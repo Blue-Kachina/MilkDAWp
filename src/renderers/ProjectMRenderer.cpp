@@ -340,12 +340,18 @@ void ProjectMRenderer::renderOpenGL()
     // Fallback visualization
     float level = fallbackLevel;
 
-    // Dev: optionally drive level from a deterministic oscillator to decouple from audio path
+    // In test mode: for the first 60 frames, clear bright red to prove presentation, then proceed.
+    if (testVisMode && frameCount <= 60u)
+    {
+        gl::glClearColor(1.f, 0.f, 0.f, 1.0f);
+        gl::glClear(gl::GL_COLOR_BUFFER_BIT);
+        if (shouldLog) MDW_LOG("GL", "renderOpenGL: testVis first frames -> solid red clear");
+        return;
+    }
+
     if (testVisMode)
     {
-        const double nowSec = Time::getMillisecondCounterHiRes() * 0.001;
-        const double dt = 1.0 / 60.0; // approximate per-frame integration
-        // 1.2 Hz slow pulsing, mix with brightness and a touch of noise
+        const double dt = 1.0 / 60.0;
         const double freq = 1.2;
         testPhase += 2.0 * double_Pi * freq * dt;
         if (testPhase > 2.0 * double_Pi)
@@ -404,19 +410,31 @@ void ProjectMRenderer::renderOpenGL()
 
     if (!program) { MDW_LOG("GL", "renderOpenGL: program missing"); return; }
     program->use();
+    {
+        auto err = gl::glGetError();
+        if (err != gl::GL_NO_ERROR)
+            MDW_LOG("GL", juce::String("After program->use (render) glError=0x") + juce::String::toHexString((int)err));
+    }
+
     auto& ext = context.extensions;
 
     const float verts[] = {
-        -0.95f, -0.95f, rc, gc, bc,
-         0.95f, -0.95f, rc, gc, bc,
-         0.95f,  0.95f, rc, gc, bc,
-        -0.95f,  0.95f, rc, gc, bc
+        // TRIANGLE_STRIP order
+        -0.95f, -0.95f, rc, gc, bc, // bottom-left
+         0.95f, -0.95f, rc, gc, bc, // bottom-right
+        -0.95f,  0.95f, rc, gc, bc, // top-left
+         0.95f,  0.95f, rc, gc, bc  // top-right
     };
     ext.glBindBuffer(gl::GL_ARRAY_BUFFER, vbo);
     ext.glBufferSubData(gl::GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
 
     ext.glBindVertexArray(vao);
-    gl::glDrawArrays(gl::GL_TRIANGLE_FAN, 0, 4);
+    gl::glDrawArrays(gl::GL_TRIANGLE_STRIP, 0, 4);
+    {
+        auto err = gl::glGetError();
+        if (err != gl::GL_NO_ERROR)
+            MDW_LOG("GL", juce::String("After glDrawArrays glError=0x") + juce::String::toHexString((int)err));
+    }
 
     if (shouldLog) MDW_LOG("GL", "renderOpenGL: end");
 }
