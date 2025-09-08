@@ -126,7 +126,12 @@ bool ProjectMRenderer::setViewportForCurrentScale()
         fbWidth = w;
         fbHeight = h;
         gl::glViewport(0, 0, fbWidth, fbHeight);
-
+        // Diagnostics: log new framebuffer size and GL error (if any)
+        {
+            auto err = gl::glGetError();
+            MDW_LOG("GL", juce::String("Viewport set: ") + juce::String(fbWidth) + "x" + juce::String(fbHeight)
+                           + (err != gl::GL_NO_ERROR ? (juce::String(" glError=0x") + juce::String::toHexString((int)err)) : ""));
+        }
        #if defined(HAVE_PROJECTM) && defined(PM_HAVE_V4_C_API)
         if (pmReady && pmHandle != nullptr)
             projectm_set_window_size((projectm_handle) pmHandle, (size_t) fbWidth, (size_t) fbHeight);
@@ -168,15 +173,28 @@ void ProjectMRenderer::newOpenGLContextCreated()
     program = tryMakeProgram(VS_150, FS_150);
     if (!program) { MDW_LOG("GL", "newOpenGLContextCreated: shader program null"); return; }
 
+    // Ensure the program is current before binding attributes (defensive)
+    program->use();
+    {
+        auto err = gl::glGetError();
+        if (err != gl::GL_NO_ERROR)
+            MDW_LOG("GL", juce::String("After program->use glError=0x") + juce::String::toHexString((int)err));
+    }
+
+
     attrPos = std::make_unique<OpenGLShaderProgram::Attribute>(*program, "aPos");
     attrCol = std::make_unique<OpenGLShaderProgram::Attribute>(*program, "aCol");
 
+    MDW_LOG("GL", juce::String("Attributes: aPos=") + juce::String(attrPos ? attrPos->attributeID : -999)
+                   + " aCol=" + juce::String(attrCol ? attrCol->attributeID : -999));
+
+
     auto& ext = context.extensions;
     const float verts[] = {
-        -0.95f, -0.95f, 1.f, 1.f, 1.f,
-         0.95f, -0.95f, 1.f, 1.f, 1.f,
-         0.95f,  0.95f, 1.f, 1.f, 1.f,
-        -0.95f,  0.95f, 1.f, 1.f, 1.f
+        -0.95f, -0.95f, 1.f, 1.f, 1.f, // bottom-left
+         0.95f, -0.95f, 1.f, 1.f, 1.f, // bottom-right
+        -0.95f,  0.95f, 1.f, 1.f, 1.f, // top-left
+         0.95f,  0.95f, 1.f, 1.f, 1.f  // top-right
     };
 
     ext.glGenVertexArrays(1, &vao);
@@ -200,6 +218,12 @@ void ProjectMRenderer::newOpenGLContextCreated()
         ext.glEnableVertexAttribArray((GLuint) attrCol->attributeID);
         ext.glVertexAttribPointer((GLuint) attrCol->attributeID, 3, gl::GL_FLOAT, gl::GL_FALSE, stride, colPtr);
     }
+    {
+        auto err = gl::glGetError();
+        if (err != gl::GL_NO_ERROR)
+            MDW_LOG("GL", juce::String("After VAO/VBO setup glError=0x") + juce::String::toHexString((int)err));
+    }
+
 
     gl::glDisable(gl::GL_DEPTH_TEST);
     gl::glDisable(gl::GL_CULL_FACE);
