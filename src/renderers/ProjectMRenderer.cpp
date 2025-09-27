@@ -350,6 +350,28 @@ void ProjectMRenderer::newOpenGLContextCreated()
 
 // Provide the missing definition (unconditional)
 
+// Utility: HSV (0..1) to RGB (0..1)
+static inline void mdw_hsv_to_rgb(float h, float s, float v, float& r, float& g, float& b)
+{
+    h = std::fmod(std::fmod(h, 1.0f) + 1.0f, 1.0f);
+    s = juce::jlimit(0.0f, 1.0f, s);
+    v = juce::jlimit(0.0f, 1.0f, v);
+    if (s <= 0.00001f) { r = g = b = v; return; }
+    float hf = h * 6.0f;
+    int i = (int) std::floor(hf);
+    float f = hf - (float) i;
+    float p = v * (1.0f - s);
+    float q = v * (1.0f - s * f);
+    float t = v * (1.0f - s * (1.0f - f));
+    switch (i % 6) {
+        case 0: r = v; g = t; b = p; break;
+        case 1: r = q; g = v; b = p; break;
+        case 2: r = p; g = v; b = t; break;
+        case 3: r = p; g = q; b = v; break;
+        case 4: r = t; g = p; b = v; break;
+        default: r = v; g = p; b = q; break;
+    }
+}
 
 void ProjectMRenderer::renderOpenGL()
 {
@@ -377,8 +399,12 @@ void ProjectMRenderer::renderOpenGL()
     gl::glClearColor(0.f, 0.f, 0.f, 1.0f);
     gl::glClear(gl::GL_COLOR_BUFFER_BIT);
 
-    const float b = juce::jlimit(0.0f, 2.0f, brightness.load());
-    const float sens = juce::jlimit(0.0f, 4.0f, sensitivity.load());
+    const float amp = juce::jlimit(0.0f, 4.0f, ampScale.load());
+    const float spd = juce::jlimit(0.1f, 3.0f, speedScale.load());
+    const float hue = juce::jlimit(0.0f, 1.0f, baseHue.load());
+    const float sat = juce::jlimit(0.0f, 1.0f, baseSat.load());
+    const int   sd  = seed.load();
+    const float hueAdj = std::fmod(hue + (sd * 0.000113f), 1.0f);
 
     static bool pmDisabledEnv = []() {
         if (const char* env = std::getenv("MILKDAWP_DISABLE_PROJECTM"))
@@ -452,6 +478,63 @@ void ProjectMRenderer::renderOpenGL()
 
             feedProjectMAudioIfAvailable();
             if (shouldLog) MDW_LOG("PM", "renderOpenGL: after feedProjectMAudioIfAvailable");
+
+            // Map UI parameters to projectM runtime parameters (C API)
+           #if defined(PM_HAVE_V4_C_API)
+            {
+                auto inst = (projectm_handle) pmHandle;
+                // Speed: map to FPS hint (presets may use it); clamp 10..180
+                const int fpsHint = juce::jlimit(10, 180, (int) juce::roundToInt(60.0f * spd));
+                static int lastFps = -1;
+                if (fpsHint != lastFps)
+                {
+                    projectm_set_fps(inst, fpsHint);
+                    lastFps = fpsHint;
+                    if (shouldLog) MDW_LOG("PM", juce::String("Applied speed->fps ") + juce::String(fpsHint));
+                }
+
+                // Hue: map to beat sensitivity (0.5..3.0). Higher sensitivity => more reactive/harder cuts.
+                const float beatSens = juce::jmap(hue, 0.0f, 1.0f, 0.5f, 3.0f);
+                static float lastBeat = std::numeric_limits<float>::quiet_NaN();
+                if (beatSens != lastBeat)
+                {
+                    projectm_set_beat_sensitivity(inst, beatSens);
+                    lastBeat = beatSens;
+                    if (shouldLog) MDW_LOG("PM", juce::String("Applied hue->beatSensitivity ") + juce::String(beatSens, 3));
+                }
+
+                // Saturation: map to soft cut duration (0.2..8 sec). Lower duration => faster transitions.
+                const double softCut = (double) juce::jmap(sat, 0.0f, 1.0f, 0.2f, 8.0f);
+                static double lastSoft = std::numeric_limits<double>::quiet_NaN();
+                if (softCut != lastSoft)
+                {
+                    projectm_set_soft_cut_duration(inst, softCut);
+                    lastSoft = softCut;
+                    if (shouldLog) MDW_LOG("PM", juce::String("Applied sat->softCut ") + juce::String(softCut, 2));
+                }
+
+                // Seed: map deterministically to the easter_egg parameter (affects preset duration distribution)
+                // Map seed to range [0.5, 4.0]
+                const float seedF = (float) (0.5 + std::fmod(std::abs((double) sd) * 0.000123, 3.5));
+                static float lastEgg = std::numeric_limits<float>::quiet_NaN();
+                if (seedF != lastEgg)
+                {
+                    projectm_set_easter_egg(inst, seedF);
+                    lastEgg = seedF;
+                    if (shouldLog) MDW_LOG("PM", juce::String("Applied seed->easterEgg ") + juce::String(seedF, 3));
+                }
+
+                // Also adapt preset duration inversely to speed for a more pronounced effect (5..45 sec baseline)
+                const double baseDuration = juce::jmap(spd, 0.1f, 3.0f, 45.0f, 5.0f);
+                static double lastDur = std::numeric_limits<double>::quiet_NaN();
+                if (baseDuration != lastDur)
+                {
+                    projectm_set_preset_duration(inst, baseDuration);
+                    lastDur = baseDuration;
+                    if (shouldLog) MDW_LOG("PM", juce::String("Applied speed->presetDuration ") + juce::String(baseDuration, 2));
+                }
+            }
+           #endif
 
             // Neutral background for projectM; avoid animated clears that may obscure faint output
             gl::glClearColor(0.f, 0.f, 0.f, 1.0f);
@@ -573,7 +656,7 @@ void ProjectMRenderer::renderOpenGL()
 
     if (testVisMode)
     {
-        const double dt = 1.0 / 60.0;
+        const double dt = (1.0 / 60.0) * (double) spd;
         const double freq = 1.2;
         testPhase += 2.0 * double_Pi * freq * dt;
         if (testPhase > 2.0 * double_Pi)
@@ -604,7 +687,7 @@ void ProjectMRenderer::renderOpenGL()
                 double acc = 0.0;
                 for (int i = 0; i < got; ++i) acc += (double) tmp[i] * tmp[i];
                 float rms = std::sqrt((float)(acc / jmax(1, got)));
-                rms = juce::jlimit(0.0f, 2.0f, rms * sens);
+                rms = juce::jlimit(0.0f, 2.0f, rms * amp);
                 const float a = 0.25f;
                 level = level + a * (rms - level);
                 fallbackLevel = level;
@@ -612,7 +695,7 @@ void ProjectMRenderer::renderOpenGL()
             else
             {
                 // No fresh audio: inject a gentle time-based oscillation to ensure visible animation
-                const double dt = 1.0 / 60.0;
+                const double dt = (1.0 / 60.0) * (double) spd;
                 const double freq = 0.5; // slow breathing when silence
                 testPhase += 2.0 * double_Pi * freq * dt;
                 if (testPhase > 2.0 * double_Pi)
@@ -629,10 +712,8 @@ void ProjectMRenderer::renderOpenGL()
         }
     }
 
-    const float base = juce::jlimit(0.0f, 2.0f, b);
-    const float rc = juce::jlimit(0.0f, 1.0f, 0.15f * base + 0.85f * juce::jlimit(0.0f, 1.0f, level));
-    const float gc = juce::jlimit(0.0f, 1.0f, 0.10f * base + 0.45f * juce::jlimit(0.0f, 1.0f, level));
-    const float bc = juce::jlimit(0.0f, 1.0f, 0.08f * base + 0.35f * juce::jlimit(0.0f, 1.0f, level));
+    float rc, gc, bc;
+    mdw_hsv_to_rgb(hueAdj, sat, juce::jlimit(0.0f, 1.0f, level), rc, gc, bc);
 
     gl::glClearColor(0.f, 0.f, 0.f, 1.0f);
     gl::glClear(gl::GL_COLOR_BUFFER_BIT);
@@ -904,17 +985,17 @@ void ProjectMRenderer::feedProjectMAudioIfAvailable()
     constexpr int kPull = 1024;
     float tmp[kPull];
     int popped = 0;
-    const float sens = juce::jlimit(0.0f, 4.0f, sensitivity.load());
+    const float amp = juce::jlimit(0.0f, 4.0f, ampScale.load());
 
     do {
         int got = audioFifo->pop(tmp, kPull); // ensure non-const local
         if (got <= 0) break;
         popped += got;
 
-        if (sens != 1.0f)
+        if (amp != 1.0f)
         {
             for (int i = 0; i < got; ++i)
-                tmp[i] = juce::jlimit(-1.5f, 1.5f, tmp[i] * sens);
+                tmp[i] = juce::jlimit(-1.5f, 1.5f, tmp[i] * amp);
         }
 
         if (!mdw_seh_projectm_pcm_add_mono((projectm_handle) pmHandle, tmp, (unsigned int) got))

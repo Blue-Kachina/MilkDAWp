@@ -18,10 +18,21 @@ public:
     void setAudioSource(LockFreeAudioFifo* fifo, int sampleRate);
 
     // Visual controls (thread-safe setters)
-    void setVisualParams(float newBrightness, float newSensitivity)
+    void setVisualParams(float newAmpScale, float newSpeed)
     {
-        brightness.store(newBrightness, std::memory_order_relaxed);
-        sensitivity.store(newSensitivity, std::memory_order_relaxed);
+        ampScale.store(newAmpScale, std::memory_order_relaxed);
+        speedScale.store(newSpeed, std::memory_order_relaxed);
+    }
+
+    void setColor(float hue01, float sat01)
+    {
+        baseHue.store(hue01, std::memory_order_relaxed);
+        baseSat.store(sat01, std::memory_order_relaxed);
+    }
+
+    void setSeed(int newSeed) noexcept
+    {
+        seed.store(newSeed, std::memory_order_relaxed);
     }
 
     // Allow turning projectM on/off at runtime (default off for stability)
@@ -52,8 +63,11 @@ private:
     int audioSampleRate = 44100;
 
     // Visual params (polled in render thread)
-    std::atomic<float> brightness { 1.0f };
-    std::atomic<float> sensitivity { 1.0f };
+    std::atomic<float> ampScale { 1.0f };     // scales audio amplitude
+    std::atomic<float> speedScale { 1.0f };   // scales animation speed
+    std::atomic<float> baseHue { 0.0f };      // 0..1
+    std::atomic<float> baseSat { 1.0f };      // 0..1
+    std::atomic<int>   seed { 0 };            // seed for pseudo-random variations
 
     // ProjectM enable flag (default false to avoid crash in some environments)
     std::atomic<bool> projectMEnabled { false };

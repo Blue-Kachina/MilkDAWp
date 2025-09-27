@@ -27,26 +27,58 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     addAndMakeVisible(inGain);
     inGain.setTextValueSuffix(" dB");
     inGain.setRange(-24.0, 24.0, 0.01);
+    inGainLabel.setJustificationType(juce::Justification::centredRight);
+    inGainLabel.attachToComponent(&inGain, false);
 
     addAndMakeVisible(outGain);
     outGain.setTextValueSuffix(" dB");
     outGain.setRange(-24.0, 24.0, 0.01);
+    outGainLabel.setJustificationType(juce::Justification::centredRight);
+    outGainLabel.attachToComponent(&outGain, false);
 
     inAtt  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "inputGain",  inGain);
     outAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "outputGain", outGain);
 
-    // Visual controls: Brightness & Sensitivity
-    addAndMakeVisible(brightness);
-    brightness.setTextValueSuffix("");
-    brightness.setRange(0.0, 2.0, 0.001);
-    brightness.setTooltip("Brightness");
-    brightAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "brightness", brightness);
+    // Visual controls: Amplitude, Speed, Hue, Saturation, Seed
+    addAndMakeVisible(ampScale);
+    ampScale.setTextValueSuffix("");
+    ampScale.setRange(0.0, 4.0, 0.001);
+    ampScale.setTooltip("Amplitude (audio-reactive strength)");
+    ampLabel.setJustificationType(juce::Justification::centredRight);
+    ampLabel.attachToComponent(&ampScale, false);
+    ampAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "ampScale", ampScale);
 
-    addAndMakeVisible(sensitivity);
-    sensitivity.setTextValueSuffix("");
-    sensitivity.setRange(0.0, 2.0, 0.001);
-    sensitivity.setTooltip("Sensitivity");
-    sensAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "sensitivity", sensitivity);
+    addAndMakeVisible(speed);
+    speed.setTextValueSuffix("x");
+    speed.setRange(0.1, 3.0, 0.001);
+    speed.setTooltip("Animation speed");
+    speedLabel.setJustificationType(juce::Justification::centredRight);
+    speedLabel.attachToComponent(&speed, false);
+    speedAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "speed", speed);
+
+    addAndMakeVisible(hue);
+    hue.setTextValueSuffix("");
+    hue.setRange(0.0, 1.0, 0.0001);
+    hue.setTooltip("Colour hue");
+    hueLabel.setJustificationType(juce::Justification::centredRight);
+    hueLabel.attachToComponent(&hue, false);
+    hueAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "colorHue", hue);
+
+    addAndMakeVisible(saturation);
+    saturation.setTextValueSuffix("");
+    saturation.setRange(0.0, 1.0, 0.0001);
+    saturation.setTooltip("Colour saturation");
+    satLabel.setJustificationType(juce::Justification::centredRight);
+    satLabel.attachToComponent(&saturation, false);
+    satAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "colorSat", saturation);
+
+    addAndMakeVisible(seed);
+    seed.setTextValueSuffix("");
+    seed.setRange(0.0, 1000000.0, 1.0);
+    seed.setTooltip("Random seed");
+    seedLabel.setJustificationType(juce::Justification::centredRight);
+    seedLabel.attachToComponent(&seed, false);
+    seedAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "seed", seed);
 
     addAndMakeVisible(btnShowWindow);
     addAndMakeVisible(btnFullscreen);
@@ -255,15 +287,23 @@ void MilkDAWpAudioProcessorEditor::resized()
 
     // Sliders area
     auto sliders = r.removeFromTop(56);
-    const int sliderWidth = 150;
+    const int sliderWidth = 140;
     const int sliderHeight = 44;
     inGain.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
     sliders.removeFromLeft(8);
     outGain.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
     sliders.removeFromLeft(8);
-    brightness.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
+    ampScale.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
     sliders.removeFromLeft(8);
-    sensitivity.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
+    speed.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
+    sliders.removeFromLeft(8);
+    hue.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
+
+    // second row for remaining sliders if space
+    auto sliders2 = r.removeFromTop(56);
+    seed.setBounds(sliders2.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
+    sliders2.removeFromLeft(8);
+    saturation.setBounds(sliders2.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
 
     r.removeFromTop(6);
 
@@ -323,8 +363,11 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
         return;
     }
 
-    const float b = processor.apvts.getRawParameterValue("brightness")->load();
-    const float s = processor.apvts.getRawParameterValue("sensitivity")->load();
+    const float amp = processor.apvts.getRawParameterValue("ampScale")->load();
+    const float spd = processor.apvts.getRawParameterValue("speed")->load();
+    const float h = processor.apvts.getRawParameterValue("colorHue")->load();
+    const float sat = processor.apvts.getRawParameterValue("colorSat")->load();
+    const int sd = (int) processor.apvts.getRawParameterValue("seed")->load();
     const bool wantFullscreen = processor.apvts.getRawParameterValue("fullscreen")->load() > 0.5f;
 
     if (wantWindow)
@@ -333,7 +376,9 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
         {
             MDW_LOG("UI", "Editor: creating VisualizationWindow (event)");
             visWindow = std::make_unique<VisualizationWindow>(processor.getAudioFifo(), processor.getCurrentSampleRateHz());
-            visWindow->setVisualParams(b, s);
+            visWindow->setVisualParams(amp, spd);
+            visWindow->setColorParams(h, sat);
+            visWindow->setSeed(sd);
             visWindow->setFullScreenParam(wantFullscreen);
             // push current preset index to window
             int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
@@ -366,7 +411,9 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
         if (visWindow)
         {
             visWindow->setFullScreenParam(wantFullscreen);
-            visWindow->setVisualParams(b, s);
+            visWindow->setVisualParams(amp, spd);
+            visWindow->setColorParams(h, sat);
+            visWindow->setSeed(sd);
             int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
             visWindow->setPresetIndex(presetIdx);
         }
@@ -400,8 +447,11 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
         lastWantWindow = wantWindow;
     }
 
-    const float b = processor.apvts.getRawParameterValue("brightness")->load();
-    const float s = processor.apvts.getRawParameterValue("sensitivity")->load();
+    const float amp = processor.apvts.getRawParameterValue("ampScale")->load();
+    const float spd = processor.apvts.getRawParameterValue("speed")->load();
+    const float h = processor.apvts.getRawParameterValue("colorHue")->load();
+    const float sat = processor.apvts.getRawParameterValue("colorSat")->load();
+    const int sd = (int) processor.apvts.getRawParameterValue("seed")->load();
 
     // Removed: embedded GL param push
 
@@ -424,7 +474,9 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
     if (visWindow)
     {
         visWindow->setFullScreenParam(wantFullscreen);
-        visWindow->setVisualParams(b, s);
+        visWindow->setVisualParams(amp, spd);
+        visWindow->setColorParams(h, sat);
+        visWindow->setSeed(sd);
         int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
         visWindow->setPresetIndex(presetIdx);
     }
@@ -434,7 +486,9 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
     {
         MDW_LOG("UI", "Editor: creating VisualizationWindow (timer catch-up)");
         visWindow = std::make_unique<VisualizationWindow>(processor.getAudioFifo(), processor.getCurrentSampleRateHz());
-        visWindow->setVisualParams(b, s);
+        visWindow->setVisualParams(amp, spd);
+        visWindow->setColorParams(h, sat);
+        visWindow->setSeed(sd);
         visWindow->setFullScreenParam(wantFullscreen);
         {
             int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();

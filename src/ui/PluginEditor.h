@@ -33,14 +33,23 @@ private:
     juce::Label meterLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> inAtt, outAtt;
     juce::Slider inGain, outGain;
+    // Labels for sliders
+    juce::Label inGainLabel { {}, "Input" };
+    juce::Label outGainLabel { {}, "Output" };
 
     juce::ToggleButton btnShowWindow { "Show Window" };
     juce::ToggleButton btnFullscreen { "Fullscreen" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> showAtt, fullAtt;
 
-    // New visual controls
-    juce::Slider brightness, sensitivity;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> brightAtt, sensAtt;
+    // Visual controls (meaningful)
+    juce::Slider ampScale, speed, hue, saturation, seed;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> ampAtt, speedAtt, hueAtt, satAtt, seedAtt;
+    // Labels for visual sliders
+    juce::Label ampLabel { {}, "Amplitude" };
+    juce::Label speedLabel { {}, "Speed" };
+    juce::Label hueLabel { {}, "Hue" };
+    juce::Label satLabel { {}, "Saturation" };
+    juce::Label seedLabel { {}, "Seed" };
 
     // Preset selector UI
     juce::Label presetLabel { {}, "Preset:" };

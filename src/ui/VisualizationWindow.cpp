@@ -96,11 +96,23 @@ void VisualizationWindow::timerCallback()
     syncTitleForOBS();
 }
 
-// New: forward visual params to the GL component
-void VisualizationWindow::setVisualParams(float brightness, float sensitivity)
+// Forward visual params to the GL component
+void VisualizationWindow::setVisualParams(float amplitude, float speed)
 {
     if (glView != nullptr)
-        glView->setVisualParams(brightness, sensitivity);
+        glView->setVisualParams(amplitude, speed);
+}
+
+void VisualizationWindow::setColorParams(float hue01, float sat01)
+{
+    if (glView != nullptr)
+        glView->setColorParams(hue01, sat01);
+}
+
+void VisualizationWindow::setSeed(int s)
+{
+    if (glView != nullptr)
+        glView->setSeed(s);
 }
 
 void VisualizationWindow::setPresetIndex(int index)
@@ -136,11 +148,23 @@ VisualizationWindow::GLComponent::~GLComponent()
     renderer.reset();
 }
 
-// New: forward to renderer
-void VisualizationWindow::GLComponent::setVisualParams(float b, float s)
+// Forward to renderer
+void VisualizationWindow::GLComponent::setVisualParams(float amplitude, float speed)
 {
     if (renderer)
-        renderer->setVisualParams(b, s);
+        renderer->setVisualParams(amplitude, speed);
+}
+
+void VisualizationWindow::GLComponent::setColorParams(float hue01, float sat01)
+{
+    if (renderer)
+        renderer->setColor(hue01, sat01);
+}
+
+void VisualizationWindow::GLComponent::setSeed(int seed)
+{
+    if (renderer)
+        renderer->setSeed(seed);
 }
 
 void VisualizationWindow::GLComponent::setPresetIndex(int index)
