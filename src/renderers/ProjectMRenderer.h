@@ -32,6 +32,9 @@ public:
 
     static constexpr const char* kWindowTitle = "MilkDAWp Visualizer (OBS Capture)";
 
+    // Host-automatable preset selection
+    void setPresetIndex(int index) noexcept { desiredPresetIndex.store(index, std::memory_order_relaxed); }
+
 private:
     juce::OpenGLContext& context;
 
@@ -41,6 +44,7 @@ private:
 
     unsigned int vao = 0;
     unsigned int vbo = 0;
+    unsigned int dummyVAO = 0; // bound before projectM to satisfy core-profile requirements
     int fbWidth = 0, fbHeight = 0;
 
     // Audio feed for visualization (SPSC FIFO)
@@ -71,6 +75,10 @@ private:
     bool pmInitAttempted = false;
     double pmInitLastAttemptSec = 0.0;
 
+    // TEST: attribute-free shader path (gl_VertexID) for robust diagnostics
+    std::unique_ptr<juce::OpenGLShaderProgram> testProgram;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> testColUniform;
+
     #if defined(HAVE_PROJECTM)
         void* pmHandle = nullptr;
         bool  pmReady  = false;
@@ -81,5 +89,9 @@ private:
         void feedProjectMAudioIfAvailable();
         // Keep playlist state when using the C API
         void* pmPlaylist = nullptr;
+        // Preset management
+        juce::StringArray pmPresetList;
+        std::atomic<int> desiredPresetIndex { 0 };
+        int lastLoadedPresetIndex = std::numeric_limits<int>::min();
     #endif
 };

@@ -14,11 +14,12 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
 {
     MDW_LOG("UI", "Editor: constructed");
     setResizable(true, true);
-    setSize (640, 140); // compact controls-only editor
+    setSize (780, 190); // allow room for preset selector
 
     // Register APVTS listeners (react to param changes ASAP)
     processor.apvts.addParameterListener("showWindow", this);
     processor.apvts.addParameterListener("fullscreen", this);
+    processor.apvts.addParameterListener("presetIndex", this);
 
     meterLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (meterLabel);
@@ -51,6 +52,18 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     addAndMakeVisible(btnFullscreen);
     showAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, "showWindow", btnShowWindow);
     fullAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, "fullscreen", btnFullscreen);
+
+    // Preset selector UI
+    presetLabel.setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(presetLabel);
+    addAndMakeVisible(presetBox);
+    presetBox.onChange = [this]() {
+        const int idx = presetBox.getSelectedItemIndex();
+        setPresetParam(idx);
+        if (visWindow)
+            visWindow->setPresetIndex(idx);
+    };
+    populatePresetBox();
 
     // New: log and ensure APVTS reflects button click (guarded to avoid redundant sets)
     btnShowWindow.onClick = [this]()
@@ -188,6 +201,7 @@ MilkDAWpAudioProcessorEditor::~MilkDAWpAudioProcessorEditor()
     // Unregister APVTS listeners
     processor.apvts.removeParameterListener("showWindow", this);
     processor.apvts.removeParameterListener("fullscreen", this);
+    processor.apvts.removeParameterListener("presetIndex", this);
 
     stopTimer();
 
@@ -250,6 +264,14 @@ void MilkDAWpAudioProcessorEditor::resized()
     brightness.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
     sliders.removeFromLeft(8);
     sensitivity.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
+
+    r.removeFromTop(6);
+
+    // Preset selector row
+    auto row = r.removeFromTop(26);
+    presetLabel.setBounds(row.removeFromLeft(60));
+    row.removeFromLeft(6);
+    presetBox.setBounds(row.removeFromLeft(juce::jmax(120, row.getWidth() - 10)));
 }
 
 void MilkDAWpAudioProcessorEditor::parameterChanged(const juce::String& paramID, float newValue)
@@ -272,6 +294,20 @@ void MilkDAWpAudioProcessorEditor::parameterChanged(const juce::String& paramID,
         {
             if (editorSP == nullptr) return;
             editorSP->handleFullscreenChangeOnUI(wantFS);
+        });
+    }
+    else if (paramID == "presetIndex")
+    {
+        const int idx = (int) newValue; // APVTS passes raw value for AudioParameterInt
+        juce::Component::SafePointer<MilkDAWpAudioProcessorEditor> editorSP(this);
+        juce::MessageManager::callAsync([editorSP, idx]()
+        {
+            if (editorSP == nullptr) return;
+            // Update UI selection if needed (avoid re-entrancy)
+            if (editorSP->presetBox.getSelectedItemIndex() != idx)
+                editorSP->presetBox.setSelectedItemIndex(idx, juce::dontSendNotification);
+            if (editorSP->visWindow)
+                editorSP->visWindow->setPresetIndex(idx);
         });
     }
 }
@@ -299,6 +335,9 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
             visWindow = std::make_unique<VisualizationWindow>(processor.getAudioFifo(), processor.getCurrentSampleRateHz());
             visWindow->setVisualParams(b, s);
             visWindow->setFullScreenParam(wantFullscreen);
+            // push current preset index to window
+            int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
+            visWindow->setPresetIndex(presetIdx);
             visWindow->toFront(true);
 
             juce::Component::SafePointer<MilkDAWpAudioProcessorEditor> editorSP(this);
@@ -328,6 +367,8 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
         {
             visWindow->setFullScreenParam(wantFullscreen);
             visWindow->setVisualParams(b, s);
+            int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
+            visWindow->setPresetIndex(presetIdx);
         }
     }
     else
@@ -384,6 +425,8 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
     {
         visWindow->setFullScreenParam(wantFullscreen);
         visWindow->setVisualParams(b, s);
+        int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
+        visWindow->setPresetIndex(presetIdx);
     }
 
     // If host delivered param change while we weren’t on desktop, act on it here
@@ -393,6 +436,10 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
         visWindow = std::make_unique<VisualizationWindow>(processor.getAudioFifo(), processor.getCurrentSampleRateHz());
         visWindow->setVisualParams(b, s);
         visWindow->setFullScreenParam(wantFullscreen);
+        {
+            int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
+            visWindow->setPresetIndex(presetIdx);
+        }
         visWindow->toFront(true);
 
         juce::Component::SafePointer<MilkDAWpAudioProcessorEditor> editorSP(this);
@@ -409,5 +456,58 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
         });
 
         creationPending.store(false);
+    }
+}
+
+// ===== Helpers: preset scanning and param set =====
+void MilkDAWpAudioProcessorEditor::populatePresetBox()
+{
+    presetBox.clear(juce::dontSendNotification);
+    presetPaths.clear();
+
+    // Resolve preset dir similarly to ProjectMRenderer
+    auto exe = juce::File::getSpecialLocation(juce::File::currentApplicationFile);
+    auto bundleRoot = exe.getParentDirectory().getParentDirectory();
+    juce::File presetsA = bundleRoot.getChildFile("Contents").getChildFile("Resources").getChildFile("presets");
+    juce::File presetsB = bundleRoot.getChildFile("Resources").getChildFile("presets");
+    juce::File chosen = presetsA.isDirectory() ? presetsA : (presetsB.isDirectory() ? presetsB : juce::File());
+
+    juce::StringArray names;
+    if (chosen.isDirectory())
+    {
+        juce::Array<juce::File> found;
+        chosen.findChildFiles(found, juce::File::findFiles, true, "*.milk");
+        for (auto& f : found)
+        {
+            presetPaths.add(f.getFullPathName());
+            names.add(f.getFileName());
+        }
+    }
+
+    if (names.isEmpty())
+    {
+        presetBox.addItem("(no presets found)", 1);
+        presetBox.setEnabled(false);
+    }
+    else
+    {
+        for (int i = 0; i < names.size(); ++i)
+            presetBox.addItem(names[i], i + 1); // ComboBox IDs are 1-based
+        presetBox.setEnabled(true);
+        int idx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
+        idx = juce::jlimit(0, names.size() - 1, idx);
+        presetBox.setSelectedItemIndex(idx, juce::dontSendNotification);
+    }
+}
+
+void MilkDAWpAudioProcessorEditor::setPresetParam(int newIndex)
+{
+    if (auto* p = dynamic_cast<juce::AudioParameterInt*>(processor.apvts.getParameter("presetIndex")))
+    {
+        newIndex = juce::jlimit(0, 1023, newIndex); // must match Parameters.h
+        const float norm = p->convertTo0to1(newIndex);
+        p->beginChangeGesture();
+        p->setValueNotifyingHost(norm);
+        p->endChangeGesture();
     }
 }

@@ -42,6 +42,11 @@ private:
     juce::Slider brightness, sensitivity;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> brightAtt, sensAtt;
 
+    // Preset selector UI
+    juce::Label presetLabel { {}, "Preset:" };
+    juce::ComboBox presetBox;
+    juce::StringArray presetPaths; // full paths to match renderer
+
     // External visualization window
     std::unique_ptr<VisualizationWindow> visWindow;
 
@@ -68,6 +73,10 @@ private:
     // NEW: UI-thread handlers
     void handleShowWindowChangeOnUI(bool wantWindow);
     void handleFullscreenChangeOnUI(bool wantFullscreen);
+
+    // Helpers
+    void populatePresetBox();
+    void setPresetParam(int newIndex);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MilkDAWpAudioProcessorEditor)
 };

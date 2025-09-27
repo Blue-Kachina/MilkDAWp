@@ -28,6 +28,9 @@ namespace om::milkdawp
             NormalisableRange<float>(0.0f, 2.0f, 0.001f), 1.0f));
         params.push_back(std::make_unique<AudioParameterFloat>(ParamIDs::sensitivity, "Sensitivity",
             NormalisableRange<float>(0.0f, 2.0f, 0.001f), 1.0f));
+        // Host-automatable preset selector (index). We’ll map this to available presets at runtime.
+        params.push_back(std::make_unique<AudioParameterInt>("presetIndex", "Preset",
+            0, 1023, 0));
         return { params.begin(), params.end() };
     }
 }

@@ -20,6 +20,7 @@ public:
 
     // New: forward visual params to the internal renderer
     void setVisualParams(float brightness, float sensitivity);
+    void setPresetIndex(int index);
 
     // New: notify editor when user closes the window (to sync the "Show Window" param)
     void setOnUserClose(std::function<void()> cb) { onUserClosed = std::move(cb); }
@@ -34,6 +35,7 @@ private:
 
         // New: forward to renderer
         void setVisualParams(float brightness, float sensitivity);
+        void setPresetIndex(int index);
 
         // explicit GL teardown (must be called on the message thread)
         void shutdownGL();

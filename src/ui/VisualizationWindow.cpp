@@ -103,6 +103,12 @@ void VisualizationWindow::setVisualParams(float brightness, float sensitivity)
         glView->setVisualParams(brightness, sensitivity);
 }
 
+void VisualizationWindow::setPresetIndex(int index)
+{
+    if (glView != nullptr)
+        glView->setPresetIndex(index);
+}
+
 // ===== GLComponent =====
 
 VisualizationWindow::GLComponent::GLComponent(LockFreeAudioFifo* fifo, int sampleRate)
@@ -110,7 +116,7 @@ VisualizationWindow::GLComponent::GLComponent(LockFreeAudioFifo* fifo, int sampl
     MDW_LOG("UI", "VisualizationWindow::GLComponent: ctor begin (attach context)");
     jassert (juce::MessageManager::getInstance()->isThisTheMessageThread()); // must be UI thread
 
-    // Do not force a specific GL version; let JUCE/driver choose a default
+    // Use JUCE default GL version (often compatibility on Windows); do not request core-only 3.2+.
     glContext.setContinuousRepainting(true);
     glContext.setSwapInterval(1);
     glContext.attachTo(*this);
@@ -135,6 +141,12 @@ void VisualizationWindow::GLComponent::setVisualParams(float b, float s)
 {
     if (renderer)
         renderer->setVisualParams(b, s);
+}
+
+void VisualizationWindow::GLComponent::setPresetIndex(int index)
+{
+    if (renderer)
+        renderer->setPresetIndex(index);
 }
 
 // New: explicit GL teardown (must be called on the message thread)
