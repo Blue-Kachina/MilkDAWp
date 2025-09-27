@@ -26,5 +26,11 @@ namespace om::milkdawp
     private:
         std::unique_ptr<juce::FileLogger> logger;
     };
-    #define MDW_LOG(tag, msg) do { juce::Logger::writeToLog(juce::String("[" tag "] ") + msg); } while(0)
 }
+
+// Logging macro: enabled only if MILKDAWP_ENABLE_LOGGING is defined (typically in Debug builds)
+#if defined(MILKDAWP_ENABLE_LOGGING)
+  #define MDW_LOG(tag, msg) do { juce::Logger::writeToLog(juce::String("[" tag "] ") + msg); } while(0)
+#else
+  #define MDW_LOG(tag, msg) do { } while(0)
+#endif

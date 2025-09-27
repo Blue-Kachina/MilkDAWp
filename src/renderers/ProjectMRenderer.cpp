@@ -506,9 +506,10 @@ void ProjectMRenderer::renderOpenGL()
             renderProjectMFrame();
             if (shouldLog) MDW_LOG("PM", "renderOpenGL: after renderProjectMFrame");
 
-            // Draw a minimal overlay to confirm animation/preset selection even if projectM draws nothing.
+           #if defined(MILKDAWP_ENABLE_DEBUG_OVERLAY)
+            // Debug overlay to confirm animation/preset selection even if projectM draws nothing.
             // This does not replace projectM; it just renders on top as a diagnostic visual.
-            // Unconditional diagnostic overlay: attribute-free gl_VertexID quad, bright white
+            // Attribute-free gl_VertexID quad, bright white
             if (testProgram)
             {
                 auto& ext2 = context.extensions;
@@ -545,6 +546,7 @@ void ProjectMRenderer::renderOpenGL()
                 if (err != gl::GL_NO_ERROR)
                     MDW_LOG("GL", juce::String("Overlay (fallback) glDrawArrays error=0x") + juce::String::toHexString((int)err));
             }
+           #endif // MILKDAWP_ENABLE_DEBUG_OVERLAY
             return;
         }
     }

@@ -116,9 +116,9 @@ endif()
 juce_add_binary_data(MilkDAWpData SOURCES resources/presets/README.md)
 target_link_libraries(MilkDAWp PRIVATE MilkDAWpData)
 
-# Log JUCE jassert messages in Debug so we can see the exact condition text
+# Enable extra diagnostics for Debug builds
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-  target_compile_definitions(MilkDAWp PRIVATE JUCE_LOG_ASSERTIONS=1)
+  target_compile_definitions(MilkDAWp PRIVATE JUCE_LOG_ASSERTIONS=1 MILKDAWP_ENABLE_LOGGING=1)
 endif()
 
 # Compute vcpkg bin dir when available
