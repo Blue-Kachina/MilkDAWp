@@ -1,8 +1,8 @@
->>>>>>> # MilkDAWp
+# MilkDAWp
 
 MilkDAWp is a JUCE-based VST3 audio plug-in with an OpenGL visualizer and optional projectM integration.
 
-This README documents the working Windows setup (CLion + CMake + vcpkg) that produces a Cubase‑friendly, statically linked VST3 bundle.
+This README documents a working Windows setup (CLion + CMake + vcpkg) that produces a Cubase‑friendly VST3 bundle. It also applies to macOS and Linux with minor path differences.
 
 ## Highlights
 
@@ -11,47 +11,6 @@ This README documents the working Windows setup (CLion + CMake + vcpkg) that pro
 - Optional projectM v4 integration for visuals (auto-detected)
 - Cross-platform (Windows, macOS, Linux)
 - Zero vendored third-party sources: dependencies are fetched/installed at configure time
-
-
-Point CMake to the vcpkg toolchain file when configuring. For example (Windows):
-```
--DCMAKE_TOOLCHAIN_FILE="C:/vcpkg-master/scripts/buildsystems/vcpkg.cmake"
-
-```
-
-Adjust the path to where you installed vcpkg.
-
-### 2) Configure and build (command line)
-
-- Windows (MSVC, x64):
-```
-bash cmake -S . -B build ^ -A x64 ^ -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg-master/scripts/buildsystems/vcpkg.cmake" cmake --build build --config Release
-```
-=======
-
-If you want the projectM visualizer, install `vcpkg` and the projectM v4 package:
-
-- Windows (PowerShell):
-    - `vcpkg install projectm4:x64-windows`
-- macOS:
-    - `vcpkg install projectm4`
-- Linux:
-    - `vcpkg install projectm4`
-
-Point CMake to the vcpkg toolchain file when configuring. For example (Windows):
-```
--DCMAKE_TOOLCHAIN_FILE="C:/vcpkg-master/scripts/buildsystems/vcpkg.cmake"
-
-```
-
-Adjust the path to where you installed vcpkg.
-
-### 2) Configure and build (command line)
-
-- Windows (MSVC, x64):
-```
-bash cmake -S . -B build ^ -A x64 ^ -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg-master/scripts/buildsystems/vcpkg.cmake" cmake --build build --config Release
-```
 
 ## Quick Start
 
@@ -210,12 +169,43 @@ This copies the built bundle into `%COMMONPROGRAMFILES%/VST3/MilkDAWp.vst3`.
     - projectM mode (when `HAVE_PROJECTM` is defined because `projectM4` was found)
     - Fallback OpenGL mode (simple quad rendering) when projectM isn’t present
 
-### Presets
+### Presets: finding and installing
 
-- At build time on Windows, presets are copied into the VST3 bundle under `Contents/Resources/presets`.
-- You can add or update preset files in `resources/presets/` and they will be staged accordingly.
+Rich visuals come from MilkDrop/projectM preset files (*.milk). The repo includes only a tiny test set. To get the full experience, install a larger preset pack.
 
+Where to get presets
+- Curated “cream of the crop” collection (commonly used):
+  - https://github.com/projectM-visualizer/presets-cream-of-the-crop
+- Official projectM packs:
+  - https://github.com/projectM-visualizer/presets-pack (recommended)
+  - https://github.com/projectM-visualizer/projectm-preset-pack
 
+Where to put presets so MilkDAWp can find them
+MilkDAWp searches several locations automatically at runtime (recursive scan for .milk):
+1) Inside the plugin bundle (what the build/deploy step uses):
+   - <Bundle>/Contents/Resources/presets
+     - Windows VST3 bundle path (per-user deploy): %LOCALAPPDATA%/Programs/Common/VST3 or %COMMONPROGRAMFILES%/VST3/MilkDAWp.vst3
+   - Our CMake copies resources/presets into this location for the built plugin on Windows.
+2) In your checkout/dev tree (useful while developing):
+   - resources/presets
+3) vcpkg-style shared data directory near the executable:
+   - <...>/share/projectM/presets
+4) Windows user profile:
+   - %APPDATA%/projectM/presets  (e.g., C:\Users\<You>\AppData\Roaming\projectM\presets)
+5) Windows system-wide install:
+   - C:\Program Files\projectM\presets
+
+Quick install steps (Windows example)
+1) Download and extract a preset pack (e.g., presets-cream-of-the-crop).
+2) Copy the extracted folders/files (*.milk) into one of the locations above. Good options:
+   - Per-user: %APPDATA%/projectM/presets
+   - Packaged plugin: %COMMONPROGRAMFILES%/VST3/MilkDAWp.vst3/Contents/Resources/presets
+3) Restart your host or reload the plugin. MilkDAWp logs the resolved preset directory (“PM” log channel) and will show richer visuals.
+
+Notes
+- Nested folders are fine; scanning is recursive.
+- You can also use the UI button “Load Preset…” to pick a single preset file directly; this doesn’t require scanning.
+- For more details, see resources/presets/README.md.
 
 JUCE sources are fetched into your build directory under `_deps/` at configure time.
 
@@ -242,13 +232,14 @@ JUCE sources are fetched into your build directory under `_deps/` at configure t
     - Headless/remote sessions may not provide hardware GL; use a local session.
 
 ---
-=======
 
 ## Project structure (short)
 ```
-src/ # Plugin source (processor, editor, renderers, utils) resources/ # Assets (e.g., presets) CMakeLists.txt # Build configuration CMakePresets.json # Optional presets for common configs THIRD_PARTY_LICENSES
+src/                     # Plugin source (processor, editor, renderers, utils)
+resources/               # Assets (e.g., presets)
+CMakeLists.txt           # Build configuration
+THIRD_PARTY_LICENSES     # Licenses for third-party components
 ```
-
 
 ## Upgrading dependencies
 

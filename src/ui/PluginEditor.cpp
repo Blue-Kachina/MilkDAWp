@@ -76,12 +76,70 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     presetLabel.setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(presetLabel);
     addAndMakeVisible(presetBox);
+    presetBox.setVisible(false); // avoid heavy scanning UI; use Load Preset button instead
     presetBox.onChange = [this]() {
         const int idx = presetBox.getSelectedItemIndex();
         setPresetParam(idx);
         if (visWindow)
             visWindow->setPresetIndex(idx);
     };
+
+    // New: lazy preset loading controls
+    addAndMakeVisible(btnLoadPreset);
+    addAndMakeVisible(btnClearPreset);
+    addAndMakeVisible(currentPresetLabel);
+    currentPresetLabel.setJustificationType(juce::Justification::centredLeft);
+
+    btnLoadPreset.onClick = [this]()
+    {
+        // Resolve presets root directory (same heuristics as before, but no scanning here)
+        juce::File initialDir;
+        auto exe = juce::File::getSpecialLocation(juce::File::currentApplicationFile);
+        auto bundleRoot = exe.getParentDirectory().getParentDirectory();
+        juce::File presetsA = bundleRoot.getChildFile("Contents").getChildFile("Resources").getChildFile("presets");
+        juce::File presetsB = bundleRoot.getChildFile("Resources").getChildFile("presets");
+        if (presetsA.isDirectory()) initialDir = presetsA;
+        else if (presetsB.isDirectory()) initialDir = presetsB;
+        if (! initialDir.isDirectory())
+        {
+            auto dir = exe.getParentDirectory();
+            for (int i = 0; i < 8 && ! initialDir.isDirectory(); ++i)
+            {
+                auto test = dir.getChildFile("resources").getChildFile("presets");
+                if (test.isDirectory()) { initialDir = test; break; }
+                dir = dir.getParentDirectory();
+            }
+        }
+        if (! initialDir.isDirectory())
+        {
+            auto cwd = juce::File::getCurrentWorkingDirectory().getChildFile("resources").getChildFile("presets");
+            if (cwd.isDirectory()) initialDir = cwd;
+        }
+
+        auto chooser = std::make_shared<juce::FileChooser>("Select a projectM preset (.milk)", initialDir, "*.milk");
+        chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+            [this, chooser](const juce::FileChooser& fc) mutable
+            {
+                juce::File f = fc.getResult();
+                if (f.existsAsFile())
+                {
+                    currentPresetLabel.setText(f.getFileName(), juce::dontSendNotification);
+                    if (visWindow)
+                        visWindow->loadPresetByPath(f.getFullPathName(), true);
+                }
+            });
+    };
+
+    btnClearPreset.onClick = [this]()
+    {
+        currentPresetLabel.setText("(none)", juce::dontSendNotification);
+        if (visWindow)
+            visWindow->loadPresetByPath("idle://", true);
+        // Also clear the parameterized index to -1 equivalent (0 in APVTS range), to avoid unintended switches
+        setPresetParam(0);
+    };
+
+    // Keep legacy box populated with a cheap placeholder (no scanning)
     populatePresetBox();
 
     // New: log and ensure APVTS reflects button click (guarded to avoid redundant sets)
@@ -291,11 +349,15 @@ void MilkDAWpAudioProcessorEditor::resized()
 
     r.removeFromTop(6);
 
-    // Preset selector row
+    // Preset selector row (lazy)
     auto row = r.removeFromTop(26);
     presetLabel.setBounds(row.removeFromLeft(60));
     row.removeFromLeft(6);
-    presetBox.setBounds(row.removeFromLeft(juce::jmax(120, row.getWidth() - 10)));
+    currentPresetLabel.setBounds(row.removeFromLeft(juce::jmax(140, row.getWidth() - 220)));
+    row.removeFromLeft(6);
+    btnLoadPreset.setBounds(row.removeFromLeft(140));
+    row.removeFromLeft(6);
+    btnClearPreset.setBounds(row.removeFromLeft(70));
 }
 
 void MilkDAWpAudioProcessorEditor::parameterChanged(const juce::String& paramID, float newValue)
@@ -379,6 +441,22 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
                     p->beginChangeGesture();
                     p->setValueNotifyingHost(0.0f);
                     p->endChangeGesture();
+                }
+            });
+
+            visWindow->setOnFullscreenChanged([editorSP](bool isFS)
+            {
+                if (editorSP == nullptr) return;
+                MDW_LOG("UI", juce::String("Editor: onFullscreenChanged -> ") + (isFS ? "true" : "false"));
+                if (auto* p = dynamic_cast<juce::AudioParameterBool*>(editorSP->processor.apvts.getParameter("fullscreen")))
+                {
+                    const float want = isFS ? 1.0f : 0.0f;
+                    if (p->get() != (isFS))
+                    {
+                        p->beginChangeGesture();
+                        p->setValueNotifyingHost(want);
+                        p->endChangeGesture();
+                    }
                 }
             });
 

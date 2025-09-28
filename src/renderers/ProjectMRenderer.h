@@ -41,10 +41,12 @@ public:
         projectMEnabled.store(enabled, std::memory_order_relaxed);
     }
 
-    static constexpr const char* kWindowTitle = "MilkDAWp Visualizer (OBS Capture)";
+    static constexpr const char* kWindowTitle = "MilkDAWp";
 
     // Host-automatable preset selection
     void setPresetIndex(int index) noexcept { desiredPresetIndex.store(index, std::memory_order_relaxed); }
+    // Direct preset loading by path (skips index mechanism)
+    void loadPresetByPath(const juce::String& absolutePath, bool hardCut = true);
 
 private:
     juce::OpenGLContext& context;
@@ -109,7 +111,11 @@ private:
         void* pmPlaylist = nullptr;
         // Preset management
         juce::StringArray pmPresetList;
-        std::atomic<int> desiredPresetIndex { 0 };
+        std::atomic<int> desiredPresetIndex { -1 }; // -1 means "no preset requested"
         int lastLoadedPresetIndex = std::numeric_limits<int>::min();
+        // Pending preset request if chosen before projectM is ready
+        std::atomic<bool> hasPendingPreset { false };
+        juce::String pendingPresetPath; // accessed on UI thread when setting; consumed on GL thread
+        std::atomic<int> pendingPresetCut { 1 }; // 1=hard, 0=soft
     #endif
 };

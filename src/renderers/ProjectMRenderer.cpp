@@ -310,14 +310,17 @@ void ProjectMRenderer::newOpenGLContextCreated()
     gl::glClearColor(0.f, 0.f, 0.f, 1.f);
 
     #if defined(HAVE_PROJECTM)
-    // Resolve preset dir with multiple fallbacks (bundle layouts and dev tree)
+    // Resolve preset dir with multiple fallbacks (bundle layouts, dev tree, system installs)
+    File chosen;
+
     auto exe = File::getSpecialLocation(File::currentApplicationFile);
     auto bundleRoot = exe.getParentDirectory().getParentDirectory();
     File presetsA = bundleRoot.getChildFile("Contents").getChildFile("Resources").getChildFile("presets");
     File presetsB = bundleRoot.getChildFile("Resources").getChildFile("presets");
-    File chosen = presetsA.isDirectory() ? presetsA : (presetsB.isDirectory() ? presetsB : File());
+    if (! chosen.isDirectory())
+        chosen = presetsA.isDirectory() ? presetsA : (presetsB.isDirectory() ? presetsB : File());
 
-    // Dev fallback: search upwards for resources/presets from the executable location
+    // 1) Dev fallback: search upwards for resources/presets from the executable location
     if (! chosen.isDirectory())
     {
         File dir = exe.getParentDirectory();
@@ -329,27 +332,63 @@ void ProjectMRenderer::newOpenGLContextCreated()
         }
     }
 
-    // Also try current working directory (useful when launched from IDE)
+    // 2) Current working directory (useful when launched from IDE)
     if (! chosen.isDirectory())
     {
         File cwd = File::getCurrentWorkingDirectory().getChildFile("resources").getChildFile("presets");
         if (cwd.isDirectory()) chosen = cwd;
     }
 
-    pmPresetDir = chosen.getFullPathName();
-        const bool exists = chosen.isDirectory();
-        MDW_LOG("PM", "PresetDir resolved: " + (exists ? pmPresetDir : String("(not found)"))
-                        + " exists=" + String(exists ? "true" : "false"));
-
-        // NEW: derive runtime enable flag from DISABLE env only (no separate ENABLE var).
+    // 3) vcpkg-style shared data directory near the exe (../share/projectM/presets)
+    if (! chosen.isDirectory())
+    {
+        File dir = exe.getParentDirectory();
+        for (int i = 0; i < 6 && ! chosen.isDirectory(); ++i)
         {
-            const char* env = std::getenv("MILKDAWP_DISABLE_PROJECTM");
-            const bool disable = env && (env[0] == '1' || env[0] == 'T' || env[0] == 't' || env[0] == 'Y' || env[0] == 'y');
-            projectMEnabled.store(!disable, std::memory_order_relaxed);
-            juce::String envStr = env ? juce::String(env) : "(null)";
-            MDW_LOG("PM", juce::String("Env MILKDAWP_DISABLE_PROJECTM=") + envStr
-                            + " -> runtime projectMEnabled=" + (disable ? "false" : "true"));
+            File test = dir.getChildFile("share").getChildFile("projectM").getChildFile("presets");
+            if (test.isDirectory()) { chosen = test; break; }
+            dir = dir.getParentDirectory();
         }
+    }
+
+    // 4) Repo-local projectM-4/presets (for developer checkouts)
+    if (! chosen.isDirectory())
+    {
+        File dir = exe.getParentDirectory();
+        for (int i = 0; i < 6 && ! chosen.isDirectory(); ++i)
+        {
+            File test = dir.getChildFile("projectM-4").getChildFile("presets");
+            if (test.isDirectory()) { chosen = test; break; }
+            dir = dir.getParentDirectory();
+        }
+    }
+
+    // 5) Common Windows locations
+    if (! chosen.isDirectory())
+    {
+        File appData = File::getSpecialLocation(File::userApplicationDataDirectory).getChildFile("projectM").getChildFile("presets");
+        if (appData.isDirectory()) chosen = appData;
+    }
+    if (! chosen.isDirectory())
+    {
+        File pf = File("C:\\Program Files\\projectM\\presets");
+        if (pf.isDirectory()) chosen = pf;
+    }
+
+    pmPresetDir = chosen.getFullPathName();
+    const bool exists = chosen.isDirectory();
+    MDW_LOG("PM", "PresetDir resolved: " + (exists ? pmPresetDir : String("(not found)"))
+                    + " exists=" + String(exists ? "true" : "false"));
+
+    // NEW: derive runtime enable flag from DISABLE env only (no separate ENABLE var).
+    {
+        const char* env = std::getenv("MILKDAWP_DISABLE_PROJECTM");
+        const bool disable = env && (env[0] == '1' || env[0] == 'T' || env[0] == 't' || env[0] == 'Y' || env[0] == 'y');
+        projectMEnabled.store(!disable, std::memory_order_relaxed);
+        juce::String envStr = env ? juce::String(env) : "(null)";
+        MDW_LOG("PM", juce::String("Env MILKDAWP_DISABLE_PROJECTM=") + envStr
+                        + " -> runtime projectMEnabled=" + (disable ? "false" : "true"));
+    }
     #endif
 
     // Log additional context diagnostics (profile, flags, FBO binding)
@@ -481,9 +520,9 @@ void ProjectMRenderer::renderOpenGL()
         {
             // Apply host-requested preset change if any
            #if defined(HAVE_PROJECTM) && defined(PM_HAVE_V4_C_API)
-            if (!pmPresetList.isEmpty())
+            const int want = desiredPresetIndex.load(std::memory_order_relaxed);
+            if (want >= 0 && !pmPresetList.isEmpty())
             {
-                const int want = desiredPresetIndex.load(std::memory_order_relaxed);
                 if (want != lastLoadedPresetIndex)
                 {
                     const int idx = juce::jlimit(0, pmPresetList.size() - 1, want % juce::jmax(1, pmPresetList.size()));
@@ -496,6 +535,30 @@ void ProjectMRenderer::renderOpenGL()
             }
            #endif
 
+            // If a preset was queued before init completed, load it now
+           #if defined(HAVE_PROJECTM)
+           #if defined(PM_HAVE_V4) || defined(PM_HAVE_V4_C_API)
+            if (hasPendingPreset.load(std::memory_order_acquire))
+            {
+                juce::String path = pendingPresetPath; // local copy
+                const int cut = pendingPresetCut.load(std::memory_order_relaxed);
+               #if defined(PM_HAVE_V4_C_API)
+                MDW_LOG("PM", juce::String("Processing queued preset -> ") + path + (cut ? " (hard)" : " (soft)"));
+                if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, path.toRawUTF8(), cut))
+                    MDW_LOG("PM", "SEH: projectm_load_preset_file threw while processing queued preset; continuing");
+               #elif defined(PM_HAVE_V4)
+                try {
+                    MDW_LOG("PM", juce::String("Processing queued preset (C++ API) -> ") + path + (cut ? " (hard)" : " (soft)"));
+                    static_cast<PM::ProjectM*>(pmHandle)->loadPresetFile(path.toStdString(), cut != 0);
+                } catch (...) {
+                    MDW_LOG("PM", "Exception in C++ API while processing queued preset; continuing");
+                }
+               #endif
+                lastLoadedPresetIndex = std::numeric_limits<int>::min();
+                hasPendingPreset.store(false, std::memory_order_release);
+            }
+           #endif
+           #endif
             feedProjectMAudioIfAvailable();
             if (shouldLog) MDW_LOG("PM", "renderOpenGL: after feedProjectMAudioIfAvailable");
 
@@ -857,76 +920,38 @@ void ProjectMRenderer::initProjectMIfNeeded()
     pmReady = true;
     MDW_LOG("PM", "projectM v4 initialized (C API)");
 
-    // Build preset list for host selection and pick an initial preset
+    // Start with no preset to improve startup responsiveness; defer scanning until user action
     pmPresetList.clear();
-    juce::String initialPreset;
-    {
-        juce::File pd(pmPresetDir);
-        if (pd.isDirectory())
-        {
-            Array<File> found;
-            pd.findChildFiles(found, File::findFiles, true, "*.milk");
-            for (auto& f : found)
-                pmPresetList.add(f.getFullPathName());
-
-            if (found.size() > 0)
-            {
-                // Prefer a clearly visible, audio-reactive test preset if available
-                // 1) Strong preference: spectrum presets
-                for (auto& f : found)
-                {
-                    auto name = f.getFileName().toLowerCase();
-                    if (name.contains("spectrum"))
-                    {
-                        initialPreset = f.getFullPathName();
-                        break;
-                    }
-                }
-                // 2) Next: wave presets
-                if (initialPreset.isEmpty())
-                {
-                    for (auto& f : found)
-                    {
-                        auto name = f.getFileName().toLowerCase();
-                        if (name.contains("wave"))
-                        {
-                            initialPreset = f.getFullPathName();
-                            break;
-                        }
-                    }
-                }
-                // Otherwise, pick the first non-empty looking preset
-                if (initialPreset.isEmpty())
-                {
-                    for (auto& f : found)
-                    {
-                        auto name = f.getFileName().toLowerCase();
-                        if (!name.contains("empty"))
-                        {
-                            initialPreset = f.getFullPathName();
-                            break;
-                        }
-                    }
-                }
-                // Fallback: first entry
-                if (initialPreset.isEmpty())
-                    initialPreset = found.getReference(0).getFullPathName();
-            }
-        }
-    }
-    if (initialPreset.isEmpty())
-        initialPreset = "idle://";
-
+    const juce::String initialPreset = "idle://";
     if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, initialPreset.toRawUTF8(), 0))
         MDW_LOG("PM", "SEH: projectm_load_preset_file threw; continuing");
-
-    MDW_LOG("PM", juce::String("C API: initial preset loaded: ") + initialPreset);
+    MDW_LOG("PM", juce::String("C API: initial preset loaded: ") + initialPreset + " (no preset scanned)");
    #else
     static std::atomic<bool> logged{false};
     bool expected = false;
     if (logged.compare_exchange_strong(expected, true))
         MDW_LOG("PM", "v4 headers not found at compile time");
     pmReady = false;
+   #endif
+}
+
+void ProjectMRenderer::loadPresetByPath(const juce::String& absolutePath, bool hardCut)
+{
+   #if defined(HAVE_PROJECTM)
+    // Always queue and let the GL thread apply the preset. This avoids calling
+    // projectM API functions off the GL thread (no current context), which can
+    // result in the change not taking effect.
+    pendingPresetPath = absolutePath;
+    pendingPresetCut.store(hardCut ? 1 : 0, std::memory_order_relaxed);
+    hasPendingPreset.store(true, std::memory_order_release);
+    if (!pmReady || !pmHandle)
+        MDW_LOG("PM", juce::String("loadPresetByPath: queued until projectM ready -> ") + absolutePath);
+    else
+        MDW_LOG("PM", juce::String("loadPresetByPath: queued for GL thread -> ") + absolutePath + (hardCut ? " (hard)" : " (soft)"));
+    // Reset index tracking so that future desiredPresetIndex switches (if any) will reload appropriately
+    lastLoadedPresetIndex = std::numeric_limits<int>::min();
+   #else
+    juce::ignoreUnused(absolutePath, hardCut);
    #endif
 }
 

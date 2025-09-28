@@ -11,9 +11,11 @@ VisualizationWindow::VisualizationWindow(LockFreeAudioFifo* fifo, int sampleRate
     jassert (juce::MessageManager::getInstance()->isThisTheMessageThread()); // must be UI thread
     setUsingNativeTitleBar(true);
     setResizable(true, true);
+    setResizeLimits(300, 200, 8192, 8192);
     // Hand ownership of the GLComponent to the window.
     glView = new GLComponent(fifo, sampleRate);
     setContentOwned(glView, false);
+    if (auto* c = getContentComponent()) c->setBounds(getLocalBounds());
     centreWithSize(900, 550);
 
     // Ensure we can receive key events (for ESC to exit fullscreen)
@@ -23,8 +25,16 @@ VisualizationWindow::VisualizationWindow(LockFreeAudioFifo* fifo, int sampleRate
     setAlwaysOnTop(true);
     setVisible(true);
     toFront(true);
+    grabKeyboardFocus();
 
     startTimerHz(10);
+}
+
+void VisualizationWindow::resized()
+{
+    // Ensure content follows the window size during interactive resize
+    if (auto* c = getContentComponent())
+        c->setBounds(getLocalBounds());
 }
 
 VisualizationWindow::~VisualizationWindow()
@@ -71,11 +81,13 @@ void VisualizationWindow::closeButtonPressed()
 void VisualizationWindow::setFullScreenParam(bool shouldBeFullScreen)
 {
     // Implement true borderless fullscreen that can be toggled and restored
+    bool changed = false;
     if (shouldBeFullScreen)
     {
         if (!inFullscreen)
         {
             inFullscreen = true;
+            changed = true;
             // Save current windowed bounds for later restore
             lastWindowBounds = getBounds();
             // Use borderless native window for fullscreen to avoid chrome
@@ -95,6 +107,7 @@ void VisualizationWindow::setFullScreenParam(bool shouldBeFullScreen)
         if (inFullscreen)
         {
             inFullscreen = false;
+            changed = true;
             setFullScreen(false);
             setUsingNativeTitleBar(true);
             setResizable(true, true);
@@ -107,6 +120,12 @@ void VisualizationWindow::setFullScreenParam(bool shouldBeFullScreen)
             toFront(true);
         }
     }
+
+    if (changed)
+    {
+        if (onFullscreenChanged)
+            onFullscreenChanged(inFullscreen);
+    }
 }
 
 void VisualizationWindow::syncTitleForOBS()
@@ -116,11 +135,11 @@ void VisualizationWindow::syncTitleForOBS()
 
 bool VisualizationWindow::keyPressed(const juce::KeyPress& key)
 {
-    // Safety: let ESC exit fullscreen
+    // Safety: let ESC exit fullscreen and sync param via callback
     if (key == juce::KeyPress::escapeKey && isFullScreen())
     {
         MDW_LOG("UI", "VisualizationWindow: ESC -> exit fullscreen");
-        setFullScreen(false);
+        setFullScreenParam(false);
         return true;
     }
     return false;
@@ -156,12 +175,20 @@ void VisualizationWindow::setPresetIndex(int index)
         glView->setPresetIndex(index);
 }
 
+void VisualizationWindow::loadPresetByPath(const juce::String& absolutePath, bool hardCut)
+{
+    if (glView != nullptr)
+        glView->loadPresetByPath(absolutePath, hardCut);
+}
+
 // ===== GLComponent =====
 
 VisualizationWindow::GLComponent::GLComponent(LockFreeAudioFifo* fifo, int sampleRate)
 {
     MDW_LOG("UI", "VisualizationWindow::GLComponent: ctor begin (attach context)");
     jassert (juce::MessageManager::getInstance()->isThisTheMessageThread()); // must be UI thread
+
+    setWantsKeyboardFocus(true);
 
     // Use JUCE default GL version (often compatibility on Windows); do not request core-only 3.2+.
     glContext.setContinuousRepainting(true);
@@ -181,6 +208,14 @@ VisualizationWindow::GLComponent::~GLComponent()
     // Destructor may be called from non-UI threads in some hosts; avoid touching the context here.
     // Ensure a clean shutdown sequence (prefer explicit shutdownGL by owner on UI thread).
     renderer.reset();
+}
+
+bool VisualizationWindow::GLComponent::keyPressed(const juce::KeyPress& key)
+{
+    // Forward key presses (like ESC) to the parent window so it can handle fullscreen exit
+    if (auto* win = findParentComponentOfClass<VisualizationWindow>())
+        return win->keyPressed(key);
+    return false;
 }
 
 // Forward to renderer
@@ -206,6 +241,12 @@ void VisualizationWindow::GLComponent::setPresetIndex(int index)
 {
     if (renderer)
         renderer->setPresetIndex(index);
+}
+
+void VisualizationWindow::GLComponent::loadPresetByPath(const juce::String& absolutePath, bool hardCut)
+{
+    if (renderer)
+        renderer->loadPresetByPath(absolutePath, hardCut);
 }
 
 // New: explicit GL teardown (must be called on the message thread)

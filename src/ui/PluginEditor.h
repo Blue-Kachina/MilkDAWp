@@ -50,6 +50,10 @@ private:
     juce::Label presetLabel { {}, "Preset:" };
     juce::ComboBox presetBox;
     juce::StringArray presetPaths; // full paths to match renderer
+    // New: lazy loading UI (avoids heavy scanning)
+    juce::TextButton btnLoadPreset { "Load Preset..." };
+    juce::TextButton btnClearPreset { "Clear" };
+    juce::Label currentPresetLabel { {}, "(none)" };
 
     // External visualization window
     std::unique_ptr<VisualizationWindow> visWindow;
