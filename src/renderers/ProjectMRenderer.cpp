@@ -186,7 +186,20 @@ bool ProjectMRenderer::setViewportForCurrentScale()
             MDW_LOG("GL", juce::String("Viewport set: ") + juce::String(fbWidth) + "x" + juce::String(fbHeight)
                            + (err != gl::GL_NO_ERROR ? (juce::String(" glError=0x") + juce::String::toHexString((int)err)) : ""));
         }
-       // No window sizing calls for v4 C API; it derives viewport from the current OpenGL state.
+       // Propagate size changes to projectM so it can recreate its GL resources for the new viewport
+      #if defined(HAVE_PROJECTM) && defined(PM_HAVE_V4_C_API)
+        if (pmReady && pmHandle)
+        {
+            projectm_set_window_size((projectm_handle) pmHandle, (size_t) fbWidth, (size_t) fbHeight);
+            // Reassert locked preset and disabled transitions after renderer reset
+            projectm_set_preset_locked((projectm_handle) pmHandle, true);
+            projectm_set_hard_cut_enabled((projectm_handle) pmHandle, false);
+            projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
+            // Make preset/transition timers effectively infinite to avoid library-driven cuts
+            projectm_set_preset_duration((projectm_handle) pmHandle, 36000.0);
+            projectm_set_hard_cut_duration((projectm_handle) pmHandle, 36000.0);
+        }
+      #endif
     }
     return true;
 }
@@ -532,6 +545,10 @@ void ProjectMRenderer::renderOpenGL()
                         MDW_LOG("PM", "SEH: projectm_load_preset_file threw during switch; continuing");
                     // Force-disable blending for this hard-cut switch to avoid any visual transition
                     projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
+                    // Reassert locked preset and disabled transitions
+                    projectm_set_preset_locked((projectm_handle) pmHandle, true);
+                    projectm_set_hard_cut_enabled((projectm_handle) pmHandle, false);
+                    projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
                     lastLoadedPresetIndex = want;
                     lastPresetPath = path;
                 }
@@ -552,6 +569,12 @@ void ProjectMRenderer::renderOpenGL()
                 // If this was a hard cut, also zero the soft cut duration to avoid any residual blending
                 if (cut != 0)
                     projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
+                // Reassert locked preset and disabled transitions to prevent auto fades
+                projectm_set_preset_locked((projectm_handle) pmHandle, true);
+                projectm_set_hard_cut_enabled((projectm_handle) pmHandle, false);
+                projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
+                projectm_set_preset_duration((projectm_handle) pmHandle, 36000.0);
+                projectm_set_hard_cut_duration((projectm_handle) pmHandle, 36000.0);
                #elif defined(PM_HAVE_V4)
                 try {
                     MDW_LOG("PM", juce::String("Processing queued preset (C++ API) -> ") + path + (cut ? " (hard)" : " (soft)"));
@@ -592,14 +615,15 @@ void ProjectMRenderer::renderOpenGL()
                     if (shouldLog) MDW_LOG("PM", juce::String("Applied hue->beatSensitivity ") + juce::String(beatSens, 3));
                 }
 
-                // Saturation: map to soft cut duration (0.2..8 sec). Lower duration => faster transitions.
-                const double softCut = (double) juce::jmap(sat, 0.0f, 1.0f, 0.2f, 8.0f);
-                static double lastSoft = std::numeric_limits<double>::quiet_NaN();
-                if (softCut != lastSoft)
+                // Saturation: map to mesh size (avoid fighting transition lock). Range: even 16..160
+                const int mesh = juce::jlimit(16, 160, (int) juce::roundToInt(16.0f + sat * (160.0f - 16.0f)));
+                static int lastMesh = -1;
+                if (mesh != lastMesh)
                 {
-                    projectm_set_soft_cut_duration(inst, softCut);
-                    lastSoft = softCut;
-                    if (shouldLog) MDW_LOG("PM", juce::String("Applied sat->softCut ") + juce::String(softCut, 2));
+                    const int meshEven = (mesh % 2) ? mesh + 1 : mesh;
+                    projectm_set_mesh_size(inst, (size_t) meshEven, (size_t) meshEven);
+                    lastMesh = meshEven;
+                    if (shouldLog) MDW_LOG("PM", juce::String("Applied sat->meshSize ") + juce::String(meshEven));
                 }
 
                 // Seed: map deterministically to the easter_egg parameter (affects preset duration distribution)
@@ -647,16 +671,6 @@ void ProjectMRenderer::renderOpenGL()
             gl::glDisable(gl::GL_SCISSOR_TEST);
             gl::glDisable(gl::GL_STENCIL_TEST);
             
-            // Ensure we are drawing to the back buffer
-            gl::glDrawBuffer(gl::GL_BACK);
-            #ifndef GL_DRAW_BUFFER
-            #define GL_DRAW_BUFFER 0x0C01
-            #endif
-            {
-                GLint db=0; gl::glGetIntegerv(GL_DRAW_BUFFER, &db);
-                if (shouldLog) MDW_LOG("GL", juce::String("renderOpenGL: drawBuffer=0x") + juce::String::toHexString(db));
-            }
-            
             // Allow blending for projectM compositing
             gl::glEnable(gl::GL_BLEND);
             gl::glBlendFunc(gl::GL_SRC_ALPHA, gl::GL_ONE_MINUS_SRC_ALPHA);
@@ -674,51 +688,68 @@ void ProjectMRenderer::renderOpenGL()
             // Ensure color writes enabled
             gl::glColorMask(gl::GL_TRUE, gl::GL_TRUE, gl::GL_TRUE, gl::GL_TRUE);
             
+            // Reassert lock and disabled transitions each frame to prevent library-driven transitions
+           #if defined(PM_HAVE_V4_C_API)
+            {
+                auto inst = (projectm_handle) pmHandle;
+                projectm_set_preset_locked(inst, true);
+                projectm_set_hard_cut_enabled(inst, false);
+                projectm_set_soft_cut_duration(inst, 0.0);
+                projectm_set_preset_duration(inst, 36000.0);
+                projectm_set_hard_cut_duration(inst, 36000.0);
+            }
+           #endif
+            // Ensure core-profile compatibility: unbind any program and bind a dummy VAO before letting projectM render
+            context.extensions.glUseProgram(0);
+            context.extensions.glBindVertexArray(dummyVAO);
             if (shouldLog) MDW_LOG("PM", "renderOpenGL: calling renderProjectMFrame");
             renderProjectMFrame();
             if (shouldLog) MDW_LOG("PM", "renderOpenGL: after renderProjectMFrame");
 
-           #if defined(MILKDAWP_ENABLE_DEBUG_OVERLAY)
-            // Debug overlay to confirm animation/preset selection even if projectM draws nothing.
-            // This does not replace projectM; it just renders on top as a diagnostic visual.
-            // Attribute-free gl_VertexID quad, bright white
-            if (testProgram)
+            // Optional runtime debug overlay and black-frame sampling (no heavy cost)
+            static bool dbgOverlay = [](){ if (const char* e = std::getenv("MILKDAWP_DEBUG_OVERLAY")) return e[0]=='1'||e[0]=='T'||e[0]=='t'||e[0]=='Y'||e[0]=='y'; return false; }();
+            static int blackCtr = 0;
+            if (dbgOverlay)
             {
+                // Sample one pixel at the center every 30 frames to detect prolonged black output
+                if ((frameCount % 30u) == 0u)
+                {
+                    unsigned char px[4] = {0,0,0,0};
+                    const int cx = jmax(0, fbWidth/2), cy = jmax(0, fbHeight/2);
+                    gl::glReadPixels(cx, cy, 1, 1, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, px);
+                    const float lum = (0.2126f*px[0] + 0.7152f*px[1] + 0.0722f*px[2]) / 255.0f;
+                    if (lum < 0.02f) { if (++blackCtr == 5) MDW_LOG("PM", "Detected ~150 consecutive frames near-black"); }
+                    else blackCtr = 0;
+                }
+                // Draw a tiny green square in the bottom-left to verify presentation
                 auto& ext2 = context.extensions;
-                // Draw overlay in a tiny viewport at the bottom-left corner
                 GLint vp[4]; gl::glGetIntegerv(gl::GL_VIEWPORT, vp);
-                const GLint ovpX = 0, ovpY = 0; const GLint ovpW = jmax(8, fbWidth / 10); const GLint ovpH = jmax(6, fbHeight / 10);
+                const GLint ovpX = 0, ovpY = 0; const GLint ovpW = jmax(6, fbWidth / 16); const GLint ovpH = jmax(6, fbHeight / 16);
                 gl::glViewport(ovpX, ovpY, ovpW, ovpH);
-                testProgram->use();
-                if (testColUniform) testColUniform->set(1.0f, 1.0f, 1.0f);
-                ext2.glBindVertexArray(vao);
-                gl::glDrawArrays(gl::GL_TRIANGLE_STRIP, 0, 4);
+                if (testProgram)
+                {
+                    testProgram->use();
+                    if (testColUniform) testColUniform->set(0.0f, 1.0f, 0.0f);
+                    ext2.glBindVertexArray(vao);
+                    gl::glDrawArrays(gl::GL_TRIANGLE_STRIP, 0, 4);
+                }
+                else if (program)
+                {
+                    program->use();
+                    ext2.glBindVertexArray(vao);
+                    const float cr = 0.0f, cg = 1.0f, cb = 0.0f; const float s = 0.1f;
+                    const float vertsSq[] = {
+                        -0.95f, -0.95f,  cr, cg, cb,
+                        -0.95f + s, -0.95f,  cr, cg, cb,
+                        -0.95f, -0.95f + s,  cr, cg, cb,
+                        -0.95f + s, -0.95f + s,  cr, cg, cb
+                    };
+                    ext2.glBindBuffer(gl::GL_ARRAY_BUFFER, vbo);
+                    ext2.glBufferData(gl::GL_ARRAY_BUFFER, sizeof(vertsSq), vertsSq, gl::GL_DYNAMIC_DRAW);
+                    gl::glDrawArrays(gl::GL_TRIANGLE_STRIP, 0, 4);
+                }
                 gl::glViewport(vp[0], vp[1], vp[2], vp[3]);
-                auto err = gl::glGetError();
-                if (err != gl::GL_NO_ERROR)
-                    MDW_LOG("GL", juce::String("Overlay glDrawArrays error=0x") + juce::String::toHexString((int)err));
             }
-            else if (program)
-            {
-                auto& ext2 = context.extensions;
-                program->use();
-                ext2.glBindVertexArray(vao);
-                const float cr = 1.0f, cg = 1.0f, cb = 1.0f;
-                const float s = 0.1f;
-                const float vertsSq[] = {
-                    -0.95f, -0.95f,  cr, cg, cb,
-                    -0.95f + s, -0.95f,  cr, cg, cb,
-                    -0.95f, -0.95f + s,  cr, cg, cb,
-                    -0.95f + s, -0.95f + s,  cr, cg, cb
-                };
-                ext2.glBindBuffer(gl::GL_ARRAY_BUFFER, vbo);
-                ext2.glBufferData(gl::GL_ARRAY_BUFFER, sizeof(vertsSq), vertsSq, gl::GL_DYNAMIC_DRAW);
-                gl::glDrawArrays(gl::GL_TRIANGLE_STRIP, 0, 4);
-                auto err = gl::glGetError();
-                if (err != gl::GL_NO_ERROR)
-                    MDW_LOG("GL", juce::String("Overlay (fallback) glDrawArrays error=0x") + juce::String::toHexString((int)err));
-            }
-           #endif // MILKDAWP_ENABLE_DEBUG_OVERLAY
             return;
         }
     }
@@ -985,6 +1016,48 @@ void ProjectMRenderer::initProjectMIfNeeded()
     pmReady = true;
     MDW_LOG("PM", "projectM v4 initialized (C API)");
 
+    // Disable all automatic transitions and lock the current preset to prevent fade-to-black
+    projectm_set_preset_locked(inst, true);
+    projectm_set_hard_cut_enabled(inst, false);
+    projectm_set_soft_cut_duration(inst, 0.0);
+    // Also make soft and hard cut timers effectively inert
+    projectm_set_preset_duration(inst, 36000.0);
+    projectm_set_hard_cut_duration(inst, 36000.0);
+
+    // Provide texture search paths to projectM (preset dir + common textures folders) to avoid asset lookup failures
+    {
+        juce::StringArray paths;
+        if (pmPresetDir.isNotEmpty())
+        {
+            paths.addIfNotAlreadyThere(pmPresetDir);
+            juce::File texA(juce::File(pmPresetDir).getChildFile("textures"));
+            if (texA.isDirectory()) paths.addIfNotAlreadyThere(texA.getFullPathName());
+        }
+        // Dev-tree resources textures
+        {
+            auto exe = juce::File::getSpecialLocation(juce::File::currentApplicationFile);
+            juce::File dir = exe.getParentDirectory();
+            for (int i = 0; i < 6; ++i)
+            {
+                juce::File test = dir.getChildFile("resources").getChildFile("textures");
+                if (test.isDirectory()) { paths.addIfNotAlreadyThere(test.getFullPathName()); break; }
+                dir = dir.getParentDirectory();
+            }
+        }
+        if (paths.size() > 0)
+        {
+            std::vector<std::string> holder; holder.reserve((size_t)paths.size());
+            std::vector<const char*> cstrs; cstrs.reserve((size_t)paths.size());
+            for (auto& p : paths)
+            {
+                holder.emplace_back(p.toStdString());
+                cstrs.push_back(holder.back().c_str());
+            }
+            projectm_set_texture_search_paths(inst, cstrs.data(), cstrs.size());
+            MDW_LOG("PM", juce::String("Set texture search paths (") + juce::String((int) cstrs.size()) + ")");
+        }
+    }
+
     // Initialize with the user's chosen preset immediately if available to avoid a flash of the default
     pmPresetList.clear();
 
@@ -1015,6 +1088,10 @@ void ProjectMRenderer::initProjectMIfNeeded()
         // If hard cut, kill soft cut duration once to avoid initial blending
         if (cut != 0)
             projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
+        // Reassert locked preset and disabled transitions
+        projectm_set_preset_locked((projectm_handle) pmHandle, true);
+        projectm_set_hard_cut_enabled((projectm_handle) pmHandle, false);
+        projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
         hasPendingPreset.store(false, std::memory_order_release);
         lastLoadedPresetIndex = std::numeric_limits<int>::min();
         appliedInitial = true;
@@ -1033,6 +1110,10 @@ void ProjectMRenderer::initProjectMIfNeeded()
                 MDW_LOG("PM", "SEH: projectm_load_preset_file threw during init index load; continuing");
             // Ensure no initial blending when forcing the first preset
             projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
+            // Reassert locked preset and disabled transitions
+            projectm_set_preset_locked((projectm_handle) pmHandle, true);
+            projectm_set_hard_cut_enabled((projectm_handle) pmHandle, false);
+            projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
             lastLoadedPresetIndex = wantIdx;
             lastPresetPath = path;
             appliedInitial = true;
@@ -1044,6 +1125,10 @@ void ProjectMRenderer::initProjectMIfNeeded()
     {
         if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, lastPresetPath.toRawUTF8(), 1))
             MDW_LOG("PM", "SEH: projectm_load_preset_file threw during init lastPresetPath load; continuing");
+        // Reassert locked preset and disabled transitions
+        projectm_set_preset_locked((projectm_handle) pmHandle, true);
+        projectm_set_hard_cut_enabled((projectm_handle) pmHandle, false);
+        projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
         MDW_LOG("PM", juce::String("C API: applied last-known preset: ") + lastPresetPath);
         appliedInitial = true;
     }
