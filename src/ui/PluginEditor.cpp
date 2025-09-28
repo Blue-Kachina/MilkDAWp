@@ -42,7 +42,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     speed.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 18);
     speed.setTextValueSuffix("x");
     speed.setRange(0.1, 3.0, 0.001);
-    speed.setTooltip("Animation speed");
+    speed.setTooltip("FPS hint for projectM (approx 10-180), derived from this speed factor");
     speedLabel.setJustificationType(juce::Justification::centred);
     speedLabel.attachToComponent(&speed, false);
     speedAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "speed", speed);
@@ -52,7 +52,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     hue.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 18);
     hue.setTextValueSuffix("");
     hue.setRange(0.0, 1.0, 0.0001);
-    hue.setTooltip("Colour hue");
+    hue.setTooltip("Beat detection sensitivity (maps to projectM beat_sensitivity)");
     hueLabel.setJustificationType(juce::Justification::centred);
     hueLabel.attachToComponent(&hue, false);
     hueAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "colorHue", hue);
@@ -62,7 +62,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     saturation.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 18);
     saturation.setTextValueSuffix("");
     saturation.setRange(0.0, 1.0, 0.0001);
-    saturation.setTooltip("Colour saturation");
+    saturation.setTooltip("Per-pixel mesh size (maps to projectM mesh size; even 16..160)");
     satLabel.setJustificationType(juce::Justification::centred);
     satLabel.attachToComponent(&saturation, false);
     satAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "colorSat", saturation);
@@ -72,7 +72,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     seed.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 18);
     seed.setTextValueSuffix("");
     seed.setRange(0.0, 1000000.0, 1.0);
-    seed.setTooltip("Random seed");
+    seed.setTooltip("Easter egg factor (maps to projectM easter_egg)");
     seedLabel.setJustificationType(juce::Justification::centred);
     seedLabel.attachToComponent(&seed, false);
     seedAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "seed", seed);

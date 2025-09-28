@@ -41,10 +41,10 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> ampAtt, speedAtt, hueAtt, satAtt, seedAtt;
     // Labels for visual sliders
     juce::Label ampLabel { {}, "Amplitude" };
-    juce::Label speedLabel { {}, "Speed" };
-    juce::Label hueLabel { {}, "Hue" };
-    juce::Label satLabel { {}, "Saturation" };
-    juce::Label seedLabel { {}, "Seed" };
+    juce::Label speedLabel { {}, "FPS Hint" };
+    juce::Label hueLabel { {}, "Beat Sensitivity" };
+    juce::Label satLabel { {}, "Mesh Size" };
+    juce::Label seedLabel { {}, "Easter Egg" };
 
     // Preset selector UI
     juce::Label presetLabel { {}, "Preset:" };

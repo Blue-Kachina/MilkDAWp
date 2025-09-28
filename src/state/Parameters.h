@@ -29,15 +29,15 @@ namespace om::milkdawp
         params.push_back(std::make_unique<AudioParameterBool>(ParamIDs::showWindow, "Show Window", false));
         params.push_back(std::make_unique<AudioParameterBool>(ParamIDs::fullscreen, "Fullscreen", false));
         // Replace arbitrary sliders with meaningful controls
-        params.push_back(std::make_unique<AudioParameterInt>(ParamIDs::seed, "Seed",
+        params.push_back(std::make_unique<AudioParameterInt>(ParamIDs::seed, "Easter Egg",
             0, 1000000, 0));
         params.push_back(std::make_unique<AudioParameterFloat>(ParamIDs::ampScale, "Amplitude",
             NormalisableRange<float>(0.0f, 4.0f, 0.001f), 1.0f));
-        params.push_back(std::make_unique<AudioParameterFloat>(ParamIDs::colorHue, "Hue",
+        params.push_back(std::make_unique<AudioParameterFloat>(ParamIDs::colorHue, "Beat Sensitivity",
             NormalisableRange<float>(0.0f, 1.0f, 0.0001f), 0.0f));
-        params.push_back(std::make_unique<AudioParameterFloat>(ParamIDs::colorSat, "Saturation",
+        params.push_back(std::make_unique<AudioParameterFloat>(ParamIDs::colorSat, "Mesh Size",
             NormalisableRange<float>(0.0f, 1.0f, 0.0001f), 1.0f));
-        params.push_back(std::make_unique<AudioParameterFloat>(ParamIDs::speed, "Speed",
+        params.push_back(std::make_unique<AudioParameterFloat>(ParamIDs::speed, "FPS Hint",
             NormalisableRange<float>(0.1f, 3.0f, 0.001f), 1.0f));
         // Host-automatable preset selector (index). We’ll map this to available presets at runtime.
         params.push_back(std::make_unique<AudioParameterInt>("presetIndex", "Preset",
