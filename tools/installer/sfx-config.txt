@@ -1,0 +1,10 @@
+;!@Install@!UTF-8!
+Title="MilkDAWp VST3 (Per-User) Installer"
+BeginPrompt="Install MilkDAWp.vst3 into your per-user VST3 folder?"
+RunProgram=""
+; Extract to the standard per-user VST3 directory (no admin rights required)
+InstallPath="%LOCALAPPDATA%\\Programs\\Common\\VST3"
+ExtractTitle="Extracting MilkDAWp.vst3"
+GUIMode="2"
+OverwriteMode="1"
+;!@InstallEnd@!
