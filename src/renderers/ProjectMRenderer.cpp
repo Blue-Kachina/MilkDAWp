@@ -530,7 +530,10 @@ void ProjectMRenderer::renderOpenGL()
                     MDW_LOG("PM", juce::String("Switching preset by index: ") + juce::String(want) + " -> [" + juce::String(idx) + "] " + path);
                     if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, path.toRawUTF8(), 1))
                         MDW_LOG("PM", "SEH: projectm_load_preset_file threw during switch; continuing");
+                    // Force-disable blending for this hard-cut switch to avoid any visual transition
+                    projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
                     lastLoadedPresetIndex = want;
+                    lastPresetPath = path;
                 }
             }
            #endif
@@ -546,6 +549,9 @@ void ProjectMRenderer::renderOpenGL()
                 MDW_LOG("PM", juce::String("Processing queued preset -> ") + path + (cut ? " (hard)" : " (soft)"));
                 if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, path.toRawUTF8(), cut))
                     MDW_LOG("PM", "SEH: projectm_load_preset_file threw while processing queued preset; continuing");
+                // If this was a hard cut, also zero the soft cut duration to avoid any residual blending
+                if (cut != 0)
+                    projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
                #elif defined(PM_HAVE_V4)
                 try {
                     MDW_LOG("PM", juce::String("Processing queued preset (C++ API) -> ") + path + (cut ? " (hard)" : " (soft)"));
@@ -885,6 +891,65 @@ void ProjectMRenderer::initProjectMIfNeeded()
         pmHandle = static_cast<void*>(engine);
         pmReady = true;
         MDW_LOG("PM", "projectM v4 initialized (C++ API)");
+
+        // Scan presets from pmPresetDir so desiredPresetIndex can be applied immediately
+        if (pmPresetDir.isNotEmpty())
+        {
+            juce::File pd(pmPresetDir);
+            if (pd.isDirectory())
+            {
+                pmPresetList.clearQuick();
+                juce::DirectoryIterator it(pd, true, "*.milk", juce::File::findFiles);
+                while (it.next())
+                    pmPresetList.add(it.getFile().getFullPathName());
+                MDW_LOG("PM", juce::String("Preset scan: found ") + juce::String(pmPresetList.size()) + " presets under " + pmPresetDir);
+            }
+        }
+
+        // Apply any queued or last-known preset immediately so first frame is correct
+        bool appliedInitial = false;
+        if (hasPendingPreset.load(std::memory_order_acquire))
+        {
+            juce::String path = pendingPresetPath;
+            const bool hard = pendingPresetCut.load(std::memory_order_relaxed) != 0;
+            try {
+                MDW_LOG("PM", juce::String("C++ API Init: applying queued preset -> ") + path + (hard ? " (hard)" : " (soft)"));
+                static_cast<PM::ProjectM*>(pmHandle)->loadPresetFile(path.toStdString(), hard);
+            } catch (...) {
+                MDW_LOG("PM", "Exception while applying queued preset at init (C++ API)");
+            }
+            hasPendingPreset.store(false, std::memory_order_release);
+            lastLoadedPresetIndex = std::numeric_limits<int>::min();
+            appliedInitial = true;
+        }
+        if (!appliedInitial && lastPresetPath.isNotEmpty())
+        {
+            try {
+                MDW_LOG("PM", juce::String("C++ API Init: applying last preset -> ") + lastPresetPath);
+                static_cast<PM::ProjectM*>(pmHandle)->loadPresetFile(lastPresetPath.toStdString(), true);
+            } catch (...) {}
+            appliedInitial = true;
+        }
+        if (!appliedInitial)
+        {
+            const int wantIdx = desiredPresetIndex.load(std::memory_order_relaxed);
+            if (wantIdx >= 0 && !pmPresetList.isEmpty())
+            {
+                const int idx = juce::jlimit(0, pmPresetList.size() - 1, wantIdx % juce::jmax(1, pmPresetList.size()));
+                auto path = pmPresetList[idx];
+                try {
+                    MDW_LOG("PM", juce::String("C++ API Init: applying desired preset index -> ") + juce::String(wantIdx) + " => [" + juce::String(idx) + "] " + path);
+                    static_cast<PM::ProjectM*>(pmHandle)->loadPresetFile(path.toStdString(), true);
+                } catch (...) {}
+                lastLoadedPresetIndex = wantIdx;
+                lastPresetPath = path;
+                appliedInitial = true;
+            }
+        }
+        if (!appliedInitial)
+        {
+            MDW_LOG("PM", "C++ API Init: no preset to apply (will render default state)");
+        }
     } catch (const std::exception& e) {
         MDW_LOG("PM", juce::String("Init failed: ") + e.what());
         pmReady = false;
@@ -920,12 +985,77 @@ void ProjectMRenderer::initProjectMIfNeeded()
     pmReady = true;
     MDW_LOG("PM", "projectM v4 initialized (C API)");
 
-    // Start with no preset to improve startup responsiveness; defer scanning until user action
+    // Initialize with the user's chosen preset immediately if available to avoid a flash of the default
     pmPresetList.clear();
-    const juce::String initialPreset = "idle://";
-    if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, initialPreset.toRawUTF8(), 0))
-        MDW_LOG("PM", "SEH: projectm_load_preset_file threw; continuing");
-    MDW_LOG("PM", juce::String("C API: initial preset loaded: ") + initialPreset + " (no preset scanned)");
+
+    // Scan presets from pmPresetDir so desiredPresetIndex can be applied immediately
+    if (pmPresetDir.isNotEmpty())
+    {
+        juce::File pd(pmPresetDir);
+        if (pd.isDirectory())
+        {
+            pmPresetList.clearQuick();
+            juce::DirectoryIterator it(pd, true, "*.milk", juce::File::findFiles);
+            while (it.next())
+                pmPresetList.add(it.getFile().getFullPathName());
+            MDW_LOG("PM", juce::String("Preset scan: found ") + juce::String(pmPresetList.size()) + " presets under " + pmPresetDir);
+        }
+    }
+
+    bool appliedInitial = false;
+
+    // If a preset was queued before init, apply it synchronously now so the first frame uses it
+    if (hasPendingPreset.load(std::memory_order_acquire))
+    {
+        juce::String path = pendingPresetPath; // local copy
+        const int cut = pendingPresetCut.load(std::memory_order_relaxed);
+        MDW_LOG("PM", juce::String("Init: applying queued preset -> ") + path + (cut ? " (hard)" : " (soft)"));
+        if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, path.toRawUTF8(), cut))
+            MDW_LOG("PM", "SEH: projectm_load_preset_file threw during init; continuing");
+        // If hard cut, kill soft cut duration once to avoid initial blending
+        if (cut != 0)
+            projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
+        hasPendingPreset.store(false, std::memory_order_release);
+        lastLoadedPresetIndex = std::numeric_limits<int>::min();
+        appliedInitial = true;
+    }
+
+    // Otherwise, if a desired index is known and our list is populated, load it now
+    if (!appliedInitial)
+    {
+        const int wantIdx = desiredPresetIndex.load(std::memory_order_relaxed);
+        if (wantIdx >= 0 && !pmPresetList.isEmpty())
+        {
+            const int idx = juce::jlimit(0, pmPresetList.size() - 1, wantIdx % juce::jmax(1, pmPresetList.size()));
+            auto path = pmPresetList[idx];
+            MDW_LOG("PM", juce::String("Init: applying desired preset index -> ") + juce::String(wantIdx) + " => [" + juce::String(idx) + "] " + path);
+            if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, path.toRawUTF8(), 1))
+                MDW_LOG("PM", "SEH: projectm_load_preset_file threw during init index load; continuing");
+            // Ensure no initial blending when forcing the first preset
+            projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
+            lastLoadedPresetIndex = wantIdx;
+            lastPresetPath = path;
+            appliedInitial = true;
+        }
+    }
+
+    // Otherwise, try the last-known preset path if available
+    if (!appliedInitial && lastPresetPath.isNotEmpty())
+    {
+        if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, lastPresetPath.toRawUTF8(), 1))
+            MDW_LOG("PM", "SEH: projectm_load_preset_file threw during init lastPresetPath load; continuing");
+        MDW_LOG("PM", juce::String("C API: applied last-known preset: ") + lastPresetPath);
+        appliedInitial = true;
+    }
+
+    // Fallback: use idle (no preset) only if nothing else was available
+    if (!appliedInitial)
+    {
+        const juce::String initialPreset = "idle://";
+        if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, initialPreset.toRawUTF8(), 0))
+            MDW_LOG("PM", "SEH: projectm_load_preset_file threw; continuing");
+        MDW_LOG("PM", juce::String("C API: initial preset loaded: ") + initialPreset + " (no preset scanned)");
+    }
    #else
     static std::atomic<bool> logged{false};
     bool expected = false;
@@ -938,6 +1068,8 @@ void ProjectMRenderer::initProjectMIfNeeded()
 void ProjectMRenderer::loadPresetByPath(const juce::String& absolutePath, bool hardCut)
 {
    #if defined(HAVE_PROJECTM)
+    // Remember last requested preset so GL re-inits can apply it immediately.
+    lastPresetPath = absolutePath;
     // Always queue and let the GL thread apply the preset. This avoids calling
     // projectM API functions off the GL thread (no current context), which can
     // result in the change not taking effect.

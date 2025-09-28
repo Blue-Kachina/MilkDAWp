@@ -113,6 +113,8 @@ private:
         juce::StringArray pmPresetList;
         std::atomic<int> desiredPresetIndex { -1 }; // -1 means "no preset requested"
         int lastLoadedPresetIndex = std::numeric_limits<int>::min();
+        // Track last successfully requested preset path so we can reapply instantly on GL reinit
+        juce::String lastPresetPath;
         // Pending preset request if chosen before projectM is ready
         std::atomic<bool> hasPendingPreset { false };
         juce::String pendingPresetPath; // accessed on UI thread when setting; consumed on GL thread

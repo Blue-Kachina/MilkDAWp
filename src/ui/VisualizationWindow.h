@@ -9,7 +9,7 @@ class VisualizationWindow : public juce::DocumentWindow,
                             private juce::Timer
 {
 public:
-    VisualizationWindow(LockFreeAudioFifo* fifo, int sampleRate);
+    VisualizationWindow(LockFreeAudioFifo* fifo, int sampleRate, const juce::String& initialPresetPath = {}, int initialPresetIndex = -1);
     ~VisualizationWindow() override;
 
     void closeButtonPressed() override;
@@ -40,7 +40,7 @@ private:
     class GLComponent : public juce::Component
     {
     public:
-        GLComponent(LockFreeAudioFifo* fifo, int sampleRate);
+        GLComponent(LockFreeAudioFifo* fifo, int sampleRate, const juce::String& initialPresetPath, int initialPresetIndex);
         ~GLComponent() override;
         void paint(juce::Graphics&) override {}
         bool keyPressed(const juce::KeyPress& key) override; // forward ESC to parent

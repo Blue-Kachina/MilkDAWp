@@ -210,6 +210,8 @@ exit /b 0
 endif()
 
 # Deploy target: copy the built bundle to the per-user VST3 folder (no admin required).
+# Presets can be large; avoid copying them on every deploy by default.
+option(MILKDAWP_DEPLOY_PRESETS "Also copy presets when deploying (slower)" OFF)
 if (WIN32 AND TARGET MilkDAWp_VST3)
   set(_SRC_BUNDLE "$<TARGET_FILE_DIR:MilkDAWp_VST3>/..")
   set(_USER_VST3_DIR "$ENV{LOCALAPPDATA}/Programs/Common/VST3")
@@ -218,10 +220,17 @@ if (WIN32 AND TARGET MilkDAWp_VST3)
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${_USER_VST3_DIR}"
     # Ensure bundle and Resources/presets exist first
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${_USER_VST3_DIR}/MilkDAWp.vst3/Contents/Resources/presets"
-    # Copy presets first so this succeeds even if the binary is in use
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_SOURCE_DIR}/resources/presets" "${_USER_VST3_DIR}/MilkDAWp.vst3/Contents/Resources/presets"
     # Then copy/update the rest of the bundle (may fail if plugin DLL is locked)
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${_SRC_BUNDLE}" "${_USER_VST3_DIR}/MilkDAWp.vst3"
+    # Optionally copy presets (disabled by default to speed up deploys)
+    COMMAND ${CMAKE_COMMAND} -Dcopy=${MILKDAWP_DEPLOY_PRESETS} -Dsrc="${CMAKE_SOURCE_DIR}/resources/presets" -Ddst="${_USER_VST3_DIR}/MilkDAWp.vst3/Contents/Resources/presets" -P "${CMAKE_SOURCE_DIR}/cmake/CopyFileIfExists.cmake"
     COMMENT "Deploying MilkDAWp.vst3 to per-user VST3: ${_USER_VST3_DIR}"
+    VERBATIM)
+
+  # Separate target to explicitly refresh presets only
+  add_custom_target(deploy_vst3_user_presets
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_USER_VST3_DIR}/MilkDAWp.vst3/Contents/Resources/presets"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_SOURCE_DIR}/resources/presets" "${_USER_VST3_DIR}/MilkDAWp.vst3/Contents/Resources/presets"
+    COMMENT "Deploying presets to per-user VST3 Resources"
     VERBATIM)
 endif()

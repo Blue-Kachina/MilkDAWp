@@ -2,7 +2,7 @@
 #include "../renderers/ProjectMRenderer.h"
 #include "../utils/Logging.h" // logging
 
-VisualizationWindow::VisualizationWindow(LockFreeAudioFifo* fifo, int sampleRate)
+VisualizationWindow::VisualizationWindow(LockFreeAudioFifo* fifo, int sampleRate, const juce::String& initialPresetPath, int initialPresetIndex)
     : juce::DocumentWindow(ProjectMRenderer::kWindowTitle,
                            juce::Colours::black,
                            juce::DocumentWindow::closeButton)
@@ -13,7 +13,7 @@ VisualizationWindow::VisualizationWindow(LockFreeAudioFifo* fifo, int sampleRate
     setResizable(true, true);
     setResizeLimits(300, 200, 8192, 8192);
     // Hand ownership of the GLComponent to the window.
-    glView = new GLComponent(fifo, sampleRate);
+    glView = new GLComponent(fifo, sampleRate, initialPresetPath, initialPresetIndex);
     setContentOwned(glView, false);
     if (auto* c = getContentComponent()) c->setBounds(getLocalBounds());
     centreWithSize(900, 550);
@@ -183,21 +183,31 @@ void VisualizationWindow::loadPresetByPath(const juce::String& absolutePath, boo
 
 // ===== GLComponent =====
 
-VisualizationWindow::GLComponent::GLComponent(LockFreeAudioFifo* fifo, int sampleRate)
+VisualizationWindow::GLComponent::GLComponent(LockFreeAudioFifo* fifo, int sampleRate, const juce::String& initialPresetPath, int initialPresetIndex)
 {
-    MDW_LOG("UI", "VisualizationWindow::GLComponent: ctor begin (attach context)");
+    MDW_LOG("UI", "VisualizationWindow::GLComponent: ctor begin (deferred attach)");
     jassert (juce::MessageManager::getInstance()->isThisTheMessageThread()); // must be UI thread
 
     setWantsKeyboardFocus(true);
 
-    // Use JUCE default GL version (often compatibility on Windows); do not request core-only 3.2+.
-    glContext.setContinuousRepainting(true);
-    glContext.setSwapInterval(1);
-    glContext.attachTo(*this);
-
+    // Create renderer first so we can queue the initial preset before any GL callbacks fire
     MDW_LOG("UI", "VisualizationWindow::GLComponent: creating ProjectMRenderer");
     renderer = std::make_unique<ProjectMRenderer>(glContext, fifo, sampleRate);
+
+    // Queue initial preset request (path preferred, else index) BEFORE attaching the context
+    if (renderer)
+    {
+        if (initialPresetPath.isNotEmpty())
+            renderer->loadPresetByPath(initialPresetPath, true);
+        else if (initialPresetIndex >= 0)
+            renderer->setPresetIndex(initialPresetIndex);
+    }
+
+    // Now attach the GL context and start rendering
+    glContext.setContinuousRepainting(true);
+    glContext.setSwapInterval(1);
     glContext.setRenderer(renderer.get());
+    glContext.attachTo(*this);
 
     MDW_LOG("UI", "VisualizationWindow::GLComponent: ctor end");
 }

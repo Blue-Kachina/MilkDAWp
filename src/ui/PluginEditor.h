@@ -86,5 +86,8 @@ private:
     void populatePresetBox();
     void setPresetParam(int newIndex);
 
+    // Remember last user-selected preset path (via Load Preset...)
+    juce::String lastPresetPath;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MilkDAWpAudioProcessorEditor)
 };

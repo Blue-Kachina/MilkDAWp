@@ -14,7 +14,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
 {
     MDW_LOG("UI", "Editor: constructed");
     setResizable(true, true);
-    setSize (740, 170); // smaller height after removing input/output controls
+    setSize (760, 260); // increased height to accommodate rotary knobs and padding
 
     // Register APVTS listeners (react to param changes ASAP)
     processor.apvts.addParameterListener("showWindow", this);
@@ -28,42 +28,52 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
 
     // Visual controls: Amplitude, Speed, Hue, Saturation, Seed
     addAndMakeVisible(ampScale);
+    ampScale.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    ampScale.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 18);
     ampScale.setTextValueSuffix("");
     ampScale.setRange(0.0, 4.0, 0.001);
     ampScale.setTooltip("Amplitude (audio-reactive strength)");
-    ampLabel.setJustificationType(juce::Justification::centredRight);
+    ampLabel.setJustificationType(juce::Justification::centred);
     ampLabel.attachToComponent(&ampScale, false);
     ampAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "ampScale", ampScale);
 
     addAndMakeVisible(speed);
+    speed.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    speed.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 18);
     speed.setTextValueSuffix("x");
     speed.setRange(0.1, 3.0, 0.001);
     speed.setTooltip("Animation speed");
-    speedLabel.setJustificationType(juce::Justification::centredRight);
+    speedLabel.setJustificationType(juce::Justification::centred);
     speedLabel.attachToComponent(&speed, false);
     speedAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "speed", speed);
 
     addAndMakeVisible(hue);
+    hue.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    hue.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 18);
     hue.setTextValueSuffix("");
     hue.setRange(0.0, 1.0, 0.0001);
     hue.setTooltip("Colour hue");
-    hueLabel.setJustificationType(juce::Justification::centredRight);
+    hueLabel.setJustificationType(juce::Justification::centred);
     hueLabel.attachToComponent(&hue, false);
     hueAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "colorHue", hue);
 
     addAndMakeVisible(saturation);
+    saturation.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    saturation.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 18);
     saturation.setTextValueSuffix("");
     saturation.setRange(0.0, 1.0, 0.0001);
     saturation.setTooltip("Colour saturation");
-    satLabel.setJustificationType(juce::Justification::centredRight);
+    satLabel.setJustificationType(juce::Justification::centred);
     satLabel.attachToComponent(&saturation, false);
     satAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "colorSat", saturation);
 
     addAndMakeVisible(seed);
+    seed.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    seed.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 18);
     seed.setTextValueSuffix("");
     seed.setRange(0.0, 1000000.0, 1.0);
     seed.setTooltip("Random seed");
-    seedLabel.setJustificationType(juce::Justification::centredRight);
+    seedLabel.setJustificationType(juce::Justification::centred);
     seedLabel.attachToComponent(&seed, false);
     seedAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "seed", seed);
 
@@ -123,9 +133,10 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
                 juce::File f = fc.getResult();
                 if (f.existsAsFile())
                 {
+                    lastPresetPath = f.getFullPathName();
                     currentPresetLabel.setText(f.getFileName(), juce::dontSendNotification);
                     if (visWindow)
-                        visWindow->loadPresetByPath(f.getFullPathName(), true);
+                        visWindow->loadPresetByPath(lastPresetPath, true);
                 }
             });
     };
@@ -133,6 +144,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     btnClearPreset.onClick = [this]()
     {
         currentPresetLabel.setText("(none)", juce::dontSendNotification);
+        lastPresetPath.clear();
         if (visWindow)
             visWindow->loadPresetByPath("idle://", true);
         // Also clear the parameterized index to -1 equivalent (0 in APVTS range), to avoid unintended switches
@@ -318,46 +330,45 @@ void MilkDAWpAudioProcessorEditor::paint(juce::Graphics& g)
 
 void MilkDAWpAudioProcessorEditor::resized()
 {
-    auto r = getLocalBounds().reduced(8);
+    auto r = getLocalBounds().reduced(10); // a bit more padding overall
 
     // Top row: title + buttons
-    auto top = r.removeFromTop(24);
-    meterLabel.setBounds(top.removeFromLeft(160));
+    auto top = r.removeFromTop(28);
+    meterLabel.setBounds(top.removeFromLeft(180));
+    top.removeFromLeft(10);
+    btnShowWindow.setBounds(top.removeFromLeft(130));
     top.removeFromLeft(8);
-    btnShowWindow.setBounds(top.removeFromLeft(120));
-    top.removeFromLeft(8);
-    btnFullscreen.setBounds(top.removeFromLeft(120));
+    btnFullscreen.setBounds(top.removeFromLeft(130));
 
-    r.removeFromTop(6);
+    // Add extra space between header and knobs
+    r.removeFromTop(12);
 
-    // Sliders area
-    auto sliders = r.removeFromTop(56);
-    const int sliderWidth = 140;
-    const int sliderHeight = 44;
-    ampScale.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
-    sliders.removeFromLeft(8);
-    speed.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
-    sliders.removeFromLeft(8);
-    hue.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
-    sliders.removeFromLeft(8);
-    saturation.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
-    sliders.removeFromLeft(8);
-    seed.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
+    // Knob area
+    auto knobs = r.removeFromTop(110);
+    const int knobW = 120;
+    const int knobH = 100;
+    ampScale.setBounds(knobs.removeFromLeft(knobW).reduced(8).removeFromTop(knobH));
+    knobs.removeFromLeft(8);
+    speed.setBounds(knobs.removeFromLeft(knobW).reduced(8).removeFromTop(knobH));
+    knobs.removeFromLeft(8);
+    hue.setBounds(knobs.removeFromLeft(knobW).reduced(8).removeFromTop(knobH));
+    knobs.removeFromLeft(8);
+    saturation.setBounds(knobs.removeFromLeft(knobW).reduced(8).removeFromTop(knobH));
+    knobs.removeFromLeft(8);
+    seed.setBounds(knobs.removeFromLeft(knobW).reduced(8).removeFromTop(knobH));
 
-    // second row reserved (currently unused)
-    r.removeFromTop(4);
-
-    r.removeFromTop(6);
+    // Extra breathing room before preset row
+    r.removeFromTop(12);
 
     // Preset selector row (lazy)
-    auto row = r.removeFromTop(26);
+    auto row = r.removeFromTop(28);
     presetLabel.setBounds(row.removeFromLeft(60));
     row.removeFromLeft(6);
-    currentPresetLabel.setBounds(row.removeFromLeft(juce::jmax(140, row.getWidth() - 220)));
+    currentPresetLabel.setBounds(row.removeFromLeft(juce::jmax(160, row.getWidth() - 240)));
     row.removeFromLeft(6);
-    btnLoadPreset.setBounds(row.removeFromLeft(140));
+    btnLoadPreset.setBounds(row.removeFromLeft(150));
     row.removeFromLeft(6);
-    btnClearPreset.setBounds(row.removeFromLeft(70));
+    btnClearPreset.setBounds(row.removeFromLeft(80));
 }
 
 void MilkDAWpAudioProcessorEditor::parameterChanged(const juce::String& paramID, float newValue)
@@ -409,6 +420,14 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
         return;
     }
 
+    // If host has suspended us (e.g., Cubase deactivated effect), do not create/show
+    if (processor.isSuspended())
+    {
+        if (visWindow && visWindow->isVisible())
+            visWindow->setVisible(false);
+        return;
+    }
+
     const float amp = processor.apvts.getRawParameterValue("ampScale")->load();
     const float spd = processor.apvts.getRawParameterValue("speed")->load();
     const float h = processor.apvts.getRawParameterValue("colorHue")->load();
@@ -421,14 +440,20 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
         if (!visWindow && !creationPending.exchange(true))
         {
             MDW_LOG("UI", "Editor: creating VisualizationWindow (event)");
-            visWindow = std::make_unique<VisualizationWindow>(processor.getAudioFifo(), processor.getCurrentSampleRateHz());
+            const int initIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
+            visWindow = std::make_unique<VisualizationWindow>(processor.getAudioFifo(), processor.getCurrentSampleRateHz(), lastPresetPath, initIdx);
             visWindow->setVisualParams(amp, spd);
             visWindow->setColorParams(h, sat);
             visWindow->setSeed(sd);
             visWindow->setFullScreenParam(wantFullscreen);
-            // push current preset index to window
-            int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
-            visWindow->setPresetIndex(presetIdx);
+            // Apply preset: prefer a manually chosen path, otherwise use the automatable preset index
+            if (! lastPresetPath.isEmpty())
+                visWindow->loadPresetByPath(lastPresetPath, true);
+            else
+            {
+                int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
+                visWindow->setPresetIndex(presetIdx);
+            }
             visWindow->toFront(true);
 
             juce::Component::SafePointer<MilkDAWpAudioProcessorEditor> editorSP(this);
@@ -468,6 +493,14 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
             MDW_LOG("UI", "Editor: showing VisualizationWindow (event)");
             visWindow->setVisible(true);
             visWindow->toFront(true);
+            // Reapply preset on show to handle GL context resets
+            if (! lastPresetPath.isEmpty())
+                visWindow->loadPresetByPath(lastPresetPath, true);
+            else
+            {
+                int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
+                visWindow->setPresetIndex(presetIdx);
+            }
         }
 
         if (visWindow)
@@ -476,8 +509,11 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
             visWindow->setVisualParams(amp, spd);
             visWindow->setColorParams(h, sat);
             visWindow->setSeed(sd);
-            int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
-            visWindow->setPresetIndex(presetIdx);
+            if (lastPresetPath.isEmpty())
+            {
+                int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
+                visWindow->setPresetIndex(presetIdx);
+            }
         }
     }
     else
@@ -493,8 +529,22 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
 // NEW: UI-thread logic for fullscreen changes
 void MilkDAWpAudioProcessorEditor::handleFullscreenChangeOnUI(bool wantFullscreen)
 {
-    if (visWindow)
-        visWindow->setFullScreenParam(wantFullscreen);
+    if (!visWindow)
+        return;
+
+    // Apply fullscreen change
+    visWindow->setFullScreenParam(wantFullscreen);
+
+    // Reapply the preset after fullscreen toggles, because some hosts/drivers recreate the GL context
+    if (! lastPresetPath.isEmpty())
+    {
+        visWindow->loadPresetByPath(lastPresetPath, true);
+    }
+    else
+    {
+        int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
+        visWindow->setPresetIndex(presetIdx);
+    }
 }
 
 // ===== timerCallback remains (visual param pushes and fallback pickup) =====
@@ -514,6 +564,24 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
     const float h = processor.apvts.getRawParameterValue("colorHue")->load();
     const float sat = processor.apvts.getRawParameterValue("colorSat")->load();
     const int sd = (int) processor.apvts.getRawParameterValue("seed")->load();
+
+    // If host suspended us (e.g., Cubase disabled the plugin), hide external window and sync checkbox
+    if (processor.isSuspended())
+    {
+        if (visWindow && visWindow->isVisible())
+            visWindow->setVisible(false);
+        if (auto* p = dynamic_cast<juce::AudioParameterBool*>(processor.apvts.getParameter("showWindow")))
+        {
+            if (p->get())
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost(0.0f);
+                p->endChangeGesture();
+            }
+        }
+        // Don’t try to create/update the window while suspended
+        return;
+    }
 
     // Removed: embedded GL param push
 
@@ -539,19 +607,27 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
         visWindow->setVisualParams(amp, spd);
         visWindow->setColorParams(h, sat);
         visWindow->setSeed(sd);
-        int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
-        visWindow->setPresetIndex(presetIdx);
+        if (lastPresetPath.isEmpty())
+        {
+            int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
+            visWindow->setPresetIndex(presetIdx);
+        }
     }
 
     // If host delivered param change while we weren’t on desktop, act on it here
     if (wantWindow && !visWindow && !creationPending.exchange(true))
     {
         MDW_LOG("UI", "Editor: creating VisualizationWindow (timer catch-up)");
-        visWindow = std::make_unique<VisualizationWindow>(processor.getAudioFifo(), processor.getCurrentSampleRateHz());
+        const int initIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
+        visWindow = std::make_unique<VisualizationWindow>(processor.getAudioFifo(), processor.getCurrentSampleRateHz(), lastPresetPath, initIdx);
         visWindow->setVisualParams(amp, spd);
         visWindow->setColorParams(h, sat);
         visWindow->setSeed(sd);
         visWindow->setFullScreenParam(wantFullscreen);
+        // Apply preset: prefer a manually chosen path, otherwise use the automatable preset index
+        if (! lastPresetPath.isEmpty())
+            visWindow->loadPresetByPath(lastPresetPath, true);
+        else
         {
             int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
             visWindow->setPresetIndex(presetIdx);
