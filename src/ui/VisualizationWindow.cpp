@@ -135,6 +135,15 @@ void VisualizationWindow::syncTitleForOBS()
 
 bool VisualizationWindow::keyPressed(const juce::KeyPress& key)
 {
+    // Toggle fullscreen on F11
+    if (key == juce::KeyPress(juce::KeyPress::F11Key))
+    {
+        const bool newState = ! isFullScreen();
+        MDW_LOG("UI", juce::String("VisualizationWindow: F11 -> ") + (newState ? "enter fullscreen" : "exit fullscreen"));
+        setFullScreenParam(newState);
+        return true;
+    }
+
     // Safety: let ESC exit fullscreen and sync param via callback
     if (key == juce::KeyPress::escapeKey && isFullScreen())
     {

@@ -65,6 +65,75 @@ Notes:
 
 Tip: You can disable projectM entirely by setting the env var MILKDAWP_DISABLE_PROJECTM=1 before launching the host. Conversely, projectM is enabled by default when the library is available.
 
+### Does projectM support preset playlists? What would that look like in a VST?
+Provides an optional playlist component that can manage ordered preset sequences, randomization and filtering. In MilkDAWp we detect and link this component when available via vcpkg and expose a VST-friendly surface on top.
+
+Implementation notes in this repo
+- Build-time detection: CMake calls find_package(projectM4 QUIET COMPONENTS Playlist). When the playlist library is present it links libprojectM::playlist and defines HAVE_PROJECTM_PLAYLIST=1.
+- Runtime behavior: When built with the C API, MilkDAWp creates a playlist manager and connects it to the projectM instance at init time. You will see a log line like "projectM playlist API available: playlist manager created and connected". If the playlist API is not present in your projectM build, we log that and continue without it.
+- Fallback: If projectM is not available at all, MilkDAWp uses its internal OpenGL renderer and the concept of a playlist does not apply.
+
+What a VST UX typically exposes
+- Source of presets
+  - Scan a folder tree for .milk files (recursive) and build an internal list.
+  - Optionally load/save .m3u or projectM JSON playlists if available.
+- Transport and selection controls (host-automatable where sensible)
+  - Preset Index (int): selects a preset by index from the current list.
+  - Next/Previous Preset (momentary buttons): step through the list.
+  - Random/Shuffle (toggle): enable randomized selection.
+  - Lock Playlist (toggle): prevents auto-advance (useful for A/B or rehearsing).
+  - Crossfade Time (seconds): maps to projectm_set_soft_cut_duration.
+  - Preset Duration (seconds): maps to projectm_set_preset_duration (when not locked).
+  - Beat Hard Cuts (toggle + sensitivity): maps to the hard-cut parameters for on-beat jumps.
+- Display and feedback
+  - Current preset name and position (e.g., 12/250).
+  - Optional search/filter box to narrow to a subset (e.g., author or keyword), then play within that subset.
+
+Current status in MilkDAWp
+- We already support loading a preset directly by file path and selecting by index from a scanned folder.
+- When compiled with playlist support (HAVE_PROJECTM_PLAYLIST), a projectM playlist manager is created and connected internally; this paves the way for richer playlist operations (shuffle, filters, next/prev) without changing the rendering thread model.
+- UI wiring for full playlist transport is intentionally minimal at the moment; expect future updates to expose Next/Prev/Shuffle and optional playlist file I/O via simple buttons in the editor.
+
+How to enable playlist support
+- Install projectM v4 via vcpkg with playlist component (the default port provides it):
+  - vcpkg install projectm4:x64-windows
+- Configure CMake with your vcpkg toolchain so find_package(projectM4) succeeds.
+- Build the plugin or helper. Look for build logs: "Linking projectM playlist component". At runtime, watch the "PM" log channel for the playlist availability line mentioned above.
+
+Limitations and notes
+- The playlist API is optional in projectM. If your package of projectM omits it, MilkDAWp still builds and runs; only playlist-specific features are disabled.
+- Preset artistic parameters remain preset-defined; playlists control ordering and timing, not visual styles.
+
+Playlist files: formats, where to find them, and how we’ll use them
+- What formats does projectM accept?
+  - The playlist component itself is an in-memory manager; it does not mandate a single on-disk format. In practice, common, interoperable formats are:
+    - M3U/M3U8: simple text, one preset path per line; lines beginning with '#' are comments. UTF‑8 (m3u8) recommended on modern systems.
+    - JSON (projectM tools): some projectM GUI tools export/import a JSON array of file paths and options. We may add import/export for this later.
+    - Plain text list: a pragmatic subset identical to M3U without the header (also works for our importer when added).
+- Do we ship any playlist files today?
+  - No. The repo ships only a tiny set of test presets under resources/presets/tests/*.milk for visual regression. There are no .m3u/.json playlists included by default.
+- Where should I put my playlists so MilkDAWp can find them?
+  - Next to presets inside the bundle (good for packaging): <Bundle>/Contents/Resources/presets/*.m3u
+  - Or in your profile preset folder: %APPDATA%/projectM/presets/*.m3u
+  - Relative paths in an M3U are resolved relative to the playlist’s location; absolute paths are also fine.
+- How will the plugin manage playlists?
+  - Short term (current build):
+    - We scan folders for .milk files and let you pick by index or direct file path. The internal projectM playlist manager is created (when available) and will be used for Next/Prev/Shuffle once UI is exposed.
+  - Near term (planned, trivial to wire):
+    - Import M3U/M3U8: read one path per line, ignore comments, de‑dupe, and feed into projectm_playlist_* APIs.
+    - Export current list to M3U for portability.
+    - UI buttons: Next, Prev, Shuffle toggle, and a display of “current preset (n/total)”. These map to playlist C API calls (set_shuffle, set_position, etc.).
+  - Advanced (optional, later):
+    - JSON import/export compatible with projectM GUI tools, and simple text search/filter mapped to projectm_playlist_set_filter/apply_filter.
+
+Tips for creating a quick M3U playlist
+- Create a text file presets.m3u in one of the locations above with contents like:
+  # MilkDAWp demo playlist
+  resources/presets/tests/001-line.milk
+  resources/presets/tests/100-square.milk
+  resources/presets/tests/250-wavecode.milk
+- Restart or reload the plugin; once M3U import is wired, these will populate the internal playlist. Until then, you can still select by index or load by path from the scanned folder.
+
 ### 1) Install vcpkg (for projectM)
 
 If you want the projectM visualizer, install `vcpkg` and the projectM v4 package:

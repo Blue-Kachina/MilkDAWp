@@ -1016,6 +1016,24 @@ void ProjectMRenderer::initProjectMIfNeeded()
     pmReady = true;
     MDW_LOG("PM", "projectM v4 initialized (C API)");
 
+   #if defined(HAVE_PROJECTM_PLAYLIST)
+    {
+        auto pl = projectm_playlist_create(inst);
+        if (pl != nullptr)
+        {
+            projectm_playlist_connect(pl, inst);
+            pmPlaylist = (void*) pl;
+            MDW_LOG("PM", "projectM playlist API available: playlist manager created and connected");
+        }
+        else
+        {
+            MDW_LOG("PM", "projectM playlist API requested but creation failed");
+        }
+    }
+   #else
+    MDW_LOG("PM", "projectM playlist API not available at build time");
+   #endif
+
     // Disable all automatic transitions and lock the current preset to prevent fade-to-black
     projectm_set_preset_locked(inst, true);
     projectm_set_hard_cut_enabled(inst, false);
