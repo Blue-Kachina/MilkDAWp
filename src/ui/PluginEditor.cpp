@@ -20,6 +20,8 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     processor.apvts.addParameterListener("showWindow", this);
     processor.apvts.addParameterListener("fullscreen", this);
     processor.apvts.addParameterListener("presetIndex", this);
+    // Listen to full APVTS state changes (e.g., when the host restores state via setStateInformation)
+    processor.apvts.state.addListener(this);
 
     meterLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (meterLabel);
@@ -134,6 +136,8 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
                 if (f.existsAsFile())
                 {
                     lastPresetPath = f.getFullPathName();
+                    // Persist selected preset path in processor state so it survives editor close and host preset save
+                    processor.apvts.state.setProperty("presetPath", lastPresetPath, nullptr);
                     currentPresetLabel.setText(f.getFileName(), juce::dontSendNotification);
                     if (visWindow)
                         visWindow->loadPresetByPath(lastPresetPath, true);
@@ -145,6 +149,8 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     {
         currentPresetLabel.setText("(none)", juce::dontSendNotification);
         lastPresetPath.clear();
+        // Persist cleared state
+        processor.apvts.state.setProperty("presetPath", "", nullptr);
         if (visWindow)
             visWindow->loadPresetByPath("idle://", true);
         // Also clear the parameterized index to -1 equivalent (0 in APVTS range), to avoid unintended switches
@@ -153,6 +159,9 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
 
     // Keep legacy box populated with a cheap placeholder (no scanning)
     populatePresetBox();
+
+    // Restore last selected preset path from processor state (persists across editor reopen and in host presets)
+    refreshPresetPathFromState();
 
     // New: log and ensure APVTS reflects button click (guarded to avoid redundant sets)
     btnShowWindow.onClick = [this]()
@@ -176,6 +185,46 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     // Begin polling params to control external visualization
     startTimerHz(15);
     MDW_LOG("UI", "Editor: timer started");
+}
+
+// ===== ValueTree listener: react to state restoration (presetPath) =====
+void MilkDAWpAudioProcessorEditor::valueTreePropertyChanged(juce::ValueTree& treeWhosePropertyHasChanged, const juce::Identifier& property)
+{
+    juce::ignoreUnused(treeWhosePropertyHasChanged);
+    if (property.toString() == "presetPath")
+    {
+        MDW_LOG("UI", "Editor: state property changed -> presetPath");
+        refreshPresetPathFromState();
+    }
+}
+
+void MilkDAWpAudioProcessorEditor::valueTreeRedirected(juce::ValueTree& treeWhichHasBeenChanged)
+{
+    juce::ignoreUnused(treeWhichHasBeenChanged);
+    MDW_LOG("UI", "Editor: state redirected (likely setStateInformation); refreshing presetPath");
+    refreshPresetPathFromState();
+}
+
+void MilkDAWpAudioProcessorEditor::refreshPresetPathFromState()
+{
+    auto v = processor.apvts.state.getProperty("presetPath");
+    juce::String saved = v.isString() ? v.toString() : juce::String();
+    if (saved == lastPresetPath)
+        return;
+
+    lastPresetPath = saved;
+    if (lastPresetPath.isNotEmpty())
+        currentPresetLabel.setText(juce::File(lastPresetPath).getFileName(), juce::dontSendNotification);
+    else
+        currentPresetLabel.setText("(none)", juce::dontSendNotification);
+
+    if (visWindow)
+    {
+        if (lastPresetPath.isNotEmpty())
+            visWindow->loadPresetByPath(lastPresetPath, true);
+        else
+            visWindow->loadPresetByPath("idle://", true);
+    }
 }
 
 // Ensure GL teardown runs on the UI thread and only once
@@ -291,6 +340,7 @@ MilkDAWpAudioProcessorEditor::~MilkDAWpAudioProcessorEditor()
     processor.apvts.removeParameterListener("showWindow", this);
     processor.apvts.removeParameterListener("fullscreen", this);
     processor.apvts.removeParameterListener("presetIndex", this);
+    processor.apvts.state.removeListener(this);
 
     stopTimer();
 

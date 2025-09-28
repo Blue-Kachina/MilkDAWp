@@ -240,6 +240,22 @@ Notes for advanced packaging
   - `MILKDAWP_STAGE_ALL_VCPKG_DLLS` (OFF by default): Bulk‑copy all vcpkg DLLs to the helper dir.
 - For end‑users, prefer relying on the MSVC redistributable and keeping only necessary DLLs alongside the plugin.
 
+## Troubleshooting: black visualization window
+
+If the visual window briefly shows and then turns black:
+- Try lowering your audio driver buffer size (ASIO block size). Very large buffers can starve the render timer on some hosts and GPUs; reducing the buffer often restores steady rendering.
+- Toggle projectM to isolate the path:
+  - Set MILKDAWP_DISABLE_PROJECTM=1 and relaunch the host. If the fallback renderer keeps drawing, the issue is likely specific to projectM/GL state.
+- Use a Debug build for richer logs. Watch for lines mentioning:
+  - "C API: initial preset loaded" / projectM init
+  - "Test program compiled (gl_VertexID path)" (our GL health check)
+  - Any GL error lines around render
+- Try a simple preset from resources/presets/tests (e.g., 001-line.milk) to rule out preset-specific issues.
+- Resize the plugin window slightly or move it between monitors to force a GL re-layout; on some drivers this recovers.
+
+If the problem persists, please share:
+- Host name/version, GPU and driver version, buffer size, and a short log excerpt from opening the UI until it goes black.
+
 ## Development notes
 
 - Language standard: C++20

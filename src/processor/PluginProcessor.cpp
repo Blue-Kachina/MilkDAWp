@@ -104,6 +104,11 @@ juce::AudioProcessorEditor* MilkDAWpAudioProcessor::createEditor()
 void MilkDAWpAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
+    // Debug: log what preset path we are about to save so we can diagnose host save behavior
+    auto presetVal = state.getProperty("presetPath");
+    juce::String presetStr = presetVal.isString() ? presetVal.toString() : juce::String("<unset>");
+    MDW_LOG("STATE", juce::String("getStateInformation: presetPath=") + presetStr);
+
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary(*xml, destData);
 }
@@ -114,6 +119,11 @@ void MilkDAWpAudioProcessor::setStateInformation (const void* data, int sizeInBy
     if (xmlState.get() != nullptr)
         if (xmlState->hasTagName(apvts.state.getType()))
             apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
+
+    // Debug: log what preset path the host restored, if any
+    auto restored = apvts.state.getProperty("presetPath");
+    juce::String restoredStr = restored.isString() ? restored.toString() : juce::String("<unset>");
+    MDW_LOG("STATE", juce::String("setStateInformation: presetPath=") + restoredStr);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

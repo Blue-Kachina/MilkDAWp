@@ -10,7 +10,8 @@ class LockFreeAudioFifo;
 
 class MilkDAWpAudioProcessorEditor : public juce::AudioProcessorEditor,
                                      private juce::Timer,
-                                     private juce::AudioProcessorValueTreeState::Listener // NEW: react to param changes
+                                     private juce::AudioProcessorValueTreeState::Listener, // NEW: react to param changes
+                                     private juce::ValueTree::Listener
 {
 public:
     explicit MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcessor&);
@@ -78,6 +79,10 @@ private:
     // NEW: APVTS listener hook
     void parameterChanged(const juce::String& paramID, float newValue) override;
 
+    // ValueTree listener hooks (react to state replacement or property changes like presetPath)
+    void valueTreePropertyChanged(juce::ValueTree& treeWhosePropertyHasChanged, const juce::Identifier& property) override;
+    void valueTreeRedirected(juce::ValueTree& treeWhichHasBeenChanged) override;
+
     // NEW: UI-thread handlers
     void handleShowWindowChangeOnUI(bool wantWindow);
     void handleFullscreenChangeOnUI(bool wantFullscreen);
@@ -85,6 +90,7 @@ private:
     // Helpers
     void populatePresetBox();
     void setPresetParam(int newIndex);
+    void refreshPresetPathFromState();
 
     // Remember last user-selected preset path (via Load Preset...)
     juce::String lastPresetPath;
