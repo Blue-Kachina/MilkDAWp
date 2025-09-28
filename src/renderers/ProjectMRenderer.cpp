@@ -310,12 +310,32 @@ void ProjectMRenderer::newOpenGLContextCreated()
     gl::glClearColor(0.f, 0.f, 0.f, 1.f);
 
     #if defined(HAVE_PROJECTM)
-    // Resolve preset dir (unchanged)...
+    // Resolve preset dir with multiple fallbacks (bundle layouts and dev tree)
     auto exe = File::getSpecialLocation(File::currentApplicationFile);
     auto bundleRoot = exe.getParentDirectory().getParentDirectory();
     File presetsA = bundleRoot.getChildFile("Contents").getChildFile("Resources").getChildFile("presets");
     File presetsB = bundleRoot.getChildFile("Resources").getChildFile("presets");
     File chosen = presetsA.isDirectory() ? presetsA : (presetsB.isDirectory() ? presetsB : File());
+
+    // Dev fallback: search upwards for resources/presets from the executable location
+    if (! chosen.isDirectory())
+    {
+        File dir = exe.getParentDirectory();
+        for (int i = 0; i < 8 && ! chosen.isDirectory(); ++i)
+        {
+            File test = dir.getChildFile("resources").getChildFile("presets");
+            if (test.isDirectory()) { chosen = test; break; }
+            dir = dir.getParentDirectory();
+        }
+    }
+
+    // Also try current working directory (useful when launched from IDE)
+    if (! chosen.isDirectory())
+    {
+        File cwd = File::getCurrentWorkingDirectory().getChildFile("resources").getChildFile("presets");
+        if (cwd.isDirectory()) chosen = cwd;
+    }
+
     pmPresetDir = chosen.getFullPathName();
         const bool exists = chosen.isDirectory();
         MDW_LOG("PM", "PresetDir resolved: " + (exists ? pmPresetDir : String("(not found)"))

@@ -14,7 +14,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
 {
     MDW_LOG("UI", "Editor: constructed");
     setResizable(true, true);
-    setSize (780, 190); // allow room for preset selector
+    setSize (740, 170); // smaller height after removing input/output controls
 
     // Register APVTS listeners (react to param changes ASAP)
     processor.apvts.addParameterListener("showWindow", this);
@@ -24,20 +24,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     meterLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (meterLabel);
 
-    addAndMakeVisible(inGain);
-    inGain.setTextValueSuffix(" dB");
-    inGain.setRange(-24.0, 24.0, 0.01);
-    inGainLabel.setJustificationType(juce::Justification::centredRight);
-    inGainLabel.attachToComponent(&inGain, false);
-
-    addAndMakeVisible(outGain);
-    outGain.setTextValueSuffix(" dB");
-    outGain.setRange(-24.0, 24.0, 0.01);
-    outGainLabel.setJustificationType(juce::Justification::centredRight);
-    outGainLabel.attachToComponent(&outGain, false);
-
-    inAtt  = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "inputGain",  inGain);
-    outAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "outputGain", outGain);
+    // Removed input/output gain controls per user request
 
     // Visual controls: Amplitude, Speed, Hue, Saturation, Seed
     addAndMakeVisible(ampScale);
@@ -289,21 +276,18 @@ void MilkDAWpAudioProcessorEditor::resized()
     auto sliders = r.removeFromTop(56);
     const int sliderWidth = 140;
     const int sliderHeight = 44;
-    inGain.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
-    sliders.removeFromLeft(8);
-    outGain.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
-    sliders.removeFromLeft(8);
     ampScale.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
     sliders.removeFromLeft(8);
     speed.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
     sliders.removeFromLeft(8);
     hue.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
+    sliders.removeFromLeft(8);
+    saturation.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
+    sliders.removeFromLeft(8);
+    seed.setBounds(sliders.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
 
-    // second row for remaining sliders if space
-    auto sliders2 = r.removeFromTop(56);
-    seed.setBounds(sliders2.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
-    sliders2.removeFromLeft(8);
-    saturation.setBounds(sliders2.removeFromLeft(sliderWidth).reduced(4).removeFromTop(sliderHeight));
+    // second row reserved (currently unused)
+    r.removeFromTop(4);
 
     r.removeFromTop(6);
 
@@ -519,12 +503,28 @@ void MilkDAWpAudioProcessorEditor::populatePresetBox()
     presetBox.clear(juce::dontSendNotification);
     presetPaths.clear();
 
-    // Resolve preset dir similarly to ProjectMRenderer
+    // Resolve preset dir similarly to ProjectMRenderer, with dev fallbacks
     auto exe = juce::File::getSpecialLocation(juce::File::currentApplicationFile);
     auto bundleRoot = exe.getParentDirectory().getParentDirectory();
     juce::File presetsA = bundleRoot.getChildFile("Contents").getChildFile("Resources").getChildFile("presets");
     juce::File presetsB = bundleRoot.getChildFile("Resources").getChildFile("presets");
     juce::File chosen = presetsA.isDirectory() ? presetsA : (presetsB.isDirectory() ? presetsB : juce::File());
+
+    if (! chosen.isDirectory())
+    {
+        auto dir = exe.getParentDirectory();
+        for (int i = 0; i < 8 && ! chosen.isDirectory(); ++i)
+        {
+            auto test = dir.getChildFile("resources").getChildFile("presets");
+            if (test.isDirectory()) { chosen = test; break; }
+            dir = dir.getParentDirectory();
+        }
+    }
+    if (! chosen.isDirectory())
+    {
+        auto cwd = juce::File::getCurrentWorkingDirectory().getChildFile("resources").getChildFile("presets");
+        if (cwd.isDirectory()) chosen = cwd;
+    }
 
     juce::StringArray names;
     if (chosen.isDirectory())

@@ -69,8 +69,12 @@ private:
     std::atomic<float> baseSat { 1.0f };      // 0..1
     std::atomic<int>   seed { 0 };            // seed for pseudo-random variations
 
-    // ProjectM enable flag (default false to avoid crash in some environments)
+    // ProjectM enable flag (default true when projectM is available; can be disabled via MILKDAWP_DISABLE_PROJECTM)
+   #if defined(HAVE_PROJECTM)
+    std::atomic<bool> projectMEnabled { true };
+   #else
     std::atomic<bool> projectMEnabled { false };
+   #endif
 
     // Simple fallback visual energy (updated by reading FIFO when projectM is not active)
     float fallbackLevel = 0.0f;

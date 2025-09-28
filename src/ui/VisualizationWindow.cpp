@@ -70,8 +70,43 @@ void VisualizationWindow::closeButtonPressed()
 
 void VisualizationWindow::setFullScreenParam(bool shouldBeFullScreen)
 {
-    if (shouldBeFullScreen != isFullScreen())
-        setFullScreen(shouldBeFullScreen);
+    // Implement true borderless fullscreen that can be toggled and restored
+    if (shouldBeFullScreen)
+    {
+        if (!inFullscreen)
+        {
+            inFullscreen = true;
+            // Save current windowed bounds for later restore
+            lastWindowBounds = getBounds();
+            // Use borderless native window for fullscreen to avoid chrome
+            setUsingNativeTitleBar(false);
+            setResizable(false, false);
+            setAlwaysOnTop(true);
+
+            // Expand to the monitor bounds containing this window
+            if (auto* disp = juce::Desktop::getInstance().getDisplays().getDisplayForRect(getBounds()))
+                setBounds(disp->userArea);
+            setFullScreen(true);
+            toFront(true);
+        }
+    }
+    else
+    {
+        if (inFullscreen)
+        {
+            inFullscreen = false;
+            setFullScreen(false);
+            setUsingNativeTitleBar(true);
+            setResizable(true, true);
+            setAlwaysOnTop(true);
+            // Restore previous window bounds if valid, otherwise use a sensible default
+            if (! lastWindowBounds.isEmpty())
+                setBounds(lastWindowBounds);
+            else
+                centreWithSize(900, 550);
+            toFront(true);
+        }
+    }
 }
 
 void VisualizationWindow::syncTitleForOBS()

@@ -31,11 +31,6 @@ private:
     MilkDAWpAudioProcessor& processor;
 
     juce::Label meterLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> inAtt, outAtt;
-    juce::Slider inGain, outGain;
-    // Labels for sliders
-    juce::Label inGainLabel { {}, "Input" };
-    juce::Label outGainLabel { {}, "Output" };
 
     juce::ToggleButton btnShowWindow { "Show Window" };
     juce::ToggleButton btnFullscreen { "Fullscreen" };

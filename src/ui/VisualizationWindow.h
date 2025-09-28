@@ -28,6 +28,10 @@ public:
     void setOnUserClose(std::function<void()> cb) { onUserClosed = std::move(cb); }
 
 private:
+    // Remember last non-fullscreen bounds to restore on exit
+    juce::Rectangle<int> lastWindowBounds;
+    bool inFullscreen = false;
+
     class GLComponent : public juce::Component
     {
     public:
