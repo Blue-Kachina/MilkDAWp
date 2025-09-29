@@ -26,7 +26,7 @@ namespace om::milkdawp
             NormalisableRange<float>(-24.0f, 24.0f, 0.01f), 0.0f));
         params.push_back(std::make_unique<AudioParameterFloat>(ParamIDs::outputGain, "Output Gain",
             NormalisableRange<float>(-24.0f, 24.0f, 0.01f), 0.0f));
-        params.push_back(std::make_unique<AudioParameterBool>(ParamIDs::showWindow, "Show Window", true));
+        params.push_back(std::make_unique<AudioParameterBool>(ParamIDs::showWindow, "Show Window", false));
         params.push_back(std::make_unique<AudioParameterBool>(ParamIDs::fullscreen, "Fullscreen", false));
         // Replace arbitrary sliders with meaningful controls
         params.push_back(std::make_unique<AudioParameterInt>(ParamIDs::seed, "Easter Egg",

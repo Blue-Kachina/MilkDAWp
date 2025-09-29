@@ -544,6 +544,17 @@ void MilkDAWpAudioProcessorEditor::parameterChanged(const juce::String& paramID,
                 editorSP->presetBox.setSelectedItemIndex(idx, juce::dontSendNotification);
             if (editorSP->visWindow)
                 editorSP->visWindow->setPresetIndex(idx);
+
+            // Auto-enable Show Window when a preset is selected (manual or via host preset manager)
+            if (auto* pShow = dynamic_cast<juce::AudioParameterBool*>(editorSP->processor.apvts.getParameter("showWindow")))
+            {
+                if (pShow->get() == false)
+                {
+                    pShow->beginChangeGesture();
+                    pShow->setValueNotifyingHost(1.0f);
+                    pShow->endChangeGesture();
+                }
+            }
         });
     }
 }
