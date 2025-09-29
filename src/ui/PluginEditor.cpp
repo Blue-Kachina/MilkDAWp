@@ -14,7 +14,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
 {
     MDW_LOG("UI", "Editor: constructed");
     setResizable(true, true);
-    setSize (760, 260); // increased height to accommodate rotary knobs and padding
+    setSize (1200, 600); // increased height to provide space for docked visualization without manual resize
 
     // Register APVTS listeners (react to param changes ASAP)
     processor.apvts.addParameterListener("showWindow", this);
@@ -81,6 +81,45 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
 
     addAndMakeVisible(btnShowWindow);
     addAndMakeVisible(btnFullscreen);
+    
+    // Style the fullscreen toggle as an icon button
+    btnFullscreen.setTooltip("Toggle Fullscreen");
+    btnFullscreen.setClickingTogglesState(true);
+    {
+        auto makeIcon = [](juce::Colour c) {
+            auto dp = std::make_unique<juce::DrawablePath>();
+            juce::Path p;
+            const float s = 24.0f; // icon square
+            const float m = 4.0f;  // margin
+            const float a = m + 3.0f;
+            const float b = s - m - 3.0f;
+            const float head = 6.0f; // arrowhead size
+            // Diagonal double-arrow: ↘ and ↖ along the same diagonal
+            // Shaft
+            p.startNewSubPath(a, a); p.lineTo(b, b);
+            // Arrowhead for ↘ at (b,b)
+            p.startNewSubPath(b, b); p.lineTo(b, b - head);
+            p.startNewSubPath(b, b); p.lineTo(b - head, b);
+            // Arrowhead for ↖ at (a,a)
+            p.startNewSubPath(a, a); p.lineTo(a, a + head);
+            p.startNewSubPath(a, a); p.lineTo(a + head, a);
+            dp->setPath(p);
+            dp->setFill(juce::Colours::transparentBlack);
+            dp->setStrokeFill(c);
+            dp->setStrokeThickness(2.0f);
+            return dp;
+        };
+        auto normal   = makeIcon(juce::Colours::lightgrey);
+        auto over     = makeIcon(juce::Colours::white);
+        auto down     = makeIcon(juce::Colours::orange);
+        auto normalOn = makeIcon(juce::Colours::aqua);
+        auto overOn   = makeIcon(juce::Colours::cyan);
+        auto downOn   = makeIcon(juce::Colours::skyblue);
+        btnFullscreen.setImages(normal.get(), over.get(), down.get(), nullptr,
+                                normalOn.get(), overOn.get(), downOn.get(), nullptr);
+        // drawables will be cloned internally by setImages; locals can be discarded
+    }
+
     showAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, "showWindow", btnShowWindow);
     fullAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, "fullscreen", btnFullscreen);
 
@@ -101,6 +140,9 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     addAndMakeVisible(btnClearPreset);
     addAndMakeVisible(currentPresetLabel);
     currentPresetLabel.setJustificationType(juce::Justification::centredLeft);
+    currentPresetLabel.setFont(juce::Font(14.0f, juce::Font::bold));
+    currentPresetLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    currentPresetLabel.setColour(juce::Label::backgroundColourId, juce::Colours::darkgrey.darker(0.4f));
 
     btnLoadPreset.onClick = [this]()
     {
@@ -139,6 +181,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
                     // Persist selected preset path in processor state so it survives editor close and host preset save
                     processor.apvts.state.setProperty("presetPath", lastPresetPath, nullptr);
                     currentPresetLabel.setText(f.getFileName(), juce::dontSendNotification);
+                    btnLoadPreset.setTooltip(f.getFullPathName());
                     if (visWindow)
                         visWindow->loadPresetByPath(lastPresetPath, true);
                 }
@@ -148,6 +191,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     btnClearPreset.onClick = [this]()
     {
         currentPresetLabel.setText("(none)", juce::dontSendNotification);
+        btnLoadPreset.setTooltip("Select a projectM preset (.milk)");
         lastPresetPath.clear();
         // Persist cleared state
         processor.apvts.state.setProperty("presetPath", "", nullptr);
@@ -163,21 +207,12 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     // Restore last selected preset path from processor state (persists across editor reopen and in host presets)
     refreshPresetPathFromState();
 
-    // New: log and ensure APVTS reflects button click (guarded to avoid redundant sets)
+    // New: log only. The ButtonAttachment handles syncing this toggle to the APVTS.
     btnShowWindow.onClick = [this]()
     {
         const bool want = btnShowWindow.getToggleState();
         MDW_LOG("UI", juce::String("Editor: btnShowWindow.onClick -> ") + (want ? "true" : "false"));
-        if (auto* p = dynamic_cast<juce::AudioParameterBool*>(processor.apvts.getParameter("showWindow")))
-        {
-            const bool cur = p->get();
-            if (cur != want)
-            {
-                p->beginChangeGesture();
-                p->setValueNotifyingHost(want ? 1.0f : 0.0f);
-                p->endChangeGesture();
-            }
-        }
+        // No manual APVTS write here to avoid redundant/looped updates with the ButtonAttachment
     };
 
     // Removed: embedded GL view creation and initial param push
@@ -214,9 +249,16 @@ void MilkDAWpAudioProcessorEditor::refreshPresetPathFromState()
 
     lastPresetPath = saved;
     if (lastPresetPath.isNotEmpty())
-        currentPresetLabel.setText(juce::File(lastPresetPath).getFileName(), juce::dontSendNotification);
+    {
+        auto name = juce::File(lastPresetPath).getFileName();
+        currentPresetLabel.setText(name, juce::dontSendNotification);
+        btnLoadPreset.setTooltip(lastPresetPath);
+    }
     else
+    {
         currentPresetLabel.setText("(none)", juce::dontSendNotification);
+        btnLoadPreset.setTooltip("Select a projectM preset (.milk)");
+    }
 
     if (visWindow)
     {
@@ -293,6 +335,13 @@ void MilkDAWpAudioProcessorEditor::visibilityChanged()
     {
         startTimerHz(15);
         MDW_LOG("UI", "Editor: timer (re)started");
+        // Auto-start visualization if requested
+        if (getPeer() != nullptr)
+        {
+            const bool want = processor.apvts.getRawParameterValue("showWindow")->load() > 0.5f;
+            if (want && !visWindow)
+                handleShowWindowChangeOnUI(true);
+        }
     }
 }
 
@@ -384,41 +433,81 @@ void MilkDAWpAudioProcessorEditor::resized()
 
     // Top row: title + buttons
     auto top = r.removeFromTop(28);
+    // Right-aligned fullscreen button area
+    auto fsArea = top.removeFromRight(32);
+    fsArea = fsArea.withSize(28, 24).withY(fsArea.getY() + juce::jmax(0, (top.getHeight() - 24) / 2));
+    btnFullscreen.setBounds(fsArea);
+    // Left controls
     meterLabel.setBounds(top.removeFromLeft(180));
     top.removeFromLeft(10);
-    btnShowWindow.setBounds(top.removeFromLeft(130));
-    top.removeFromLeft(8);
-    btnFullscreen.setBounds(top.removeFromLeft(130));
+    btnShowWindow.setBounds(top.removeFromLeft(160));
 
-    // Add extra space between header and knobs
-    r.removeFromTop(12);
-
-    // Knob area
-    auto knobs = r.removeFromTop(110);
-    const int knobW = 120;
-    const int knobH = 100;
-    ampScale.setBounds(knobs.removeFromLeft(knobW).reduced(8).removeFromTop(knobH));
-    knobs.removeFromLeft(8);
-    speed.setBounds(knobs.removeFromLeft(knobW).reduced(8).removeFromTop(knobH));
-    knobs.removeFromLeft(8);
-    hue.setBounds(knobs.removeFromLeft(knobW).reduced(8).removeFromTop(knobH));
-    knobs.removeFromLeft(8);
-    saturation.setBounds(knobs.removeFromLeft(knobW).reduced(8).removeFromTop(knobH));
-    knobs.removeFromLeft(8);
-    seed.setBounds(knobs.removeFromLeft(knobW).reduced(8).removeFromTop(knobH));
-
-    // Extra breathing room before preset row
+    // Padding between header and preset row
     r.removeFromTop(12);
 
     // Preset selector row (lazy)
     auto row = r.removeFromTop(28);
     presetLabel.setBounds(row.removeFromLeft(60));
     row.removeFromLeft(6);
-    currentPresetLabel.setBounds(row.removeFromLeft(juce::jmax(160, row.getWidth() - 240)));
+    currentPresetLabel.setBounds(row.removeFromLeft(juce::jmax(180, row.getWidth() - 250)));
     row.removeFromLeft(6);
     btnLoadPreset.setBounds(row.removeFromLeft(150));
     row.removeFromLeft(6);
     btnClearPreset.setBounds(row.removeFromLeft(80));
+
+    // Extra breathing room before knobs (more padding per request)
+    r.removeFromTop(28);
+
+    // Knob area (centered horizontally)
+    auto knobs = r.removeFromTop(110);
+    const int knobW = 120;
+    const int knobH = 100;
+    const int gap = 8;
+    const int count = 5;
+    const int totalW = count * knobW + (count - 1) * gap;
+    const int startX = knobs.getX() + juce::jmax(0, (knobs.getWidth() - totalW) / 2);
+    const int y = knobs.getY();
+    auto place = [&](juce::Component& c, int index) {
+        c.setBounds(startX + index * (knobW + gap), y, knobW, knobH);
+    };
+    place(ampScale, 0);
+    place(speed, 1);
+    place(hue, 2);
+    place(saturation, 3);
+    place(seed, 4);
+
+    // If visualization window is docked, occupy the remaining area
+    if (visWindow && visWindow->isDocked())
+    {
+        // 'r' now represents remaining area under the controls
+        auto visAreaLocal = r; // use remaining area as-is to avoid pushing bounds outside parent
+        // If embedded as a child, set local bounds; if top-level, convert to screen
+        if (visWindow->isOnDesktop())
+        {
+            auto visAreaScreen = localAreaToGlobal(visAreaLocal);
+            visWindow->setBounds(visAreaScreen);
+        }
+        else
+        {
+            visWindow->setBounds(visAreaLocal);
+        }
+        // Ensure visibility and Z-order of both the container and its content
+        if (!visWindow->isVisible())
+            visWindow->setVisible(true);
+        if (auto* content = visWindow->getContentComponent())
+        {
+            if (!content->isVisible())
+                content->setVisible(true);
+            content->toFront(false);
+            content->repaint();
+        }
+        visWindow->toFront(false);
+        visWindow->repaint();
+        MDW_LOG("UI", juce::String("Editor.resized: docked vis bounds=") + visWindow->getBounds().toString() +
+            ", areaLeft=" + r.toString() +
+            ", visVisible=" + juce::String(visWindow->isVisible() ? 1 : 0) +
+            ", contentVisible=" + juce::String(visWindow->getContentComponent() && visWindow->getContentComponent()->isVisible() ? 1 : 0));
+    }
 }
 
 void MilkDAWpAudioProcessorEditor::parameterChanged(const juce::String& paramID, float newValue)
@@ -492,10 +581,22 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
             MDW_LOG("UI", "Editor: creating VisualizationWindow (event)");
             const int initIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
             visWindow = std::make_unique<VisualizationWindow>(processor.getAudioFifo(), processor.getCurrentSampleRateHz(), lastPresetPath, initIdx);
+            // Dock to the main editor by default (embedded)
+            visWindow->dockTo(this);
+            // Ensure it is visible immediately (don't rely solely on addAndMakeVisible)
+            visWindow->setVisible(true);
+            if (auto* content = visWindow->getContentComponent())
+            {
+                content->setVisible(true);
+                content->toFront(false);
+            }
+            // Lay out immediately so the GL canvas is visible without requiring a resize
+            this->resized();
             visWindow->setVisualParams(amp, spd);
             visWindow->setColorParams(h, sat);
             visWindow->setSeed(sd);
-            visWindow->setFullScreenParam(wantFullscreen);
+            if (!visWindow->isDocked())
+                visWindow->setFullScreenParam(wantFullscreen);
             // Apply preset: prefer a manually chosen path, otherwise use the automatable preset index
             if (! lastPresetPath.isEmpty())
                 visWindow->loadPresetByPath(lastPresetPath, true);
@@ -505,6 +606,7 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
                 visWindow->setPresetIndex(presetIdx);
             }
             visWindow->toFront(true);
+            visWindow->repaint();
 
             juce::Component::SafePointer<MilkDAWpAudioProcessorEditor> editorSP(this);
             visWindow->setOnUserClose([editorSP]()
@@ -535,6 +637,13 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
                 }
             });
 
+            // Ensure layout stabilizes after the current message; prevents zero-sized dock area
+            juce::Timer::callAfterDelay(0, [editorSP]()
+            {
+                if (editorSP != nullptr)
+                    editorSP->resized();
+            });
+
             creationPending.store(false);
         }
 
@@ -542,7 +651,15 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
         {
             MDW_LOG("UI", "Editor: showing VisualizationWindow (event)");
             visWindow->setVisible(true);
+            if (auto* content = visWindow->getContentComponent())
+            {
+                content->setVisible(true);
+                content->toFront(false);
+            }
+            // Ensure the docked window gets immediate bounds without requiring manual resize
+            this->resized();
             visWindow->toFront(true);
+            visWindow->repaint();
             // Reapply preset on show to handle GL context resets
             if (! lastPresetPath.isEmpty())
                 visWindow->loadPresetByPath(lastPresetPath, true);
@@ -555,7 +672,8 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
 
         if (visWindow)
         {
-            visWindow->setFullScreenParam(wantFullscreen);
+            if (!visWindow->isDocked())
+                visWindow->setFullScreenParam(wantFullscreen);
             visWindow->setVisualParams(amp, spd);
             visWindow->setColorParams(h, sat);
             visWindow->setSeed(sd);
@@ -582,8 +700,28 @@ void MilkDAWpAudioProcessorEditor::handleFullscreenChangeOnUI(bool wantFullscree
     if (!visWindow)
         return;
 
-    // Apply fullscreen change
-    visWindow->setFullScreenParam(wantFullscreen);
+    if (wantFullscreen)
+    {
+        // Ensure the visualization is undocked before entering fullscreen
+        wasDockedBeforeFullscreen = visWindow->isDocked();
+        if (wasDockedBeforeFullscreen)
+        {
+            visWindow->undock();
+        }
+        visWindow->setFullScreenParam(true);
+    }
+    else
+    {
+        // Exit fullscreen first
+        visWindow->setFullScreenParam(false);
+        // Redock if we had been docked before entering fullscreen
+        if (wasDockedBeforeFullscreen)
+        {
+            visWindow->dockTo(this);
+            // Lay out immediately to restore docked bounds
+            this->resized();
+        }
+    }
 
     // Reapply the preset after fullscreen toggles, because some hosts/drivers recreate the GL context
     if (! lastPresetPath.isEmpty())
@@ -662,6 +800,16 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
             int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
             visWindow->setPresetIndex(presetIdx);
         }
+        // Safety: if docked but not visible or zero-sized, force layout and visibility
+        if (visWindow->isDocked())
+        {
+            auto b = visWindow->getBounds();
+            if (!visWindow->isVisible() || b.isEmpty())
+            {
+                visWindow->setVisible(true);
+                this->resized();
+            }
+        }
     }
 
     // If host delivered param change while we weren’t on desktop, act on it here
@@ -670,10 +818,15 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
         MDW_LOG("UI", "Editor: creating VisualizationWindow (timer catch-up)");
         const int initIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
         visWindow = std::make_unique<VisualizationWindow>(processor.getAudioFifo(), processor.getCurrentSampleRateHz(), lastPresetPath, initIdx);
+        // Dock to the main editor by default (embedded)
+        visWindow->dockTo(this);
+        // Lay out immediately so the GL canvas is visible without requiring a resize
+        this->resized();
         visWindow->setVisualParams(amp, spd);
         visWindow->setColorParams(h, sat);
         visWindow->setSeed(sd);
-        visWindow->setFullScreenParam(wantFullscreen);
+        if (!visWindow->isDocked())
+            visWindow->setFullScreenParam(wantFullscreen);
         // Apply preset: prefer a manually chosen path, otherwise use the automatable preset index
         if (! lastPresetPath.isEmpty())
             visWindow->loadPresetByPath(lastPresetPath, true);
@@ -682,6 +835,8 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
             int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
             visWindow->setPresetIndex(presetIdx);
         }
+        // Ensure the newly created window is actually shown (it starts hidden in ctor)
+        visWindow->setVisible(true);
         visWindow->toFront(true);
 
         juce::Component::SafePointer<MilkDAWpAudioProcessorEditor> editorSP(this);

@@ -14,18 +14,17 @@ VisualizationWindow::VisualizationWindow(LockFreeAudioFifo* fifo, int sampleRate
     setResizeLimits(300, 200, 8192, 8192);
     // Hand ownership of the GLComponent to the window.
     glView = new GLComponent(fifo, sampleRate, initialPresetPath, initialPresetIndex);
+    // Hand over a non-owning content; previous working state used non-owning content assignment
     setContentOwned(glView, false);
     if (auto* c = getContentComponent()) c->setBounds(getLocalBounds());
-    centreWithSize(900, 550);
+    centreWithSize(1000, 750);
 
     // Ensure we can receive key events (for ESC to exit fullscreen)
     setWantsKeyboardFocus(true);
 
-    // Bring the window to the front and keep it on top so it doesn't hide behind the host
-    setAlwaysOnTop(true);
-    setVisible(true);
-    toFront(true);
-    grabKeyboardFocus();
+    // Do not force visibility/topmost here; caller will decide (docked vs undocked)
+    setAlwaysOnTop(false);
+    setVisible(false);
 
     startTimerHz(10);
 }
@@ -116,7 +115,7 @@ void VisualizationWindow::setFullScreenParam(bool shouldBeFullScreen)
             if (! lastWindowBounds.isEmpty())
                 setBounds(lastWindowBounds);
             else
-                centreWithSize(900, 550);
+                centreWithSize(1000, 750);
             toFront(true);
         }
     }
@@ -131,6 +130,45 @@ void VisualizationWindow::setFullScreenParam(bool shouldBeFullScreen)
 void VisualizationWindow::syncTitleForOBS()
 {
     setName(ProjectMRenderer::kWindowTitle);
+}
+
+void VisualizationWindow::dockTo(juce::Component* parentComponent)
+{
+    if (parentComponent == nullptr)
+        return;
+
+    // Embed this window as a child component inside the editor instead of a separate native window
+    removeFromDesktop(); // ensure we are not a top-level peer
+    setUsingNativeTitleBar(false);
+    setTitleBarButtonsRequired(0, false);
+    setTitleBarHeight(0);
+    setResizable(false, false);
+    setAlwaysOnTop(false);
+
+    // Add as a child component to the parent and make visible
+    parentComponent->addAndMakeVisible(this);
+    // Also ensure our content component is visible immediately
+    if (auto* c = getContentComponent())
+        c->setVisible(true);
+    docked = true;
+}
+
+void VisualizationWindow::undock()
+{
+    // Detach from parent if currently embedded
+    if (auto* p = getParentComponent())
+        p->removeChildComponent(this);
+
+    // Make it a standalone top-level window again
+    removeFromDesktop();
+    setUsingNativeTitleBar(true);
+    setTitleBarButtonsRequired(juce::DocumentWindow::closeButton, false);
+    setTitleBarHeight(24);
+    setResizable(true, true);
+    setAlwaysOnTop(true);
+    addToDesktop(juce::ComponentPeer::windowHasTitleBar | juce::ComponentPeer::windowIsResizable);
+    toFront(true);
+    docked = false;
 }
 
 bool VisualizationWindow::keyPressed(const juce::KeyPress& key)
@@ -212,11 +250,10 @@ VisualizationWindow::GLComponent::GLComponent(LockFreeAudioFifo* fifo, int sampl
             renderer->setPresetIndex(initialPresetIndex);
     }
 
-    // Now attach the GL context and start rendering
-    glContext.setContinuousRepainting(true);
-    glContext.setSwapInterval(1);
-    glContext.setRenderer(renderer.get());
-    glContext.attachTo(*this);
+    // Defer GL context attachment to next message tick; attach only when truly showing
+    juce::Timer::callAfterDelay(0, [this]() {
+        attachIfReady();
+    });
 
     MDW_LOG("UI", "VisualizationWindow::GLComponent: ctor end");
 }
@@ -227,6 +264,24 @@ VisualizationWindow::GLComponent::~GLComponent()
     // Destructor may be called from non-UI threads in some hosts; avoid touching the context here.
     // Ensure a clean shutdown sequence (prefer explicit shutdownGL by owner on UI thread).
     renderer.reset();
+}
+
+void VisualizationWindow::GLComponent::parentHierarchyChanged()
+{
+    MDW_LOG("UI", juce::String("GLComponent: parentHierarchyChanged peer=") + (getPeer() ? "yes" : "no"));
+    attachIfReady();
+}
+
+void VisualizationWindow::GLComponent::visibilityChanged()
+{
+    MDW_LOG("UI", juce::String("GLComponent: visibilityChanged -> ") + (isShowing() ? "showing" : "hidden"));
+    attachIfReady();
+}
+
+void VisualizationWindow::GLComponent::resized()
+{
+    MDW_LOG("UI", juce::String("GLComponent: resized to ") + juce::String(getWidth()) + "x" + juce::String(getHeight()));
+    attachIfReady();
 }
 
 bool VisualizationWindow::GLComponent::keyPressed(const juce::KeyPress& key)
@@ -276,5 +331,34 @@ void VisualizationWindow::GLComponent::shutdownGL()
     glContext.setRenderer(nullptr);
     glContext.setContinuousRepainting(false);
     if (glContext.isAttached())
+    {
         glContext.detach();
+    }
+    glAttached = false;
+}
+
+void VisualizationWindow::GLComponent::attachIfReady()
+{
+    if (glAttached)
+        return;
+
+    const bool havePeer = (getPeer() != nullptr);
+    const bool showing = isShowing();
+    const bool nonZero = getWidth() > 0 && getHeight() > 0;
+
+    // Attach only when component is actually showing, has a peer, and non-zero size
+    if (!havePeer || !showing || !nonZero)
+    {
+        MDW_LOG("UI", juce::String("GLComponent: attachIfReady waiting - peer=") + (havePeer?"yes":"no") +
+            ", showing=" + (showing?"yes":"no") + ", size=" + juce::String(getWidth()) + "x" + juce::String(getHeight()));
+        return;
+    }
+
+    MDW_LOG("UI", "GLComponent: attaching OpenGLContext");
+    glContext.setContinuousRepainting(true);
+    glContext.setSwapInterval(1);
+    glContext.setRenderer(renderer.get());
+    glContext.attachTo(*this);
+    glAttached = true;
+    MDW_LOG("UI", "GLComponent: OpenGLContext attached");
 }

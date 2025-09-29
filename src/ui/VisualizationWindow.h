@@ -19,6 +19,11 @@ public:
     bool keyPressed(const juce::KeyPress& key) override;
     void resized() override; // ensure content follows window size
 
+    // Docking helpers
+    void dockTo(juce::Component* parentComponent);
+    void undock();
+    bool isDocked() const { return docked; }
+
     // Forward visual params to the internal renderer
     void setVisualParams(float amplitude, float speed);
     void setColorParams(float hue01, float sat01);
@@ -36,29 +41,36 @@ private:
     // Remember last non-fullscreen bounds to restore on exit
     juce::Rectangle<int> lastWindowBounds;
     bool inFullscreen = false;
+    bool docked = false;
 
     class GLComponent : public juce::Component
-    {
-    public:
-        GLComponent(LockFreeAudioFifo* fifo, int sampleRate, const juce::String& initialPresetPath, int initialPresetIndex);
-        ~GLComponent() override;
-        void paint(juce::Graphics&) override {}
-        bool keyPressed(const juce::KeyPress& key) override; // forward ESC to parent
+        {
+        public:
+            GLComponent(LockFreeAudioFifo* fifo, int sampleRate, const juce::String& initialPresetPath, int initialPresetIndex);
+            ~GLComponent() override;
+            void paint(juce::Graphics&) override {}
+            bool keyPressed(const juce::KeyPress& key) override; // forward ESC to parent
+            void parentHierarchyChanged() override;
+            void visibilityChanged() override;
+            void resized() override;
 
-        // Forward to renderer
-        void setVisualParams(float amplitude, float speed);
-        void setColorParams(float hue01, float sat01);
-        void setSeed(int seed);
-        void setPresetIndex(int index);
-        void loadPresetByPath(const juce::String& absolutePath, bool hardCut = true);
+            // Forward to renderer
+            void setVisualParams(float amplitude, float speed);
+            void setColorParams(float hue01, float sat01);
+            void setSeed(int seed);
+            void setPresetIndex(int index);
+            void loadPresetByPath(const juce::String& absolutePath, bool hardCut = true);
 
-        // explicit GL teardown (must be called on the message thread)
-        void shutdownGL();
+            // explicit GL teardown (must be called on the message thread)
+            void shutdownGL();
 
-    private:
-        juce::OpenGLContext glContext;
-        std::unique_ptr<ProjectMRenderer> renderer;
-    };
+        private:
+            void attachIfReady();
+            juce::OpenGLContext glContext;
+            std::unique_ptr<ProjectMRenderer> renderer;
+            bool glAttached { false };
+            bool startupDelayDone { false };
+        };
 
     // Owned by the DocumentWindow via setContentOwned; we keep a non-owning pointer.
     GLComponent* glView = nullptr;

@@ -34,7 +34,7 @@ private:
     juce::Label meterLabel;
 
     juce::ToggleButton btnShowWindow { "Show Window" };
-    juce::ToggleButton btnFullscreen { "Fullscreen" };
+    juce::DrawableButton btnFullscreen { "Fullscreen", juce::DrawableButton::ImageOnButtonBackground };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> showAtt, fullAtt;
 
     // Visual controls (meaningful)
@@ -52,7 +52,7 @@ private:
     juce::ComboBox presetBox;
     juce::StringArray presetPaths; // full paths to match renderer
     // New: lazy loading UI (avoids heavy scanning)
-    juce::TextButton btnLoadPreset { "Load Preset..." };
+    juce::TextButton btnLoadPreset { "Load Preset" };
     juce::TextButton btnClearPreset { "Clear" };
     juce::Label currentPresetLabel { {}, "(none)" };
 
@@ -94,6 +94,9 @@ private:
 
     // Remember last user-selected preset path (via Load Preset...)
     juce::String lastPresetPath;
+
+    // Track docking state around fullscreen transitions
+    bool wasDockedBeforeFullscreen { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MilkDAWpAudioProcessorEditor)
 };
