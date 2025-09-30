@@ -36,6 +36,10 @@ private:
     juce::DrawableButton btnFullscreen { "Fullscreen", juce::DrawableButton::ImageOnButtonBackground };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> fullAtt;
 
+    // New: Pop Out (dock/undock) toggle button
+    juce::DrawableButton btnPopOut { "PopOut", juce::DrawableButton::ImageOnButtonBackground };
+    bool popOutDesired { false }; // track whether user wants separate window
+
     // Visual controls (meaningful)
     juce::Slider ampScale, speed, hue, saturation, seed;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> ampAtt, speedAtt, hueAtt, satAtt, seedAtt;
