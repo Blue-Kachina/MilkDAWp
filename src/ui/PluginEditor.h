@@ -33,9 +33,8 @@ private:
 
     juce::Label meterLabel;
 
-    juce::ToggleButton btnShowWindow { "Show Window" };
     juce::DrawableButton btnFullscreen { "Fullscreen", juce::DrawableButton::ImageOnButtonBackground };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> showAtt, fullAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> fullAtt;
 
     // Visual controls (meaningful)
     juce::Slider ampScale, speed, hue, saturation, seed;
@@ -70,7 +69,6 @@ private:
 
     // Race-safe external window creation state
     std::atomic<bool> creationPending { false };
-    bool lastWantWindow { false };
     bool lastVisibleStateLogged { false };
 
     // Helper: consider ourselves on desktop as soon as we have a peer (visibility may follow shortly)

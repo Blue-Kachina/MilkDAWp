@@ -17,7 +17,6 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     setSize (1200, 600); // increased height to provide space for docked visualization without manual resize
 
     // Register APVTS listeners (react to param changes ASAP)
-    processor.apvts.addParameterListener("showWindow", this);
     processor.apvts.addParameterListener("fullscreen", this);
     processor.apvts.addParameterListener("presetIndex", this);
     // Also listen to visual params so we can push immediate updates to the renderer
@@ -85,7 +84,6 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     seedLabel.attachToComponent(&seed, false);
     seedAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.apvts, "seed", seed);
 
-    addAndMakeVisible(btnShowWindow);
     addAndMakeVisible(btnFullscreen);
     
     // Style the fullscreen toggle as an icon button
@@ -126,7 +124,6 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
         // drawables will be cloned internally by setImages; locals can be discarded
     }
 
-    showAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, "showWindow", btnShowWindow);
     fullAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, "fullscreen", btnFullscreen);
 
     // Preset selector UI
@@ -213,14 +210,6 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     // Restore last selected preset path from processor state (persists across editor reopen and in host presets)
     refreshPresetPathFromState();
 
-    // New: log only. The ButtonAttachment handles syncing this toggle to the APVTS.
-    btnShowWindow.onClick = [this]()
-    {
-        const bool want = btnShowWindow.getToggleState();
-        MDW_LOG("UI", juce::String("Editor: btnShowWindow.onClick -> ") + (want ? "true" : "false"));
-        // No manual APVTS write here to avoid redundant/looped updates with the ButtonAttachment
-    };
-
     // Removed: embedded GL view creation and initial param push
 
     // Begin polling params to control external visualization
@@ -275,9 +264,8 @@ void MilkDAWpAudioProcessorEditor::refreshPresetPathFromState()
     }
     else
     {
-        // If a preset was restored and the user wants the window, create/show it now
-        const bool want = processor.apvts.getRawParameterValue("showWindow")->load() > 0.5f;
-        if (want)
+        // If a preset was restored and the window is not created yet, create/show it now
+        if (isOnDesktop() && !processor.isSuspended())
             handleShowWindowChangeOnUI(true);
     }
 }
@@ -348,13 +336,9 @@ void MilkDAWpAudioProcessorEditor::visibilityChanged()
     glShutdownRequested.store(false);
     startTimerHz(15);
     MDW_LOG("UI", "Editor: timer (re)started");
-    // Auto-start visualization if requested
-    if (getPeer() != nullptr)
-    {
-        const bool want = processor.apvts.getRawParameterValue("showWindow")->load() > 0.5f;
-        if (want && !visWindow)
-            handleShowWindowChangeOnUI(true);
-    }
+    // Auto-start visualization
+    if (getPeer() != nullptr && !visWindow)
+        handleShowWindowChangeOnUI(true);
 }
 
 void MilkDAWpAudioProcessorEditor::parentHierarchyChanged()
@@ -368,12 +352,11 @@ void MilkDAWpAudioProcessorEditor::parentHierarchyChanged()
     }
     else
     {
-        // We just got a peer: clear shutdown gate, ensure our timer is running and auto-create the vis window if requested
+        // We just got a peer: clear shutdown gate, ensure our timer is running and auto-create the vis window
         glShutdownRequested.store(false);
         startTimerHz(15);
         MDW_LOG("UI", "Editor: timer (re)started (parentHierarchyChanged)");
-        const bool want = processor.apvts.getRawParameterValue("showWindow")->load() > 0.5f;
-        if (want && !visWindow)
+        if (!visWindow)
             handleShowWindowChangeOnUI(true);
     }
 }
@@ -408,7 +391,6 @@ MilkDAWpAudioProcessorEditor::~MilkDAWpAudioProcessorEditor()
     MDW_LOG("UI", "Editor: destructor");
 
     // Unregister APVTS listeners
-    processor.apvts.removeParameterListener("showWindow", this);
     processor.apvts.removeParameterListener("fullscreen", this);
     processor.apvts.removeParameterListener("presetIndex", this);
     processor.apvts.removeParameterListener("ampScale", this);
@@ -466,8 +448,6 @@ void MilkDAWpAudioProcessorEditor::resized()
     btnFullscreen.setBounds(fsArea);
     // Left controls
     meterLabel.setBounds(top.removeFromLeft(180));
-    top.removeFromLeft(10);
-    btnShowWindow.setBounds(top.removeFromLeft(160));
 
     // Padding between header and preset row
     r.removeFromTop(12);
@@ -539,17 +519,7 @@ void MilkDAWpAudioProcessorEditor::resized()
 
 void MilkDAWpAudioProcessorEditor::parameterChanged(const juce::String& paramID, float newValue)
 {
-    if (paramID == "showWindow")
-    {
-        const bool want = newValue > 0.5f;
-        juce::Component::SafePointer<MilkDAWpAudioProcessorEditor> editorSP(this);
-        juce::MessageManager::callAsync([editorSP, want]()
-        {
-            if (editorSP == nullptr) return;
-            editorSP->handleShowWindowChangeOnUI(want);
-        });
-    }
-    else if (paramID == "fullscreen")
+    if (paramID == "fullscreen")
     {
         const bool wantFS = newValue > 0.5f;
         juce::Component::SafePointer<MilkDAWpAudioProcessorEditor> editorSP(this);
@@ -571,17 +541,6 @@ void MilkDAWpAudioProcessorEditor::parameterChanged(const juce::String& paramID,
                 editorSP->presetBox.setSelectedItemIndex(idx, juce::dontSendNotification);
             if (editorSP->visWindow)
                 editorSP->visWindow->setPresetIndex(idx);
-
-            // Auto-enable Show Window when a preset is selected (manual or via host preset manager)
-            if (auto* pShow = dynamic_cast<juce::AudioParameterBool*>(editorSP->processor.apvts.getParameter("showWindow")))
-            {
-                if (pShow->get() == false)
-                {
-                    pShow->beginChangeGesture();
-                    pShow->setValueNotifyingHost(1.0f);
-                    pShow->endChangeGesture();
-                }
-            }
         });
     }
     else if (paramID == "ampScale" || paramID == "speed" || paramID == "colorHue" || paramID == "colorSat" || paramID == "seed")
@@ -670,13 +629,9 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
             visWindow->setOnUserClose([editorSP]()
             {
                 if (editorSP == nullptr) return;
-                MDW_LOG("UI", "Editor: onUserClose -> set showWindow = false");
-                if (auto* p = dynamic_cast<juce::AudioParameterBool*>(editorSP->processor.apvts.getParameter("showWindow")))
-                {
-                    p->beginChangeGesture();
-                    p->setValueNotifyingHost(0.0f);
-                    p->endChangeGesture();
-                }
+                MDW_LOG("UI", "Editor: onUserClose -> hide visualization");
+                if (editorSP->visWindow)
+                    editorSP->visWindow->setVisible(false);
             });
 
             visWindow->setOnFullscreenChanged([editorSP](bool isFS)
@@ -798,14 +753,7 @@ void MilkDAWpAudioProcessorEditor::handleFullscreenChangeOnUI(bool wantFullscree
 // ===== timerCallback remains (visual param pushes and fallback pickup) =====
 void MilkDAWpAudioProcessorEditor::timerCallback()
 {
-    const bool wantWindow = processor.apvts.getRawParameterValue("showWindow")->load() > 0.5f;
     const bool wantFullscreen = processor.apvts.getRawParameterValue("fullscreen")->load() > 0.5f;
-
-    if (wantWindow != lastWantWindow)
-    {
-        MDW_LOG("UI", juce::String("Editor: showWindow param changed -> ") + (wantWindow ? "true" : "false"));
-        lastWantWindow = wantWindow;
-    }
 
     const float amp = processor.apvts.getRawParameterValue("ampScale")->load();
     const float spd = processor.apvts.getRawParameterValue("speed")->load();
@@ -813,20 +761,11 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
     const float sat = processor.apvts.getRawParameterValue("colorSat")->load();
     const int sd = (int) processor.apvts.getRawParameterValue("seed")->load();
 
-    // If host suspended us (e.g., Cubase disabled the plugin), hide external window and sync checkbox
+    // If host suspended us (e.g., Cubase disabled the plugin), hide external window
     if (processor.isSuspended())
     {
         if (visWindow && visWindow->isVisible())
             visWindow->setVisible(false);
-        if (auto* p = dynamic_cast<juce::AudioParameterBool*>(processor.apvts.getParameter("showWindow")))
-        {
-            if (p->get())
-            {
-                p->beginChangeGesture();
-                p->setValueNotifyingHost(0.0f);
-                p->endChangeGesture();
-            }
-        }
         // Don’t try to create/update the window while suspended
         return;
     }
@@ -872,8 +811,8 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
         }
     }
 
-    // If host delivered param change while we weren’t on desktop, act on it here
-    if (wantWindow && !visWindow && !creationPending.exchange(true))
+    // If we weren’t on desktop before, act on it here by creating the window when needed
+    if (!visWindow && !creationPending.exchange(true))
     {
         MDW_LOG("UI", "Editor: creating VisualizationWindow (timer catch-up)");
         const int initIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
@@ -904,13 +843,9 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
         visWindow->setOnUserClose([editorSP]()
         {
             if (editorSP == nullptr) return;
-            MDW_LOG("UI", "Editor: onUserClose -> set showWindow = false");
-            if (auto* p = dynamic_cast<juce::AudioParameterBool*>(editorSP->processor.apvts.getParameter("showWindow")))
-            {
-                p->beginChangeGesture();
-                p->setValueNotifyingHost(0.0f);
-                p->endChangeGesture();
-            }
+            MDW_LOG("UI", "Editor: onUserClose -> hide visualization");
+            if (editorSP->visWindow)
+                editorSP->visWindow->setVisible(false);
         });
 
         creationPending.store(false);
