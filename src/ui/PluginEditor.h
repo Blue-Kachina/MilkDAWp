@@ -100,6 +100,11 @@ private:
     // Track docking state around fullscreen transitions
     bool wasDockedBeforeFullscreen { false };
 
+    // Remember the pop-out state before entering fullscreen; used to restore on ESC/exit
+    bool previousPopoutWasDocked { false };
+    // Guard: ensure we only capture previousPopoutWasDocked once per fullscreen entry
+    bool previousPopoutStateCaptured { false };
+
     // Logo image loaded from BinaryData
     juce::Image logoImage;
 

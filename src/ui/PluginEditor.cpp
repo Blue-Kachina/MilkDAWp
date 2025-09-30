@@ -87,9 +87,46 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     addAndMakeVisible(btnFullscreen);
     addAndMakeVisible(btnPopOut);
     
-    // Style the fullscreen toggle as an icon button
+    // Style the fullscreen toggle as an icon button (now uses the "external" square-with-arrow icon)
     btnFullscreen.setTooltip("Toggle fullscreen");
     btnFullscreen.setClickingTogglesState(true);
+    {
+        auto makePopIcon = [](juce::Colour c) {
+            auto dp = std::make_unique<juce::DrawablePath>();
+            juce::Path p;
+            const float s = 24.0f;
+            const float m = 4.0f;
+            // Draw a square frame
+            p.addRectangle(m, m, s - 2*m, s - 2*m);
+            // Draw an arrow exiting to top-right
+            juce::Path arrow;
+            const float ax0 = s/2.4f, ay0 = s/2.4f;
+            const float ax1 = s - m - 2.0f, ay1 = m + 2.0f;
+            arrow.startNewSubPath(ax0, ay0); arrow.lineTo(ax1, ay1);
+            // Arrow head at (ax1, ay1)
+            arrow.startNewSubPath(ax1, ay1); arrow.lineTo(ax1 - 6.0f, ay1);
+            arrow.startNewSubPath(ax1, ay1); arrow.lineTo(ax1, ay1 + 6.0f);
+            p.addPath(arrow);
+            dp->setPath(p);
+            dp->setFill(juce::Colours::transparentBlack);
+            dp->setStrokeFill(c);
+            dp->setStrokeThickness(2.0f);
+            return dp;
+        };
+        auto normal   = makePopIcon(juce::Colours::lightgrey);
+        auto over     = makePopIcon(juce::Colours::white);
+        auto down     = makePopIcon(juce::Colours::orange);
+        auto normalOn = makePopIcon(juce::Colours::aqua);
+        auto overOn   = makePopIcon(juce::Colours::cyan);
+        auto downOn   = makePopIcon(juce::Colours::skyblue);
+        btnFullscreen.setImages(normal.get(), over.get(), down.get(), nullptr,
+                                normalOn.get(), overOn.get(), downOn.get(), nullptr);
+        // drawables will be cloned internally by setImages; locals can be discarded
+    }
+
+    // Style the Pop Out toggle as an icon button (now uses the diagonal double-arrow icon)
+    btnPopOut.setTooltip("Pop out visualization to a separate window");
+    btnPopOut.setClickingTogglesState(true);
     {
         auto makeIcon = [](juce::Colour c) {
             auto dp = std::make_unique<juce::DrawablePath>();
@@ -120,43 +157,6 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
         auto normalOn = makeIcon(juce::Colours::aqua);
         auto overOn   = makeIcon(juce::Colours::cyan);
         auto downOn   = makeIcon(juce::Colours::skyblue);
-        btnFullscreen.setImages(normal.get(), over.get(), down.get(), nullptr,
-                                normalOn.get(), overOn.get(), downOn.get(), nullptr);
-        // drawables will be cloned internally by setImages; locals can be discarded
-    }
-
-    // Style the Pop Out toggle as an icon button (square with arrow pointing out)
-    btnPopOut.setTooltip("Pop out visualization to a separate window");
-    btnPopOut.setClickingTogglesState(true);
-    {
-        auto makePopIcon = [](juce::Colour c) {
-            auto dp = std::make_unique<juce::DrawablePath>();
-            juce::Path p;
-            const float s = 24.0f;
-            const float m = 4.0f;
-            // Draw a square frame
-            p.addRectangle(m, m, s - 2*m, s - 2*m);
-            // Draw an arrow exiting to top-right
-            juce::Path arrow;
-            const float ax0 = s/2.4f, ay0 = s/2.4f;
-            const float ax1 = s - m - 2.0f, ay1 = m + 2.0f;
-            arrow.startNewSubPath(ax0, ay0); arrow.lineTo(ax1, ay1);
-            // Arrow head at (ax1, ay1)
-            arrow.startNewSubPath(ax1, ay1); arrow.lineTo(ax1 - 6.0f, ay1);
-            arrow.startNewSubPath(ax1, ay1); arrow.lineTo(ax1, ay1 + 6.0f);
-            p.addPath(arrow);
-            dp->setPath(p);
-            dp->setFill(juce::Colours::transparentBlack);
-            dp->setStrokeFill(c);
-            dp->setStrokeThickness(2.0f);
-            return dp;
-        };
-        auto normal   = makePopIcon(juce::Colours::lightgrey);
-        auto over     = makePopIcon(juce::Colours::white);
-        auto down     = makePopIcon(juce::Colours::orange);
-        auto normalOn = makePopIcon(juce::Colours::aqua);
-        auto overOn   = makePopIcon(juce::Colours::cyan);
-        auto downOn   = makePopIcon(juce::Colours::skyblue);
         btnPopOut.setImages(normal.get(), over.get(), down.get(), nullptr,
                             normalOn.get(), overOn.get(), downOn.get(), nullptr);
     }
@@ -167,6 +167,49 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     // Pop-out click handler: dock/undock the vis window
     btnPopOut.onClick = [this]()
     {
+        // While in fullscreen, allow disabling Pop Out by exiting fullscreen and docking back
+        const bool isFS = processor.apvts.getRawParameterValue("fullscreen")->load() > 0.5f;
+        if (isFS)
+        {
+            const bool wantPopOut = btnPopOut.getToggleState();
+            if (!wantPopOut)
+            {
+                // User wants to pop back in while fullscreen: exit fullscreen, dock, and keep Pop Out off
+                popOutDesired = false;
+                if (auto* p = dynamic_cast<juce::AudioParameterBool*>(processor.apvts.getParameter("fullscreen")))
+                {
+                    p->beginChangeGesture();
+                    p->setValueNotifyingHost(0.0f);
+                    p->endChangeGesture();
+                }
+                if (!visWindow)
+                    handleShowWindowChangeOnUI(true);
+                if (visWindow && !visWindow->isDocked())
+                {
+                    visWindow->dockTo(this);
+                    this->resized();
+                }
+                if (visWindow)
+                {
+                    visWindow->setVisible(true);
+                    visWindow->toFront(false);
+                }
+                return;
+            }
+            // If still wanting Pop Out while fullscreen, ensure undocked and visible
+            popOutDesired = true;
+            if (!visWindow)
+                handleShowWindowChangeOnUI(true);
+            if (visWindow)
+            {
+                if (visWindow->isDocked())
+                    visWindow->undock();
+                visWindow->setVisible(true);
+                visWindow->toFront(true);
+            }
+            return;
+        }
+
         popOutDesired = btnPopOut.getToggleState();
         // Ensure we have a visualization window
         if (!visWindow)
@@ -184,9 +227,8 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
             }
             else
             {
-                // Only dock back if not in fullscreen
-                const bool isFS = processor.apvts.getRawParameterValue("fullscreen")->load() > 0.5f;
-                if (!isFS && !visWindow->isDocked())
+                // Only dock back if not in fullscreen (redundant here since !isFS)
+                if (!visWindow->isDocked())
                 {
                     visWindow->dockTo(this);
                     this->resized();
@@ -755,6 +797,21 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
             {
                 if (editorSP == nullptr) return;
                 MDW_LOG("UI", juce::String("Editor: onFullscreenChanged -> ") + (isFS ? "true" : "false"));
+                // When entering fullscreen (including via ESC toggles or host), remember prior pop-out state
+                if (isFS && editorSP->visWindow)
+                {
+                    if (!editorSP->previousPopoutStateCaptured)
+                    {
+                        editorSP->previousPopoutWasDocked = editorSP->visWindow->isDocked();
+                        editorSP->wasDockedBeforeFullscreen = editorSP->previousPopoutWasDocked;
+                        editorSP->previousPopoutStateCaptured = true;
+                    }
+                }
+                else if (!isFS)
+                {
+                    // Reset capture guard when exiting fullscreen
+                    editorSP->previousPopoutStateCaptured = false;
+                }
                 if (auto* p = dynamic_cast<juce::AudioParameterBool*>(editorSP->processor.apvts.getParameter("fullscreen")))
                 {
                     const float want = isFS ? 1.0f : 0.0f;
@@ -849,25 +906,43 @@ void MilkDAWpAudioProcessorEditor::handleFullscreenChangeOnUI(bool wantFullscree
 
     if (wantFullscreen)
     {
+        // Remember prior pop-out state for ESC/exit restoration
+        previousPopoutWasDocked = visWindow->isDocked();
+        previousPopoutStateCaptured = true;
         // Ensure the visualization is undocked before entering fullscreen
-        wasDockedBeforeFullscreen = visWindow->isDocked();
+        wasDockedBeforeFullscreen = previousPopoutWasDocked;
         if (wasDockedBeforeFullscreen)
         {
             visWindow->undock();
         }
+        // Enforce Pop Out state while in fullscreen (UI reflects that it's a separate window now)
+        popOutDesired = true;
+        if (!btnPopOut.getToggleState())
+            btnPopOut.setToggleState(true, juce::dontSendNotification);
         visWindow->setFullScreenParam(true);
     }
     else
     {
         // Exit fullscreen first
         visWindow->setFullScreenParam(false);
-        // Redock if we had been docked before entering fullscreen and user hasn't requested Pop Out
-        if (wasDockedBeforeFullscreen && !popOutDesired)
+        // Restore to the previously remembered pop-out state regardless of current toggle
+        if (previousPopoutWasDocked)
         {
             visWindow->dockTo(this);
             // Lay out immediately to restore docked bounds
             this->resized();
         }
+        else
+        {
+            // Ensure it stays undocked (popped-out)
+            if (visWindow->isDocked())
+            {
+                visWindow->undock();
+            }
+            visWindow->toFront(true);
+        }
+        // Reset guard after exiting fullscreen
+        previousPopoutStateCaptured = false;
     }
 
     // Reapply the preset after fullscreen toggles, because some hosts/drivers recreate the GL context
