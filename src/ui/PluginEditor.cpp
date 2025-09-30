@@ -14,7 +14,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
 {
     MDW_LOG("UI", "Editor: constructed");
     setResizable(true, true);
-    setSize (1200, 600); // increased height to provide space for docked visualization without manual resize
+    setSize (1200, 650); // increased height to provide space for docked visualization without manual resize (+50 per request)
 
     // Register APVTS listeners (react to param changes ASAP)
     processor.apvts.addParameterListener("fullscreen", this);
@@ -211,6 +211,35 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     refreshPresetPathFromState();
 
     // Removed: embedded GL view creation and initial param push
+
+    // Load logo image from embedded BinaryData
+    {
+        int dataSize = 0;
+        // JUCE BinaryData sanitizes names: spaces become underscores; dots become underscores
+        const char* resourceNamePrimary = "MilkDAWp_Logo_Transparent_png"; // exact match for "MilkDAWp Logo Transparent.png"
+        const char* resourceNameFallback = "MilkDAWpLogoTransparent_png";   // legacy guess used previously
+        const void* data = BinaryData::getNamedResource(resourceNamePrimary, dataSize);
+        if (data == nullptr)
+            data = BinaryData::getNamedResource(resourceNameFallback, dataSize);
+        if (data != nullptr)
+        {
+            juce::MemoryInputStream mis(data, static_cast<size_t>(dataSize), false);
+            auto img = juce::ImageFileFormat::loadFrom(mis);
+            if (img.isValid())
+            {
+                logoImage = img;
+                MDW_LOG("UI", juce::String("Logo loaded: ") + juce::String(logoImage.getWidth()) + "x" + juce::String(logoImage.getHeight()));
+            }
+            else
+            {
+                MDW_LOG("UI", "Failed to decode embedded logo image");
+            }
+        }
+        else
+        {
+            MDW_LOG("UI", "Embedded logo image not found (tried MilkDAWp_Logo_Transparent_png and MilkDAWpLogoTransparent_png)");
+        }
+    }
 
     // Begin polling params to control external visualization
     startTimerHz(15);
@@ -425,10 +454,18 @@ void MilkDAWpAudioProcessorEditor::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colours::black);
 
-    // Simple header text
-    g.setColour(juce::Colours::white.withAlpha(0.9f));
-    g.setFont(16.0f);
-    g.drawText("MilkDAWp", 10, 10, 200, 24, juce::Justification::left);
+    // Draw logo at ~50% scale in the header area
+    if (logoImage.isValid())
+    {
+        const int nativeW = logoImage.getWidth();
+        const int nativeH = logoImage.getHeight();
+        const int drawW = juce::roundToInt(nativeW * 0.5f);
+        const int drawH = juce::roundToInt(nativeH * 0.5f);
+        const int x = 10;
+        const int y = 4;
+        juce::RectanglePlacement rp(juce::RectanglePlacement::xLeft | juce::RectanglePlacement::yMid | juce::RectanglePlacement::onlyReduceInSize);
+        g.drawImageWithin(logoImage, x, y, drawW, drawH, rp);
+    }
 
     // Meter text (if you wire it up later)
     g.setColour(juce::Colours::lightgrey);
@@ -449,8 +486,8 @@ void MilkDAWpAudioProcessorEditor::resized()
     // Left controls
     meterLabel.setBounds(top.removeFromLeft(180));
 
-    // Padding between header and preset row
-    r.removeFromTop(12);
+    // Padding between header and preset row (increased by +20 to make room for taller logo)
+    r.removeFromTop(32);
 
     // Preset selector row (lazy)
     auto row = r.removeFromTop(28);

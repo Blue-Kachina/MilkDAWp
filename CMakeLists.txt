@@ -113,7 +113,10 @@ else()
     message(STATUS "projectM4 not found; building WITHOUT projectM (fallback renderer only)")
 endif()
 
-juce_add_binary_data(MilkDAWpData SOURCES resources/presets/README.md)
+juce_add_binary_data(MilkDAWpData SOURCES
+    resources/presets/README.md
+    "resources/images/MilkDAWp Logo Transparent.png"
+)
 target_link_libraries(MilkDAWp PRIVATE MilkDAWpData)
 
 # Enable extra diagnostics for Debug builds

@@ -96,5 +96,8 @@ private:
     // Track docking state around fullscreen transitions
     bool wasDockedBeforeFullscreen { false };
 
+    // Logo image loaded from BinaryData
+    juce::Image logoImage;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MilkDAWpAudioProcessorEditor)
 };
