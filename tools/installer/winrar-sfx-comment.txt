@@ -1,0 +1,6 @@
+;The comment below contains SFX script commands
+Title=MilkDAWp VST3 (Per-User) Installer
+Path=%LOCALAPPDATA%\Programs\Common\VST3
+SavePath
+Overwrite=1
+Silent=0
