@@ -73,8 +73,8 @@ private:
     bool lastWantWindow { false };
     bool lastVisibleStateLogged { false };
 
-    // Helper: are we safely on the desktop (peer created)?
-    bool isOnDesktop() const noexcept { return getPeer() != nullptr && isShowing(); }
+    // Helper: consider ourselves on desktop as soon as we have a peer (visibility may follow shortly)
+    bool isOnDesktop() const noexcept { return getPeer() != nullptr; }
 
     // NEW: APVTS listener hook
     void parameterChanged(const juce::String& paramID, float newValue) override;

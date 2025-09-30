@@ -335,13 +335,14 @@ void VisualizationWindow::GLComponent::attachIfReady()
 
     const bool havePeer = (getPeer() != nullptr);
     const bool showing = isShowing();
+    const bool visible = isVisible();
     const bool nonZero = getWidth() > 0 && getHeight() > 0;
 
-    // Attach only when component is actually showing, has a peer, and non-zero size
-    if (!havePeer || !showing || !nonZero)
+    // Attach when component has a peer, non-zero size, and is either showing (on-screen) or at least visible (docked case)
+    if (!havePeer || !nonZero || (!showing && !visible))
     {
         MDW_LOG("UI", juce::String("GLComponent: attachIfReady waiting - peer=") + (havePeer?"yes":"no") +
-            ", showing=" + (showing?"yes":"no") + ", size=" + juce::String(getWidth()) + "x" + juce::String(getHeight()));
+            ", showing=" + (showing?"yes":"no") + ", visible=" + (visible?"yes":"no") + ", size=" + juce::String(getWidth()) + "x" + juce::String(getHeight()));
         return;
     }
 

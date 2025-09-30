@@ -20,6 +20,12 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     processor.apvts.addParameterListener("showWindow", this);
     processor.apvts.addParameterListener("fullscreen", this);
     processor.apvts.addParameterListener("presetIndex", this);
+    // Also listen to visual params so we can push immediate updates to the renderer
+    processor.apvts.addParameterListener("ampScale", this);
+    processor.apvts.addParameterListener("speed", this);
+    processor.apvts.addParameterListener("colorHue", this);
+    processor.apvts.addParameterListener("colorSat", this);
+    processor.apvts.addParameterListener("seed", this);
     // Listen to full APVTS state changes (e.g., when the host restores state via setStateInformation)
     processor.apvts.state.addListener(this);
 
@@ -267,6 +273,13 @@ void MilkDAWpAudioProcessorEditor::refreshPresetPathFromState()
         else
             visWindow->loadPresetByPath("idle://", true);
     }
+    else
+    {
+        // If a preset was restored and the user wants the window, create/show it now
+        const bool want = processor.apvts.getRawParameterValue("showWindow")->load() > 0.5f;
+        if (want)
+            handleShowWindowChangeOnUI(true);
+    }
 }
 
 // Ensure GL teardown runs on the UI thread and only once
@@ -331,17 +344,16 @@ void MilkDAWpAudioProcessorEditor::visibilityChanged()
         return;
     }
 
-    if (!glShutdownRequested.load())
+    // We are visible again; clear any prior shutdown gate and (re)start the timer
+    glShutdownRequested.store(false);
+    startTimerHz(15);
+    MDW_LOG("UI", "Editor: timer (re)started");
+    // Auto-start visualization if requested
+    if (getPeer() != nullptr)
     {
-        startTimerHz(15);
-        MDW_LOG("UI", "Editor: timer (re)started");
-        // Auto-start visualization if requested
-        if (getPeer() != nullptr)
-        {
-            const bool want = processor.apvts.getRawParameterValue("showWindow")->load() > 0.5f;
-            if (want && !visWindow)
-                handleShowWindowChangeOnUI(true);
-        }
+        const bool want = processor.apvts.getRawParameterValue("showWindow")->load() > 0.5f;
+        if (want && !visWindow)
+            handleShowWindowChangeOnUI(true);
     }
 }
 
@@ -353,6 +365,16 @@ void MilkDAWpAudioProcessorEditor::parentHierarchyChanged()
     {
         shutdownGLOnMessageThread();
         destroyVisWindowOnMessageThread();
+    }
+    else
+    {
+        // We just got a peer: clear shutdown gate, ensure our timer is running and auto-create the vis window if requested
+        glShutdownRequested.store(false);
+        startTimerHz(15);
+        MDW_LOG("UI", "Editor: timer (re)started (parentHierarchyChanged)");
+        const bool want = processor.apvts.getRawParameterValue("showWindow")->load() > 0.5f;
+        if (want && !visWindow)
+            handleShowWindowChangeOnUI(true);
     }
 }
 
@@ -389,6 +411,11 @@ MilkDAWpAudioProcessorEditor::~MilkDAWpAudioProcessorEditor()
     processor.apvts.removeParameterListener("showWindow", this);
     processor.apvts.removeParameterListener("fullscreen", this);
     processor.apvts.removeParameterListener("presetIndex", this);
+    processor.apvts.removeParameterListener("ampScale", this);
+    processor.apvts.removeParameterListener("speed", this);
+    processor.apvts.removeParameterListener("colorHue", this);
+    processor.apvts.removeParameterListener("colorSat", this);
+    processor.apvts.removeParameterListener("seed", this);
     processor.apvts.state.removeListener(this);
 
     stopTimer();
@@ -557,6 +584,25 @@ void MilkDAWpAudioProcessorEditor::parameterChanged(const juce::String& paramID,
             }
         });
     }
+    else if (paramID == "ampScale" || paramID == "speed" || paramID == "colorHue" || paramID == "colorSat" || paramID == "seed")
+    {
+        juce::Component::SafePointer<MilkDAWpAudioProcessorEditor> editorSP(this);
+        juce::MessageManager::callAsync([editorSP]()
+        {
+            if (editorSP == nullptr) return;
+            if (editorSP->visWindow)
+            {
+                const float amp = editorSP->processor.apvts.getRawParameterValue("ampScale")->load();
+                const float spd = editorSP->processor.apvts.getRawParameterValue("speed")->load();
+                const float h   = editorSP->processor.apvts.getRawParameterValue("colorHue")->load();
+                const float sat = editorSP->processor.apvts.getRawParameterValue("colorSat")->load();
+                const int sd    = (int) editorSP->processor.apvts.getRawParameterValue("seed")->load();
+                editorSP->visWindow->setVisualParams(amp, spd);
+                editorSP->visWindow->setColorParams(h, sat);
+                editorSP->visWindow->setSeed(sd);
+            }
+        });
+    }
 }
 
 // NEW: UI-thread logic for showWindow changes
@@ -606,8 +652,9 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
             visWindow->setVisualParams(amp, spd);
             visWindow->setColorParams(h, sat);
             visWindow->setSeed(sd);
-            if (!visWindow->isDocked())
-                visWindow->setFullScreenParam(wantFullscreen);
+            // Apply fullscreen if requested via the proper path (will undock if needed)
+            if (wantFullscreen)
+                handleFullscreenChangeOnUI(true);
             // Apply preset: prefer a manually chosen path, otherwise use the automatable preset index
             if (! lastPresetPath.isEmpty())
                 visWindow->loadPresetByPath(lastPresetPath, true);
@@ -683,7 +730,9 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
 
         if (visWindow)
         {
-            if (!visWindow->isDocked())
+            if (wantFullscreen && visWindow->isDocked())
+                handleFullscreenChangeOnUI(true);
+            else
                 visWindow->setFullScreenParam(wantFullscreen);
             visWindow->setVisualParams(amp, spd);
             visWindow->setColorParams(h, sat);
@@ -836,8 +885,9 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
         visWindow->setVisualParams(amp, spd);
         visWindow->setColorParams(h, sat);
         visWindow->setSeed(sd);
-        if (!visWindow->isDocked())
-            visWindow->setFullScreenParam(wantFullscreen);
+        // Apply fullscreen if requested via the proper path (will undock if needed)
+        if (wantFullscreen)
+            handleFullscreenChangeOnUI(true);
         // Apply preset: prefer a manually chosen path, otherwise use the automatable preset index
         if (! lastPresetPath.isEmpty())
             visWindow->loadPresetByPath(lastPresetPath, true);
