@@ -210,6 +210,36 @@ exit /b 0
             "${CMAKE_BINARY_DIR}/post-build-MilkDAWp_VST3.bat"
             "${CMAKE_BINARY_DIR}/CMakeFiles/MilkDAWp_VST3.dir/post-build.bat"
     VERBATIM)
+
+  # Stage vcpkg DLLs next to the plugin binary (for distribution when using dynamic triplets)
+  if (NOT VCPKG_TARGET_TRIPLET MATCHES "-static$" AND NOT _VCPKG_BIN_DIR STREQUAL "")
+    add_custom_command(TARGET MilkDAWp_VST3 POST_BUILD
+      COMMAND "${CMAKE_COMMAND}" "-Dsrc=${_VCPKG_BIN_DIR}/glew32.dll"           "-Ddst=$<TARGET_FILE_DIR:MilkDAWp_VST3>/glew32.dll"           -P "${CMAKE_SOURCE_DIR}/cmake/CopyFileIfExists.cmake"
+      COMMAND "${CMAKE_COMMAND}" "-Dsrc=${_VCPKG_BIN_DIR}/projectM-4.dll"       "-Ddst=$<TARGET_FILE_DIR:MilkDAWp_VST3>/projectM-4.dll"       -P "${CMAKE_SOURCE_DIR}/cmake/CopyFileIfExists.cmake"
+      VERBATIM)
+    if (TARGET libprojectM::playlist)
+      add_custom_command(TARGET MilkDAWp_VST3 POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" "-Dsrc=${_VCPKG_BIN_DIR}/projectM-4-playlist.dll" "-Ddst=$<TARGET_FILE_DIR:MilkDAWp_VST3>/projectM-4-playlist.dll" -P "${CMAKE_SOURCE_DIR}/cmake/CopyFileIfExists.cmake"
+        VERBATIM)
+    endif()
+    if (MILKDAWP_STAGE_ALL_VCPKG_DLLS)
+      add_custom_command(TARGET MilkDAWp_VST3 POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${_VCPKG_BIN_DIR}" "$<TARGET_FILE_DIR:MilkDAWp_VST3>"
+        VERBATIM)
+    endif()
+  endif()
+
+  # Packaging target: create a zip with the .vst3 bundle for distribution
+  set(_DIST_DIR "${CMAKE_BINARY_DIR}/dist")
+  add_custom_target(package_vst3_zip
+    DEPENDS MilkDAWp_VST3
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_DIST_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_DIST_DIR}/MilkDAWp.vst3"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "$<TARGET_FILE_DIR:MilkDAWp_VST3>/.." "${_DIST_DIR}/MilkDAWp.vst3"
+    # Use PowerShell to zip for maximum compatibility on Windows
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Force -Path '${_DIST_DIR}/MilkDAWp.vst3' -DestinationPath '${CMAKE_BINARY_DIR}/MilkDAWp-v${PROJECT_VERSION}-win64.zip'"
+    COMMENT "Packaging MilkDAWp.vst3 into zip archive for distribution"
+    VERBATIM)
 endif()
 
 # Deploy target: copy the built bundle to the per-user VST3 folder (no admin required).
