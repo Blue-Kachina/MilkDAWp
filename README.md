@@ -25,7 +25,8 @@ Recently, I found out about [ReaPlugs VST FX Suite](https://www.reaper.fm/reaplu
 Big shoutout to those devs!\
 I started using `reastream` to get audio from my DAW into OBS for live-streaming.\
 It saved me from having to run extra wires just for loopback, and also got me thinking that VST can be used for other things instead of just for manipulating audio.
-So, if I could only get a VST plugin to render visualizations, then I could also use automation features built into most DAWs in order to get the precision of control that I wanted.  
+So, if I could only get a VST plugin to render visualizations, then I could also use automation features built into most DAWs in order to get the level of precision control that I was seeking.  
+*One of my goals right now is to get this to a point where preset changes can be automated*
 
 ## Usage Notes
 If you're like me, and are also looking for a way to make music videos, then it seems like using this with reastream into OBS is a good option.  Unless of course you have an audio interface that is equipped with loopback already.
