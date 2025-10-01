@@ -4,6 +4,57 @@
 #include "../utils/Logging.h"
 #include "VisualizationWindow.h"
 
+namespace Icons {
+    // Helper: create a Drawable from an inline SVG string and tint it to the given colour
+    static std::unique_ptr<juce::Drawable> createFromSvgString(const juce::String& svg, juce::Colour tint)
+    {
+        juce::XmlDocument doc(svg);
+        auto xml = doc.getDocumentElement();
+        if (!xml)
+            return {};
+        auto drawable = juce::Drawable::createFromSVG(*xml);
+        if (!drawable)
+            return {};
+        // The bundled SVG paths use black fills; replace them with the requested tint
+        drawable->replaceColour(juce::Colours::black, tint);
+        // Also normalize any white to tint (in case of stroke usage)
+        drawable->replaceColour(juce::Colours::white, tint);
+        return drawable;
+    }
+
+    // Material Design icon: "fullscreen" (Outlined), 24px grid, Apache-2.0
+    static std::unique_ptr<juce::Drawable> createFullscreenIcon(juce::Colour colour)
+    {
+        static const char* svg =
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+            "<path fill='#000000' d='M7 14H5v5h5v-2H7v-3zm0-9H5v5h2V7h3V5H7zm10 0h-5v2h3v3h2V5zm-5 14h5v-5h-2v3h-3v2z'/>"
+            "</svg>";
+        return createFromSvgString(svg, colour);
+    }
+
+    // Material Design icon: "open_in_new" (Outlined), 24px grid, Apache-2.0
+    static std::unique_ptr<juce::Drawable> createPopOutIcon(juce::Colour colour)
+    {
+        static const char* svg =
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+            "<path fill='#000000' d='M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42L17.59 5H14V3z'/>"
+            "<path fill='#000000' d='M5 5h5V3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-5h-2v5H5V5z'/>"
+            "</svg>";
+        return createFromSvgString(svg, colour);
+    }
+
+    static void setIconStates(juce::DrawableButton& btn,
+                              std::unique_ptr<juce::Drawable> normal,
+                              std::unique_ptr<juce::Drawable> over,
+                              std::unique_ptr<juce::Drawable> down,
+                              std::unique_ptr<juce::Drawable> normalOn,
+                              std::unique_ptr<juce::Drawable> overOn,
+                              std::unique_ptr<juce::Drawable> downOn) {
+        btn.setImages(normal.get(), over.get(), down.get(), nullptr,
+                      normalOn.get(), overOn.get(), downOn.get(), nullptr);
+    }
+}
+
 // ===== EditorGLComponent (embedded GL) =====
 // Removed: embedded OpenGL preview inside the editor
 
@@ -87,78 +138,32 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     addAndMakeVisible(btnFullscreen);
     addAndMakeVisible(btnPopOut);
     
-    // Style the fullscreen toggle as an icon button (now uses the "external" square-with-arrow icon)
+    // Style the fullscreen toggle using the Icons library (four-corner fullscreen glyph)
     btnFullscreen.setTooltip("Toggle fullscreen");
     btnFullscreen.setClickingTogglesState(true);
     {
-        auto makePopIcon = [](juce::Colour c) {
-            auto dp = std::make_unique<juce::DrawablePath>();
-            juce::Path p;
-            const float s = 24.0f;
-            const float m = 4.0f;
-            // Draw a square frame
-            p.addRectangle(m, m, s - 2*m, s - 2*m);
-            // Draw an arrow exiting to top-right
-            juce::Path arrow;
-            const float ax0 = s/2.4f, ay0 = s/2.4f;
-            const float ax1 = s - m - 2.0f, ay1 = m + 2.0f;
-            arrow.startNewSubPath(ax0, ay0); arrow.lineTo(ax1, ay1);
-            // Arrow head at (ax1, ay1)
-            arrow.startNewSubPath(ax1, ay1); arrow.lineTo(ax1 - 6.0f, ay1);
-            arrow.startNewSubPath(ax1, ay1); arrow.lineTo(ax1, ay1 + 6.0f);
-            p.addPath(arrow);
-            dp->setPath(p);
-            dp->setFill(juce::Colours::transparentBlack);
-            dp->setStrokeFill(c);
-            dp->setStrokeThickness(2.0f);
-            return dp;
-        };
-        auto normal   = makePopIcon(juce::Colours::lightgrey);
-        auto over     = makePopIcon(juce::Colours::white);
-        auto down     = makePopIcon(juce::Colours::orange);
-        auto normalOn = makePopIcon(juce::Colours::aqua);
-        auto overOn   = makePopIcon(juce::Colours::cyan);
-        auto downOn   = makePopIcon(juce::Colours::skyblue);
-        btnFullscreen.setImages(normal.get(), over.get(), down.get(), nullptr,
-                                normalOn.get(), overOn.get(), downOn.get(), nullptr);
-        // drawables will be cloned internally by setImages; locals can be discarded
+        auto normal   = Icons::createFullscreenIcon(juce::Colours::lightgrey);
+        auto over     = Icons::createFullscreenIcon(juce::Colours::white);
+        auto down     = Icons::createFullscreenIcon(juce::Colours::orange);
+        auto normalOn = Icons::createFullscreenIcon(juce::Colours::aqua);
+        auto overOn   = Icons::createFullscreenIcon(juce::Colours::cyan);
+        auto downOn   = Icons::createFullscreenIcon(juce::Colours::skyblue);
+        Icons::setIconStates(btnFullscreen, std::move(normal), std::move(over), std::move(down),
+                             std::move(normalOn), std::move(overOn), std::move(downOn));
     }
 
-    // Style the Pop Out toggle as an icon button (now uses the diagonal double-arrow icon)
+    // Style the Pop Out toggle using the Icons library (window with pop-out arrow)
     btnPopOut.setTooltip("Pop out visualization to a separate window");
     btnPopOut.setClickingTogglesState(true);
     {
-        auto makeIcon = [](juce::Colour c) {
-            auto dp = std::make_unique<juce::DrawablePath>();
-            juce::Path p;
-            const float s = 24.0f; // icon square
-            const float m = 4.0f;  // margin
-            const float a = m + 3.0f;
-            const float b = s - m - 3.0f;
-            const float head = 6.0f; // arrowhead size
-            // Diagonal double-arrow: ↘ and ↖ along the same diagonal
-            // Shaft
-            p.startNewSubPath(a, a); p.lineTo(b, b);
-            // Arrowhead for ↘ at (b,b)
-            p.startNewSubPath(b, b); p.lineTo(b, b - head);
-            p.startNewSubPath(b, b); p.lineTo(b - head, b);
-            // Arrowhead for ↖ at (a,a)
-            p.startNewSubPath(a, a); p.lineTo(a, a + head);
-            p.startNewSubPath(a, a); p.lineTo(a + head, a);
-            dp->setPath(p);
-            dp->setFill(juce::Colours::transparentBlack);
-            dp->setStrokeFill(c);
-            dp->setStrokeThickness(2.0f);
-            return dp;
-        };
-        auto normal   = makeIcon(juce::Colours::lightgrey);
-        auto over     = makeIcon(juce::Colours::white);
-        auto down     = makeIcon(juce::Colours::orange);
-        auto normalOn = makeIcon(juce::Colours::aqua);
-        auto overOn   = makeIcon(juce::Colours::cyan);
-        auto downOn   = makeIcon(juce::Colours::skyblue);
-        btnPopOut.setImages(normal.get(), over.get(), down.get(), nullptr,
-                            normalOn.get(), overOn.get(), downOn.get(), nullptr);
+        auto normal   = Icons::createPopOutIcon(juce::Colours::lightgrey);
+        auto over     = Icons::createPopOutIcon(juce::Colours::white);
+        auto down     = Icons::createPopOutIcon(juce::Colours::orange);
+        auto normalOn = Icons::createPopOutIcon(juce::Colours::aqua);
+        auto overOn   = Icons::createPopOutIcon(juce::Colours::cyan);
+        auto downOn   = Icons::createPopOutIcon(juce::Colours::skyblue);
+        Icons::setIconStates(btnPopOut, std::move(normal), std::move(over), std::move(down),
+                             std::move(normalOn), std::move(overOn), std::move(downOn));
     }
 
     // Attach fullscreen to APVTS param
@@ -926,7 +931,8 @@ void MilkDAWpAudioProcessorEditor::handleFullscreenChangeOnUI(bool wantFullscree
         // Exit fullscreen first
         visWindow->setFullScreenParam(false);
         // Restore to the previously remembered pop-out state regardless of current toggle
-        if (previousPopoutWasDocked)
+        const bool shouldDock = previousPopoutWasDocked;
+        if (shouldDock)
         {
             visWindow->dockTo(this);
             // Lay out immediately to restore docked bounds
@@ -941,6 +947,10 @@ void MilkDAWpAudioProcessorEditor::handleFullscreenChangeOnUI(bool wantFullscree
             }
             visWindow->toFront(true);
         }
+        // Update the Pop Out UI/toggle to reflect the actual state after exiting fullscreen
+        popOutDesired = !shouldDock;
+        if (btnPopOut.getToggleState() != popOutDesired)
+            btnPopOut.setToggleState(popOutDesired, juce::dontSendNotification);
         // Reset guard after exiting fullscreen
         previousPopoutStateCaptured = false;
     }

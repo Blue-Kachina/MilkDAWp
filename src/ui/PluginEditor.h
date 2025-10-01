@@ -31,6 +31,9 @@ protected:
 private:
     MilkDAWpAudioProcessor& processor;
 
+    // Tooltip host to enable tooltips across the editor
+    juce::TooltipWindow tooltipWindow { this, 800 };
+
     juce::Label meterLabel;
 
     juce::DrawableButton btnFullscreen { "Fullscreen", juce::DrawableButton::ImageOnButtonBackground };

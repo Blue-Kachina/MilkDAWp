@@ -42,7 +42,7 @@ juce_add_plugin(MilkDAWp
         IS_MIDI_EFFECT FALSE
         NEEDS_MIDI_INPUT FALSE
         NEEDS_MIDI_OUTPUT FALSE
-        VST3_CATEGORIES "Fx" "Analyzer"
+        VST3_CATEGORIES "Fx" "Analyzer" "Visualization"
         FORMATS VST3
         PRODUCT_NAME "MilkDAWp"
         PLUGIN_MANUFACTURER_CODE OMed
