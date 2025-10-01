@@ -43,6 +43,25 @@ namespace Icons {
         return createFromSvgString(svg, colour);
     }
 
+    // Simple chevrons for prev/next
+    static std::unique_ptr<juce::Drawable> createChevronLeft(juce::Colour colour)
+    {
+        static const char* svg =
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+            "<path fill='#000000' d='M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z'/>"
+            "</svg>";
+        return createFromSvgString(svg, colour);
+    }
+
+    static std::unique_ptr<juce::Drawable> createChevronRight(juce::Colour colour)
+    {
+        static const char* svg =
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+            "<path fill='#000000' d='m8.59 16.59 1.41 1.41 6-6-6-6-1.41 1.41L13.17 12z'/>"
+            "</svg>";
+        return createFromSvgString(svg, colour);
+    }
+
     static void setIconStates(juce::DrawableButton& btn,
                               std::unique_ptr<juce::Drawable> normal,
                               std::unique_ptr<juce::Drawable> over,
@@ -246,12 +265,25 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     presetLabel.setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(presetLabel);
     addAndMakeVisible(presetBox);
-    presetBox.setVisible(false); // avoid heavy scanning UI; use Load Preset button instead
+    presetBox.setVisible(false); // used only as playlist dropdown
     presetBox.onChange = [this]() {
         const int idx = presetBox.getSelectedItemIndex();
-        setPresetParam(idx);
-        if (visWindow)
-            visWindow->setPresetIndex(idx);
+        if (playlistActive && idx >= 0 && idx < playlistItems.size())
+        {
+            playlistIndex = idx;
+            auto path = playlistItems[(int) idx].getFullPathName();
+            lastPresetPath = path;
+            processor.apvts.state.setProperty("presetPath", lastPresetPath, nullptr);
+            currentPresetLabel.setText(playlistItems[(int) idx].getFileName(), juce::dontSendNotification);
+            if (visWindow)
+                visWindow->loadPresetByPath(lastPresetPath, true);
+        }
+        else
+        {
+            setPresetParam(idx);
+            if (visWindow)
+                visWindow->setPresetIndex(idx);
+        }
     };
 
     // New: lazy preset loading controls
@@ -263,9 +295,46 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     currentPresetLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     currentPresetLabel.setColour(juce::Label::backgroundColourId, juce::Colours::darkgrey.darker(0.4f));
 
+    // Transport buttons (prev/next) for playlist mode
+    addAndMakeVisible(btnPrev);
+    addAndMakeVisible(btnNext);
+    btnPrev.setVisible(false);
+    btnNext.setVisible(false);
+    btnPrev.setTooltip("Previous preset in playlist");
+    btnNext.setTooltip("Next preset in playlist");
+    {
+        auto normal   = Icons::createChevronLeft(juce::Colours::lightgrey);
+        auto over     = Icons::createChevronLeft(juce::Colours::white);
+        auto down     = Icons::createChevronLeft(juce::Colours::orange);
+        auto normalOn = Icons::createChevronLeft(juce::Colours::aqua);
+        auto overOn   = Icons::createChevronLeft(juce::Colours::cyan);
+        auto downOn   = Icons::createChevronLeft(juce::Colours::skyblue);
+        Icons::setIconStates(btnPrev, std::move(normal), std::move(over), std::move(down), std::move(normalOn), std::move(overOn), std::move(downOn));
+    }
+    {
+        auto normal   = Icons::createChevronRight(juce::Colours::lightgrey);
+        auto over     = Icons::createChevronRight(juce::Colours::white);
+        auto down     = Icons::createChevronRight(juce::Colours::orange);
+        auto normalOn = Icons::createChevronRight(juce::Colours::aqua);
+        auto overOn   = Icons::createChevronRight(juce::Colours::cyan);
+        auto downOn   = Icons::createChevronRight(juce::Colours::skyblue);
+        Icons::setIconStates(btnNext, std::move(normal), std::move(over), std::move(down), std::move(normalOn), std::move(overOn), std::move(downOn));
+    }
+
+    btnPrev.onClick = [this]() {
+        if (!playlistActive || playlistItems.isEmpty()) return;
+        playlistIndex = (playlistIndex - 1 + playlistItems.size()) % playlistItems.size();
+        presetBox.setSelectedItemIndex(playlistIndex, juce::sendNotificationSync);
+    };
+    btnNext.onClick = [this]() {
+        if (!playlistActive || playlistItems.isEmpty()) return;
+        playlistIndex = (playlistIndex + 1) % playlistItems.size();
+        presetBox.setSelectedItemIndex(playlistIndex, juce::sendNotificationSync);
+    };
+
     btnLoadPreset.onClick = [this]()
     {
-        // Resolve presets root directory (same heuristics as before, but no scanning here)
+        // Resolve presets root directory (same heuristics as before)
         juce::File initialDir;
         auto exe = juce::File::getSpecialLocation(juce::File::currentApplicationFile);
         auto bundleRoot = exe.getParentDirectory().getParentDirectory();
@@ -289,28 +358,99 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
             if (cwd.isDirectory()) initialDir = cwd;
         }
 
-        auto chooser = std::make_shared<juce::FileChooser>("Select a projectM preset (.milk)", initialDir, "*.milk");
-        chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        auto chooser = std::make_shared<juce::FileChooser>("Load preset (.milk) or playlist folder", initialDir, "*.milk");
+        int flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::canSelectDirectories;
+        chooser->launchAsync(flags,
             [this, chooser](const juce::FileChooser& fc) mutable
             {
                 juce::File f = fc.getResult();
-                if (f.existsAsFile())
+                if (! f.exists()) return;
+
+                if (f.isDirectory())
                 {
+                    // Treat directory as a playlist: scan for .milk (non-recursive)
+                    playlistItems.clear();
+                    playlistRoot = f;
+                    juce::DirectoryIterator it(f, false, "*.milk", juce::File::findFiles);
+                    while (it.next())
+                        playlistItems.add(it.getFile());
+
+                    struct FileNameLess { int compareElements(const juce::File& a, const juce::File& b) const { return a.getFileName().toLowerCase().compare(b.getFileName().toLowerCase()); } } cmp;
+                    playlistItems.sort(cmp);
+
+                    playlistActive = playlistItems.size() > 0;
+                    if (playlistActive)
+                    {
+                        // Populate dropdown with playlist items
+                        presetBox.clear(juce::dontSendNotification);
+                        for (int i = 0; i < playlistItems.size(); ++i)
+                            presetBox.addItem(playlistItems.getReference(i).getFileName(), i + 1);
+                        presetBox.setSelectedItemIndex(0, juce::dontSendNotification);
+                        presetBox.setVisible(true);
+                        currentPresetLabel.setVisible(false);
+                        // Show transport
+                        btnPrev.setVisible(true);
+                        btnNext.setVisible(true);
+                        // Load first preset
+                        playlistIndex = 0;
+                        lastPresetPath = playlistItems[0].getFullPathName();
+                        processor.apvts.state.setProperty("presetPath", lastPresetPath, nullptr);
+                        currentPresetLabel.setText(playlistItems[0].getFileName(), juce::dontSendNotification);
+                        btnLoadPreset.setTooltip(playlistRoot.getFullPathName());
+                        if (visWindow)
+                            visWindow->loadPresetByPath(lastPresetPath, true);
+                        // Re-layout now that controls changed visibility
+                        this->resized();
+                    }
+                    else
+                    {
+                        // Empty folder: deactivate playlist UI
+                        playlistActive = false;
+                        presetBox.setVisible(false);
+                        currentPresetLabel.setVisible(true);
+                        btnPrev.setVisible(false);
+                        btnNext.setVisible(false);
+                        // Re-layout now that controls changed visibility
+                        this->resized();
+                    }
+                }
+                else if (f.existsAsFile())
+                {
+                    // Single preset
+                    playlistActive = false;
+                    playlistItems.clear();
+                    playlistIndex = -1;
+                    presetBox.setVisible(false);
+                    currentPresetLabel.setVisible(true);
+                    btnPrev.setVisible(false);
+                    btnNext.setVisible(false);
+
                     lastPresetPath = f.getFullPathName();
-                    // Persist selected preset path in processor state so it survives editor close and host preset save
                     processor.apvts.state.setProperty("presetPath", lastPresetPath, nullptr);
                     currentPresetLabel.setText(f.getFileName(), juce::dontSendNotification);
                     btnLoadPreset.setTooltip(f.getFullPathName());
                     if (visWindow)
                         visWindow->loadPresetByPath(lastPresetPath, true);
+                    // Re-layout now that controls changed visibility
+                    this->resized();
                 }
             });
     };
 
     btnClearPreset.onClick = [this]()
     {
+        // Deactivate playlist mode and clear current preset
+        playlistActive = false;
+        playlistItems.clear();
+        playlistIndex = -1;
+        presetBox.clear(juce::dontSendNotification);
+        presetBox.setVisible(false);
+        btnPrev.setVisible(false);
+        btnNext.setVisible(false);
+
+        currentPresetLabel.setVisible(true);
         currentPresetLabel.setText("(none)", juce::dontSendNotification);
-        btnLoadPreset.setTooltip("Select a projectM preset (.milk)");
+        btnLoadPreset.setTooltip("Load preset (.milk) or playlist folder");
         lastPresetPath.clear();
         // Persist cleared state
         processor.apvts.state.setProperty("presetPath", "", nullptr);
@@ -318,6 +458,8 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
             visWindow->loadPresetByPath("idle://", true);
         // Also clear the parameterized index to -1 equivalent (0 in APVTS range), to avoid unintended switches
         setPresetParam(0);
+        // Re-layout now that controls changed visibility
+        this->resized();
     };
 
     // Keep legacy box populated with a cheap placeholder (no scanning)
@@ -397,7 +539,7 @@ void MilkDAWpAudioProcessorEditor::refreshPresetPathFromState()
     else
     {
         currentPresetLabel.setText("(none)", juce::dontSendNotification);
-        btnLoadPreset.setTooltip("Select a projectM preset (.milk)");
+        btnLoadPreset.setTooltip("Load preset (.milk) or playlist folder");
     }
 
     if (visWindow)
@@ -609,11 +751,41 @@ void MilkDAWpAudioProcessorEditor::resized()
     // Padding between header and preset row (increased by +20 to make room for taller logo)
     r.removeFromTop(32);
 
-    // Preset selector row (lazy)
+    // Preset/playlist row
     auto row = r.removeFromTop(28);
-    presetLabel.setBounds(row.removeFromLeft(60));
+    // Transport area (expanded, replaces type label)
+    auto transportArea = row.removeFromLeft(240);
+    if (playlistActive)
+    {
+        auto ta = transportArea;
+        auto h = juce::jmin(24, ta.getHeight());
+        auto ymid = ta.getY() + (ta.getHeight() - h) / 2;
+        auto leftBtn = ta.removeFromLeft(28).withSizeKeepingCentre(24, h).withY(ymid);
+        ta.removeFromLeft(4);
+        auto rightBtn = ta.removeFromLeft(28).withSizeKeepingCentre(24, h).withY(ymid);
+        btnPrev.setBounds(leftBtn);
+        btnNext.setBounds(rightBtn);
+        btnPrev.setVisible(true);
+        btnNext.setVisible(true);
+    }
+    else
+    {
+        btnPrev.setVisible(false);
+        btnNext.setVisible(false);
+    }
     row.removeFromLeft(6);
-    currentPresetLabel.setBounds(row.removeFromLeft(juce::jmax(180, row.getWidth() - 250)));
+    if (playlistActive)
+    {
+        presetBox.setVisible(true);
+        currentPresetLabel.setVisible(false);
+        presetBox.setBounds(row.removeFromLeft(juce::jmax(180, row.getWidth() - 250)));
+    }
+    else
+    {
+        presetBox.setVisible(false);
+        currentPresetLabel.setVisible(true);
+        currentPresetLabel.setBounds(row.removeFromLeft(juce::jmax(180, row.getWidth() - 250)));
+    }
     row.removeFromLeft(6);
     btnLoadPreset.setBounds(row.removeFromLeft(150));
     row.removeFromLeft(6);

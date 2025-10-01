@@ -54,13 +54,21 @@ private:
     juce::Label seedLabel { {}, "Easter Egg" };
 
     // Preset selector UI
-    juce::Label presetLabel { {}, "Preset:" };
-    juce::ComboBox presetBox;
+    juce::Label presetLabel { {}, "" }; // Type label area repurposed for transport panel
+    juce::ComboBox presetBox; // Used as playlist dropdown when a playlist is active
     juce::StringArray presetPaths; // full paths to match renderer
     // New: lazy loading UI (avoids heavy scanning)
-    juce::TextButton btnLoadPreset { "Load Preset" };
+    juce::TextButton btnLoadPreset { "Load" };
     juce::TextButton btnClearPreset { "Clear" };
     juce::Label currentPresetLabel { {}, "(none)" };
+
+    // Playlist / transport state and controls
+    bool playlistActive { false };
+    juce::Array<juce::File> playlistItems;
+    int playlistIndex { -1 };
+    juce::File playlistRoot;
+    juce::DrawableButton btnPrev { "Prev", juce::DrawableButton::ImageOnButtonBackground };
+    juce::DrawableButton btnNext { "Next", juce::DrawableButton::ImageOnButtonBackground };
 
     // External visualization window
     std::unique_ptr<VisualizationWindow> visWindow;
