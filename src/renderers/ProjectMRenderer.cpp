@@ -74,7 +74,40 @@ out vec3 vCol;
 void main(){ vCol=aCol; gl_Position=vec4(aPos,0.0,1.0); })";
 static const char* FS_150 = R"(#version 150 core
 in vec3 vCol; out vec4 FragColor;
-void main(){ FragColor=vec4(vCol,1.0); })";
+uniform float uHue; // 0..1
+uniform float uSat; // 0..1
+uniform float uLevel; // 0..1
+uniform float uMesh; // pixels ~ 16..160
+uniform float uSeed; // arbitrary
+
+vec3 hsv2rgb(float h, float s, float v){
+    h = mod(mod(h, 1.0) + 1.0, 1.0);
+    s = clamp(s, 0.0, 1.0);
+    v = clamp(v, 0.0, 1.0);
+    if (s <= 0.00001) return vec3(v);
+    float hf = h * 6.0;
+    int i = int(floor(hf));
+    float f = hf - float(i);
+    float p = v * (1.0 - s);
+    float q = v * (1.0 - s * f);
+    float t = v * (1.0 - s * (1.0 - f));
+    if (i == 0) return vec3(v, t, p);
+    else if (i == 1) return vec3(q, v, p);
+    else if (i == 2) return vec3(p, v, t);
+    else if (i == 3) return vec3(p, q, v);
+    else if (i == 4) return vec3(t, p, v);
+    else return vec3(v, p, q);
+}
+
+void main(){
+    // simple checker/grid by mesh size and seed
+    float mesh = max(1.0, uMesh);
+    vec2 cell = floor(gl_FragCoord.xy / mesh + vec2(uSeed * 0.013, uSeed * 0.021));
+    float checker = mod(cell.x + cell.y, 2.0);
+    float v = mix(uLevel * 0.5, uLevel, checker);
+    vec3 rgb = hsv2rgb(uHue, uSat, v);
+    FragColor = vec4(rgb, 1.0);
+})";
 
 // TEST-only, attribute-free shader (gl_VertexID)
 static const char* TEST_VS_150 = R"(#version 150 core
@@ -255,11 +288,18 @@ void ProjectMRenderer::newOpenGLContextCreated()
 
     program = tryMakeProgram(VS_150, FS_150);
     if (!program) { MDW_LOG("GL", "newOpenGLContextCreated: shader program null"); return; }
-    // Bind once to query attributes, then unbind to keep fixed-function available for projectM
+    // Bind once to query attributes and uniforms, then unbind to keep fixed-function available for projectM
     program->use();
 
     attrPos = std::make_unique<OpenGLShaderProgram::Attribute>(*program, "aPos");
     attrCol = std::make_unique<OpenGLShaderProgram::Attribute>(*program, "aCol");
+    // Fallback shader uniforms
+    uHueUniform.reset(new OpenGLShaderProgram::Uniform(*program, "uHue"));
+    uSatUniform.reset(new OpenGLShaderProgram::Uniform(*program, "uSat"));
+    uLevelUniform.reset(new OpenGLShaderProgram::Uniform(*program, "uLevel"));
+    uMeshUniform.reset(new OpenGLShaderProgram::Uniform(*program, "uMesh"));
+    uSeedUniform.reset(new OpenGLShaderProgram::Uniform(*program, "uSeed"));
+
     // Important: leave no program bound so projectM (fixed-function) can render if needed
     context.extensions.glUseProgram(0);
     MDW_LOG("GL", juce::String("Attributes: aPos=") + juce::String(attrPos ? attrPos->attributeID : -999)
@@ -808,7 +848,8 @@ void ProjectMRenderer::renderOpenGL()
                 for (int i = 0; i < got; ++i) acc += (double) tmp[i] * tmp[i];
                 float rms = std::sqrt((float)(acc / jmax(1, got)));
                 rms = juce::jlimit(0.0f, 2.0f, rms * amp);
-                const float a = 0.25f;
+                // Beat sensitivity affects envelope responsiveness: low=slow, high=snappy
+                const float a = juce::jmap(hue, 0.0f, 1.0f, 0.05f, 0.6f);
                 level = level + a * (rms - level);
                 fallbackLevel = level;
             }
@@ -854,6 +895,17 @@ void ProjectMRenderer::renderOpenGL()
 
     if (!program) { MDW_LOG("GL", "renderOpenGL: program missing"); return; }
     program->use();
+
+    // Update fallback uniforms so UI controls have visible impact without projectM
+    if (uHueUniform)  uHueUniform->set((GLfloat) hueAdj);
+    if (uSatUniform)  uSatUniform->set((GLfloat) sat);
+    if (uLevelUniform) uLevelUniform->set((GLfloat) juce::jlimit(0.0f, 1.0f, level));
+    // Map mesh size similarly to projectM: even 16..160 pixels
+    int meshPix = juce::jlimit(16, 160, (int) juce::roundToInt(16.0f + sat * (160.0f - 16.0f)));
+    if (meshPix % 2) meshPix += 1;
+    if (uMeshUniform) uMeshUniform->set((GLfloat) meshPix);
+    if (uSeedUniform) uSeedUniform->set((GLfloat) sd);
+
     {
         auto err = gl::glGetError();
         if (err != gl::GL_NO_ERROR)

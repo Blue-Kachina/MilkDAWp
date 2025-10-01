@@ -1,0 +1,11 @@
+Material Design Icons (Outlined set) by Google
+
+Source: https://fonts.google.com/icons
+License: Apache License 2.0
+
+Notice:
+This project includes or derives vector shapes from the Material Design Icons by Google. The icons are used as inline SVG paths embedded in the source (see src/ui/PluginEditor.cpp, namespace Icons). No icon font is distributed.
+
+Apache License Version 2.0 summary:
+You may use, reproduce, and distribute the icons, with or without modification, under the terms of the Apache License 2.0. For the full license text, see:
+https://www.apache.org/licenses/LICENSE-2.0

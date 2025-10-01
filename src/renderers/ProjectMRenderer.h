@@ -54,6 +54,12 @@ private:
     std::unique_ptr<juce::OpenGLShaderProgram> program;
     std::unique_ptr<juce::OpenGLShaderProgram::Attribute> attrPos;
     std::unique_ptr<juce::OpenGLShaderProgram::Attribute> attrCol;
+    // Fallback shader uniforms to reflect UI controls
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uHueUniform;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uSatUniform;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uLevelUniform;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uMeshUniform;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uSeedUniform;
 
     unsigned int vao = 0;
     unsigned int vbo = 0;
