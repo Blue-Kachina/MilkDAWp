@@ -176,12 +176,17 @@ private:
         std::atomic<bool> playlistDirty { false };
         // Requested playlist position (applied on GL thread)
         std::atomic<int>  desiredPlaylistPos { -1 };
-        std::atomic<bool> desiredPlaylistHardCut { true };
+        std::atomic<bool> desiredPlaylistHardCut { false };
         std::atomic<bool> playlistPosDirty { false };
         // Watchdog for auto-play progression (nudges playlist if internal auto stalls)
         int lastObservedPlaylistPos { -1 };
         double lastAutoWatchdogTimeSec { 0.0 };
         // Cached playlist position (updated on GL thread)
         std::atomic<int> currentPlaylistPos { -1 };
+        // Callbacks into this object from projectM (C API): must be static members
+        static void onProjectMSwitchRequested(bool isHardCut, void* userData) noexcept;
+       #if defined(HAVE_PROJECTM_PLAYLIST)
+        static void onPlaylistPresetSwitched(bool isHardCut, unsigned int index, void* userData) noexcept;
+       #endif
     #endif
 };

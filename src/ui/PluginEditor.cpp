@@ -295,11 +295,15 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
             {
                 if (visWindow->supportsProjectMAuto())
                 {
-                    visWindow->setProjectMPlaylistPosition(idx, true);
+                    const bool autoOn = processor.apvts.getRawParameterValue("autoPlay")->load() > 0.5f;
+                    const bool hardCut = autoOn ? (processor.apvts.getRawParameterValue("autoPlayHardCut")->load() > 0.5f) : false;
+                    visWindow->setProjectMPlaylistPosition(idx, hardCut);
                 }
                 else
                 {
-                    visWindow->loadPresetByPath(lastPresetPath, true);
+                    const bool autoOn = processor.apvts.getRawParameterValue("autoPlay")->load() > 0.5f;
+                    const bool hardCut = autoOn ? (processor.apvts.getRawParameterValue("autoPlayHardCut")->load() > 0.5f) : false;
+                    visWindow->loadPresetByPath(lastPresetPath, hardCut);
                 }
             }
         }
@@ -995,7 +999,7 @@ void MilkDAWpAudioProcessorEditor::parameterChanged(const juce::String& paramID,
             if (editorSP->visWindow)
             {
                 const bool autoOn = editorSP->processor.apvts.getRawParameterValue("autoPlay")->load() > 0.5f;
-                bool hardCut = true; // default for manual changes
+                bool hardCut = false; // default to soft for manual changes
                 if (autoOn)
                     hardCut = editorSP->processor.apvts.getRawParameterValue("autoPlayHardCut")->load() > 0.5f;
                 if (editorSP->visWindow->supportsProjectMAuto())
@@ -1648,20 +1652,22 @@ void MilkDAWpAudioProcessorEditor::restorePlaylistFromState()
         juce::StringArray paths;
         for (auto& f : playlistItems) paths.add(f.getFullPathName());
         visWindow->setProjectMPlaylist(paths);
+        // Determine transition style: default soft unless Auto-play with Hard Cut is enabled
+        const bool ap  = processor.apvts.getRawParameterValue("autoPlay")->load() > 0.5f;
+        const bool hct = processor.apvts.getRawParameterValue("autoPlayHardCut")->load() > 0.5f;
+        const bool hardCut = ap ? hct : false;
         // Load initial selection: prefer projectM playlist position when available
         if (visWindow->supportsProjectMAuto())
         {
-            visWindow->setProjectMPlaylistPosition(idx, true);
+            visWindow->setProjectMPlaylistPosition(idx, hardCut);
         }
         else
         {
-            visWindow->loadPresetByPath(lastPresetPath, true);
-            visWindow->setProjectMPlaylistPosition(idx, true);
+            visWindow->loadPresetByPath(lastPresetPath, hardCut);
+            visWindow->setProjectMPlaylistPosition(idx, hardCut);
         }
         // Push current auto-play flags
-        const bool ap  = processor.apvts.getRawParameterValue("autoPlay")->load() > 0.5f;
         const bool rnd = processor.apvts.getRawParameterValue("autoPlayRandom")->load() > 0.5f;
-        const bool hct = processor.apvts.getRawParameterValue("autoPlayHardCut")->load() > 0.5f;
         visWindow->setAutoPlayFlags(ap, rnd, hct);
     }
 

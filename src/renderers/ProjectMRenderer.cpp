@@ -42,6 +42,7 @@ using namespace juce;
     #include <projectM-4/parameters.h>
    #if defined(HAVE_PROJECTM_PLAYLIST)
     #include <projectM-4/playlist.h>
+    #include <projectM-4/playlist_callbacks.h>
    #endif
   }
   #define PM_HAVE_V4_C_API 1
@@ -224,13 +225,6 @@ bool ProjectMRenderer::setViewportForCurrentScale()
         if (pmReady && pmHandle)
         {
             projectm_set_window_size((projectm_handle) pmHandle, (size_t) fbWidth, (size_t) fbHeight);
-            // Reassert locked preset and disabled transitions after renderer reset
-            projectm_set_preset_locked((projectm_handle) pmHandle, true);
-            projectm_set_hard_cut_enabled((projectm_handle) pmHandle, false);
-            projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
-            // Make preset/transition timers effectively infinite to avoid library-driven cuts
-            projectm_set_preset_duration((projectm_handle) pmHandle, 36000.0);
-            projectm_set_hard_cut_duration((projectm_handle) pmHandle, 36000.0);
         }
       #endif
     }
@@ -585,10 +579,17 @@ void ProjectMRenderer::renderOpenGL()
                         MDW_LOG("PM", "SEH: projectm_load_preset_file threw during switch; continuing");
                     // Force-disable blending for this hard-cut switch to avoid any visual transition
                     projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
-                    // Reassert locked preset and disabled transitions
-                    projectm_set_preset_locked((projectm_handle) pmHandle, true);
-                    projectm_set_hard_cut_enabled((projectm_handle) pmHandle, false);
-                    projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
+                    // Reapply current autoplay/transition config right away
+                    {
+                        const bool apNow = autoPlayEnabled.load(std::memory_order_relaxed);
+                        const bool hcNow = autoPlayHardCut.load(std::memory_order_relaxed);
+                        projectm_set_preset_locked((projectm_handle) pmHandle, !apNow);
+                        // Always enable beat-based switch requests when autoplay is on; choose transition style separately
+                        projectm_set_hard_cut_enabled((projectm_handle) pmHandle, apNow);
+                        projectm_set_preset_duration((projectm_handle) pmHandle, 20.0);
+                        projectm_set_soft_cut_duration((projectm_handle) pmHandle, hcNow ? 0.0 : 3.0);
+                        projectm_set_hard_cut_duration((projectm_handle) pmHandle, 5.0);
+                    }
                     lastLoadedPresetIndex = want;
                     lastPresetPath = path;
                 }
@@ -606,15 +607,18 @@ void ProjectMRenderer::renderOpenGL()
                 MDW_LOG("PM", juce::String("Processing queued preset -> ") + path + (cut ? " (hard)" : " (soft)"));
                 if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, path.toRawUTF8(), cut))
                     MDW_LOG("PM", "SEH: projectm_load_preset_file threw while processing queued preset; continuing");
-                // If this was a hard cut, also zero the soft cut duration to avoid any residual blending
+                // If this was a hard cut, temporarily zero soft cut to avoid any residual blending, then restore configured value
+                const bool apNow = autoPlayEnabled.load(std::memory_order_relaxed);
+                const bool hcNow = autoPlayHardCut.load(std::memory_order_relaxed);
                 if (cut != 0)
                     projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
-                // Reassert locked preset and disabled transitions to prevent auto fades
-                projectm_set_preset_locked((projectm_handle) pmHandle, true);
-                projectm_set_hard_cut_enabled((projectm_handle) pmHandle, false);
-                projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
-                projectm_set_preset_duration((projectm_handle) pmHandle, 36000.0);
-                projectm_set_hard_cut_duration((projectm_handle) pmHandle, 36000.0);
+                // Apply current autoplay/transition config so subsequent transitions behave as expected
+                projectm_set_preset_locked((projectm_handle) pmHandle, !apNow);
+                // Always enable beat-based switch requests when autoplay is on; choose transition style separately
+                projectm_set_hard_cut_enabled((projectm_handle) pmHandle, apNow);
+                projectm_set_preset_duration((projectm_handle) pmHandle, 20.0);
+                projectm_set_soft_cut_duration((projectm_handle) pmHandle, hcNow ? 0.0 : 3.0);
+                projectm_set_hard_cut_duration((projectm_handle) pmHandle, 5.0);
                #elif defined(PM_HAVE_V4)
                 try {
                     MDW_LOG("PM", juce::String("Processing queued preset (C++ API) -> ") + path + (cut ? " (hard)" : " (soft)"));
@@ -737,25 +741,27 @@ void ProjectMRenderer::renderOpenGL()
                 {
                     const bool ap  = autoPlayEnabled.load(std::memory_order_relaxed);
                     const bool shf = autoPlayShuffle.load(std::memory_order_relaxed);
-                    const bool hcut= autoPlayHardCut.load(std::memory_order_relaxed);
+                    const bool hardStyle = autoPlayHardCut.load(std::memory_order_relaxed);
                     // Unlock to allow automatic transitions when enabled; lock to fully disable when off
                     projectm_set_preset_locked(inst, !ap);
-                    // Configure durations: use a sane default max display time (20s) and soft cut around 3s
+                    // Configure durations: use a sane default max display time (20s)
                     const double presetSecs = 20.0;
-                    const double softSecs   = 3.0;
+                    const double softSecsDefault = 3.0;
                     const double hardMin    = 5.0; // minimum time before a hard cut may occur on beats
                     projectm_set_preset_duration(inst, presetSecs);
-                    projectm_set_soft_cut_duration(inst, softSecs);
+                    // Blend style: when Hard Cut option is ON, force zero soft duration (instant); otherwise use soft fade
+                    projectm_set_soft_cut_duration(inst, hardStyle ? 0.0 : softSecsDefault);
                     projectm_set_hard_cut_duration(inst, hardMin);
-                    // Enable/disable hard cuts (beat-based) according to UI
-                    projectm_set_hard_cut_enabled(inst, hcut);
+                    // Enable/disable hard-cut algorithm based on user preference; allow soft cuts when not hard
+                    // Always enable beat-triggered switch requests when autoplay is enabled; control cut style via soft/hard duration and play_next flag
+                    projectm_set_hard_cut_enabled(inst, ap);
                    #if defined(HAVE_PROJECTM_PLAYLIST)
                     if (pmPlaylist != nullptr)
                     {
                         projectm_playlist_set_shuffle((projectm_playlist_handle) pmPlaylist, shf);
                     }
                    #endif
-                    MDW_LOG("PM", juce::String("Applied auto config: ap=") + (ap?"1":"0") + ", shuffle=" + (shf?"1":"0") + ", hardCut=" + (hcut?"1":"0"));
+                    MDW_LOG("PM", juce::String("Applied auto config: ap=") + (ap?"1":"0") + ", shuffle=" + (shf?"1":"0") + ", hardCut=" + (hardStyle?"1":"0"));
                     autoConfigDirty.store(false, std::memory_order_release);
                 }
                 // If a new playlist was provided, feed it into the playlist manager
@@ -836,8 +842,8 @@ void ProjectMRenderer::renderOpenGL()
                         }
                         else
                         {
-                            // Allow preset duration + soft cut + 1.0s grace
-                            const double allowSec = juce::jmax(1.0, dPreset + dSoft + 1.0);
+                            // Allow preset duration + soft cut + additional grace to avoid racing internal triggers
+                            const double allowSec = juce::jmax(1.0, dPreset + dSoft + 3.0);
                             if (lastAutoWatchdogTimeSec <= 0.0)
                                 lastAutoWatchdogTimeSec = nowSec;
                             else if ((nowSec - lastAutoWatchdogTimeSec) > allowSec)
@@ -1190,6 +1196,9 @@ void ProjectMRenderer::initProjectMIfNeeded()
             projectm_playlist_connect(pl, inst);
             pmPlaylist = (void*) pl;
             MDW_LOG("PM", "projectM playlist API available: playlist manager created and connected");
+            // Register callbacks so projectM can request preset switches and we can log when they occur
+            projectm_set_preset_switch_requested_event_callback(inst, &ProjectMRenderer::onProjectMSwitchRequested, this);
+            projectm_playlist_set_preset_switched_event_callback(pl, &ProjectMRenderer::onPlaylistPresetSwitched, this);
         }
         else
         {
@@ -1200,13 +1209,16 @@ void ProjectMRenderer::initProjectMIfNeeded()
     MDW_LOG("PM", "projectM playlist API not available at build time");
    #endif
 
-    // Disable all automatic transitions and lock the current preset to prevent fade-to-black
-    projectm_set_preset_locked(inst, true);
-    projectm_set_hard_cut_enabled(inst, false);
-    projectm_set_soft_cut_duration(inst, 0.0);
-    // Also make soft and hard cut timers effectively inert
-    projectm_set_preset_duration(inst, 36000.0);
-    projectm_set_hard_cut_duration(inst, 36000.0);
+    // Initialize auto-transition behavior based on current autoplay settings
+    const bool apInit  = autoPlayEnabled.load(std::memory_order_relaxed);
+    const bool hcInit  = autoPlayHardCut.load(std::memory_order_relaxed);
+    projectm_set_preset_locked(inst, !apInit);
+    // Always enable beat-triggered switch requests when autoplay is enabled at init time
+    projectm_set_hard_cut_enabled(inst, apInit);
+    // Default durations: preset 20s, soft cut 3s (0 when hard-cut), minimum hard-cut spacing 5s
+    projectm_set_preset_duration(inst, 20.0);
+    projectm_set_soft_cut_duration(inst, hcInit ? 0.0 : 3.0);
+    projectm_set_hard_cut_duration(inst, 5.0);
 
     // Provide texture search paths to projectM (preset dir + common textures folders) to avoid asset lookup failures
     {
@@ -1272,10 +1284,17 @@ void ProjectMRenderer::initProjectMIfNeeded()
         // If hard cut, kill soft cut duration once to avoid initial blending
         if (cut != 0)
             projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
-        // Reassert locked preset and disabled transitions
-        projectm_set_preset_locked((projectm_handle) pmHandle, true);
-        projectm_set_hard_cut_enabled((projectm_handle) pmHandle, false);
-        projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
+        // Apply current autoplay/transition config immediately
+        {
+            const bool apNow = autoPlayEnabled.load(std::memory_order_relaxed);
+            const bool hcNow = autoPlayHardCut.load(std::memory_order_relaxed);
+            projectm_set_preset_locked((projectm_handle) pmHandle, !apNow);
+            // Always enable beat-based switch requests when autoplay is on; choose transition style separately
+            projectm_set_hard_cut_enabled((projectm_handle) pmHandle, apNow);
+            projectm_set_preset_duration((projectm_handle) pmHandle, 20.0);
+            projectm_set_soft_cut_duration((projectm_handle) pmHandle, hcNow ? 0.0 : 3.0);
+            projectm_set_hard_cut_duration((projectm_handle) pmHandle, 5.0);
+        }
         hasPendingPreset.store(false, std::memory_order_release);
         lastLoadedPresetIndex = std::numeric_limits<int>::min();
         appliedInitial = true;
@@ -1294,10 +1313,17 @@ void ProjectMRenderer::initProjectMIfNeeded()
                 MDW_LOG("PM", "SEH: projectm_load_preset_file threw during init index load; continuing");
             // Ensure no initial blending when forcing the first preset
             projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
-            // Reassert locked preset and disabled transitions
-            projectm_set_preset_locked((projectm_handle) pmHandle, true);
-            projectm_set_hard_cut_enabled((projectm_handle) pmHandle, false);
-            projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
+            // Apply current autoplay/transition config
+            {
+                const bool apNow = autoPlayEnabled.load(std::memory_order_relaxed);
+                const bool hcNow = autoPlayHardCut.load(std::memory_order_relaxed);
+                projectm_set_preset_locked((projectm_handle) pmHandle, !apNow);
+                // Always enable beat-based switch requests when autoplay is on; choose transition style separately
+                projectm_set_hard_cut_enabled((projectm_handle) pmHandle, apNow);
+                projectm_set_preset_duration((projectm_handle) pmHandle, 20.0);
+                projectm_set_soft_cut_duration((projectm_handle) pmHandle, hcNow ? 0.0 : 3.0);
+                projectm_set_hard_cut_duration((projectm_handle) pmHandle, 5.0);
+            }
             lastLoadedPresetIndex = wantIdx;
             lastPresetPath = path;
             appliedInitial = true;
@@ -1309,10 +1335,17 @@ void ProjectMRenderer::initProjectMIfNeeded()
     {
         if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, lastPresetPath.toRawUTF8(), 1))
             MDW_LOG("PM", "SEH: projectm_load_preset_file threw during init lastPresetPath load; continuing");
-        // Reassert locked preset and disabled transitions
-        projectm_set_preset_locked((projectm_handle) pmHandle, true);
-        projectm_set_hard_cut_enabled((projectm_handle) pmHandle, false);
-        projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
+        // Apply current autoplay/transition config
+        {
+            const bool apNow = autoPlayEnabled.load(std::memory_order_relaxed);
+            const bool hcNow = autoPlayHardCut.load(std::memory_order_relaxed);
+            projectm_set_preset_locked((projectm_handle) pmHandle, !apNow);
+            // Always enable beat-based switch requests when autoplay is on; choose transition style separately
+            projectm_set_hard_cut_enabled((projectm_handle) pmHandle, apNow);
+            projectm_set_preset_duration((projectm_handle) pmHandle, 20.0);
+            projectm_set_soft_cut_duration((projectm_handle) pmHandle, hcNow ? 0.0 : 3.0);
+            projectm_set_hard_cut_duration((projectm_handle) pmHandle, 5.0);
+        }
         MDW_LOG("PM", juce::String("C API: applied last-known preset: ") + lastPresetPath);
         appliedInitial = true;
     }
@@ -1465,4 +1498,37 @@ void ProjectMRenderer::feedProjectMAudioIfAvailable()
     }
    #endif
 }
+#endif
+
+
+#if defined(HAVE_PROJECTM) && defined(PM_HAVE_V4_C_API)
+void ProjectMRenderer::onProjectMSwitchRequested(bool /*isHardCut*/, void* userData) noexcept
+{
+    auto* self = static_cast<ProjectMRenderer*>(userData);
+    if (!self) return;
+   #if defined(HAVE_PROJECTM_PLAYLIST)
+    if (self->pmPlaylist != nullptr)
+    {
+        const bool hard = self->autoPlayHardCut.load(std::memory_order_relaxed);
+        auto pl = (projectm_playlist_handle) self->pmPlaylist;
+        uint32_t newPos = projectm_playlist_play_next(pl, hard);
+        MDW_LOG("PM", juce::String("PM request: play_next -> ") + juce::String((int)newPos) + (hard ? " (hard)" : " (soft)"));
+        self->currentPlaylistPos.store((int)newPos, std::memory_order_relaxed);
+        self->lastObservedPlaylistPos = (int)newPos;
+        self->lastAutoWatchdogTimeSec = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    }
+   #else
+    juce::ignoreUnused(userData);
+   #endif
+}
+
+#if defined(HAVE_PROJECTM_PLAYLIST)
+void ProjectMRenderer::onPlaylistPresetSwitched(bool isHardCut, unsigned int index, void* userData) noexcept
+{
+    auto* self = static_cast<ProjectMRenderer*>(userData);
+    if (!self) return;
+    MDW_LOG("PM", juce::String("Playlist event: switched -> index=") + juce::String((int)index) + (isHardCut ? " (hard)" : " (soft)"));
+    self->currentPlaylistPos.store((int)index, std::memory_order_relaxed);
+}
+#endif
 #endif

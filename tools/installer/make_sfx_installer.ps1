@@ -40,11 +40,17 @@ function Resolve-7Zip {
 }
 
 function Resolve-7ZipSfxModule {
-  $possibleDirs = @(
-    Split-Path (Resolve-7Zip) -Parent,
-    "$Env:ProgramFiles\\7-Zip",
-    "$Env:ProgramFiles(x86)\\7-Zip"
-  ) | Where-Object { $_ -and (Test-Path $_) }
+  $dirs = @()
+  $seven = Resolve-7Zip
+  if ($seven) {
+    $parent = Split-Path $seven -Parent
+    if ($parent -and (Test-Path $parent)) { $dirs += $parent }
+  }
+  $dirs += @(
+    "$Env:ProgramFiles\7-Zip",
+    "$Env:ProgramFiles(x86)\7-Zip"
+  )
+  $possibleDirs = $dirs | Where-Object { $_ -and (Test-Path $_) }
   foreach ($d in $possibleDirs) {
     $sfx = Join-Path $d '7z.sfx'
     if (Test-Path $sfx) { return $sfx }
@@ -149,7 +155,26 @@ try {
   }
   else {
     # Fallback: generate an install.bat that extracts the zip to the per-user VST3 folder
-    $bat = "@echo off\r\nsetlocal enableextensions\r\nset DEST=%LOCALAPPDATA%\\Programs\\Common\\VST3\r\nif not exist \"%DEST%\" mkdir \"%DEST%\"\r\n\r\nset SCRIPT=%~f0\r\nset SCRIPT_DIR=%~dp0\r\nset ZIP=%SCRIPT_DIR%MilkDAWp_vst3.zip\r\n\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command \"Expand-Archive -Path \"\"%ZIP%\"\" -DestinationPath \"\"%DEST%\"\" -Force\"\r\nif errorlevel 1 (\r\n  echo Failed to extract archive. Ensure PowerShell is available.\r\n  exit /b 1\r\n) else (\r\n  echo Installed MilkDAWp.vst3 to %DEST%\r\n)\r\npause\r\n"
+    $bat = @"
+@echo off
+setlocal enableextensions
+set DEST=%LOCALAPPDATA%\Programs\Common\VST3
+if not exist "%DEST%" mkdir "%DEST%"
+
+set SCRIPT=%~f0
+set SCRIPT_DIR=%~dp0
+set ZIP=%SCRIPT_DIR%MilkDAWp_vst3.zip
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path ""%ZIP%"" -DestinationPath ""%DEST%"" -Force"
+if errorlevel 1 (
+  echo Failed to extract archive. Ensure PowerShell is available.
+  exit /b 1
+) else (
+  echo Installed MilkDAWp.vst3 to %DEST%
+)
+pause
+
+"@
     Set-Content -LiteralPath $installBat -Value $bat -Encoding ASCII
     Write-Host "Neither WinRAR nor 7-Zip SFX build available. Emitted ZIP + installer BAT:" -ForegroundColor Yellow
     Write-Host "  ZIP: $zipPath"
