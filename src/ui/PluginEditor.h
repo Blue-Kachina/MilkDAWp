@@ -69,8 +69,18 @@ private:
     juce::File playlistRoot;
     juce::DrawableButton btnPrev { "Prev", juce::DrawableButton::ImageOnButtonBackground };
     juce::DrawableButton btnNext { "Next", juce::DrawableButton::ImageOnButtonBackground };
+    // New auto-play transport toggles
+    juce::DrawableButton btnAutoPlay { "AutoPlay", juce::DrawableButton::ImageOnButtonBackground };
+    juce::ToggleButton btnAutoRandom { "Random" };
+    juce::ToggleButton btnAutoHardCut { "Hard cut" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> prevAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> nextAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoPlayAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoRandomAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoHardCutAtt;
+    // Auto-play timing
+    juce::int64 lastAutoChangeMs { 0 };
+    juce::Random rng;
 
     // External visualization window
     std::unique_ptr<VisualizationWindow> visWindow;

@@ -62,6 +62,16 @@ namespace Icons {
         return createFromSvgString(svg, colour);
     }
 
+    // Simple play icon (triangle)
+    static std::unique_ptr<juce::Drawable> createPlayIcon(juce::Colour colour)
+    {
+        static const char* svg =
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+            "<path fill='#000000' d='M8 5v14l11-7z'/>"
+            "</svg>";
+        return createFromSvgString(svg, colour);
+    }
+
     static void setIconStates(juce::DrawableButton& btn,
                               std::unique_ptr<juce::Drawable> normal,
                               std::unique_ptr<juce::Drawable> over,
@@ -282,7 +292,16 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
             processor.apvts.state.setProperty("presetPath", lastPresetPath, nullptr);
             currentPresetLabel.setText(playlistItems[(int) idx].getFileName(), juce::dontSendNotification);
             if (visWindow)
-                visWindow->loadPresetByPath(lastPresetPath, true);
+            {
+                if (visWindow->supportsProjectMAuto())
+                {
+                    visWindow->setProjectMPlaylistPosition(idx, true);
+                }
+                else
+                {
+                    visWindow->loadPresetByPath(lastPresetPath, true);
+                }
+            }
         }
         else
         {
@@ -327,9 +346,34 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
         Icons::setIconStates(btnNext, std::move(normal), std::move(over), std::move(down), std::move(normalOn), std::move(overOn), std::move(downOn));
     }
 
-    // Bind prev/next buttons to parameters so they’re MIDI/automation mappable
+    // Auto-play UI (available only when playlist is active)
+    addAndMakeVisible(btnAutoPlay);
+    addAndMakeVisible(btnAutoRandom);
+    addAndMakeVisible(btnAutoHardCut);
+    btnAutoPlay.setVisible(false);
+    btnAutoRandom.setVisible(false);
+    btnAutoHardCut.setVisible(false);
+    btnAutoPlay.setTooltip("Auto-play playlist");
+    btnAutoRandom.setTooltip("Random order (requires Auto-play)");
+    btnAutoHardCut.setTooltip("Use hard cut when switching (requires Auto-play)");
+    // Ensure Auto-play behaves as a toggle (so the attachment sets a persistent on/off state)
+    btnAutoPlay.setClickingTogglesState(true);
+    {
+        auto normal   = Icons::createPlayIcon(juce::Colours::lightgrey);
+        auto over     = Icons::createPlayIcon(juce::Colours::white);
+        auto down     = Icons::createPlayIcon(juce::Colours::orange);
+        auto normalOn = Icons::createPlayIcon(juce::Colours::aqua);
+        auto overOn   = Icons::createPlayIcon(juce::Colours::cyan);
+        auto downOn   = Icons::createPlayIcon(juce::Colours::skyblue);
+        Icons::setIconStates(btnAutoPlay, std::move(normal), std::move(over), std::move(down), std::move(normalOn), std::move(overOn), std::move(downOn));
+    }
+
+    // Bind prev/next and auto-play buttons to parameters (MIDI/automation mappable)
     prevAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, "playlistPrev", btnPrev);
     nextAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, "playlistNext", btnNext);
+    autoPlayAtt   = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, "autoPlay", btnAutoPlay);
+    autoRandomAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, "autoPlayRandom", btnAutoRandom);
+    autoHardCutAtt= std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, "autoPlayHardCut", btnAutoHardCut);
 
     btnPrev.onClick = [this]() {
         if (!playlistActive || playlistItems.isEmpty()) return;
@@ -790,7 +834,7 @@ void MilkDAWpAudioProcessorEditor::resized()
     // Preset/playlist row
     auto row = r.removeFromTop(28);
     // Transport area (expanded, replaces type label)
-    auto transportArea = row.removeFromLeft(240);
+    auto transportArea = row.removeFromLeft(360);
     if (playlistActive)
     {
         auto ta = transportArea;
@@ -803,11 +847,31 @@ void MilkDAWpAudioProcessorEditor::resized()
         btnNext.setBounds(rightBtn);
         btnPrev.setVisible(true);
         btnNext.setVisible(true);
+        // Auto-play controls
+        ta.removeFromLeft(6);
+        auto autoBtn = ta.removeFromLeft(28).withSizeKeepingCentre(24, h).withY(ymid);
+        btnAutoPlay.setBounds(autoBtn);
+        btnAutoPlay.setVisible(true);
+        ta.removeFromLeft(6);
+        auto randW = 70; auto hcW = 80;
+        auto randArea = ta.removeFromLeft(randW).withY(ymid).withHeight(h);
+        ta.removeFromLeft(6);
+        auto hcArea = ta.removeFromLeft(hcW).withY(ymid).withHeight(h);
+        btnAutoRandom.setBounds(randArea);
+        btnAutoHardCut.setBounds(hcArea);
+        btnAutoRandom.setVisible(true);
+        btnAutoHardCut.setVisible(true);
+        const bool autoOn = processor.apvts.getRawParameterValue("autoPlay")->load() > 0.5f;
+        btnAutoRandom.setEnabled(autoOn);
+        btnAutoHardCut.setEnabled(autoOn);
     }
     else
     {
         btnPrev.setVisible(false);
         btnNext.setVisible(false);
+        btnAutoPlay.setVisible(false);
+        btnAutoRandom.setVisible(false);
+        btnAutoHardCut.setVisible(false);
     }
     row.removeFromLeft(6);
     if (playlistActive)
@@ -929,7 +993,23 @@ void MilkDAWpAudioProcessorEditor::parameterChanged(const juce::String& paramID,
             editorSP->processor.apvts.state.setProperty("presetPath", editorSP->lastPresetPath, nullptr);
             editorSP->processor.apvts.state.setProperty("playlistIndex", clamped, nullptr);
             if (editorSP->visWindow)
-                editorSP->visWindow->loadPresetByPath(editorSP->lastPresetPath, true);
+            {
+                const bool autoOn = editorSP->processor.apvts.getRawParameterValue("autoPlay")->load() > 0.5f;
+                bool hardCut = true; // default for manual changes
+                if (autoOn)
+                    hardCut = editorSP->processor.apvts.getRawParameterValue("autoPlayHardCut")->load() > 0.5f;
+                if (editorSP->visWindow->supportsProjectMAuto())
+                {
+                    // Let projectM’s playlist manager load the preset to keep its timekeeper intact
+                    editorSP->visWindow->setProjectMPlaylistPosition(clamped, hardCut);
+                }
+                else
+                {
+                    editorSP->visWindow->loadPresetByPath(editorSP->lastPresetPath, hardCut);
+                    // Keep internal playlist position in sync for fallback
+                    editorSP->visWindow->setProjectMPlaylistPosition(clamped, hardCut);
+                }
+            }
         });
     }
     else if (paramID == "playlistPrev" || paramID == "playlistNext")
@@ -971,6 +1051,21 @@ void MilkDAWpAudioProcessorEditor::parameterChanged(const juce::String& paramID,
                 editorSP->visWindow->setVisualParams(amp, spd);
                 editorSP->visWindow->setColorParams(h, sat);
                 editorSP->visWindow->setSeed(sd);
+            }
+        });
+    }
+    else if (paramID == "autoPlay" || paramID == "autoPlayRandom" || paramID == "autoPlayHardCut")
+    {
+        juce::Component::SafePointer<MilkDAWpAudioProcessorEditor> editorSP(this);
+        juce::MessageManager::callAsync([editorSP]()
+        {
+            if (editorSP == nullptr) return;
+            if (editorSP->visWindow)
+            {
+                const bool ap  = editorSP->processor.apvts.getRawParameterValue("autoPlay")->load() > 0.5f;
+                const bool rnd = editorSP->processor.apvts.getRawParameterValue("autoPlayRandom")->load() > 0.5f;
+                const bool hct = editorSP->processor.apvts.getRawParameterValue("autoPlayHardCut")->load() > 0.5f;
+                editorSP->visWindow->setAutoPlayFlags(ap, rnd, hct);
             }
         });
     }
@@ -1281,6 +1376,70 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
                 this->resized();
             }
         }
+
+        // Auto-play: prefer projectM's internal playlist/transition engine when available; otherwise fallback to editor-timer
+        if (playlistActive && !playlistItems.isEmpty())
+        {
+            const bool autoOn = processor.apvts.getRawParameterValue("autoPlay")->load() > 0.5f;
+            const bool randomOn = processor.apvts.getRawParameterValue("autoPlayRandom")->load() > 0.5f;
+            // Push flags to renderer (idempotent)
+            if (visWindow)
+                visWindow->setAutoPlayFlags(autoOn, randomOn, processor.apvts.getRawParameterValue("autoPlayHardCut")->load() > 0.5f);
+
+            const bool useProjectMAuto = (visWindow && visWindow->supportsProjectMAuto());
+            if (!useProjectMAuto)
+            {
+                // Fallback: fixed-interval auto advance
+                const juce::int64 intervalMs = 20000; // 20 seconds
+                const juce::int64 nowMs = (juce::int64) juce::Time::getMillisecondCounter();
+                if (!autoOn)
+                {
+                    lastAutoChangeMs = 0;
+                }
+                else
+                {
+                    if (lastAutoChangeMs == 0)
+                        lastAutoChangeMs = nowMs;
+                    if (nowMs - lastAutoChangeMs >= intervalMs)
+                    {
+                        const int size = playlistItems.size();
+                        if (size > 0)
+                        {
+                            int next = 0;
+                            if (randomOn && size > 1)
+                            {
+                                int cur = juce::jlimit(0, size - 1, playlistIndex < 0 ? 0 : playlistIndex);
+                                do { next = rng.nextInt(size); } while (next == cur);
+                            }
+                            else
+                            {
+                                int cur = juce::jlimit(0, size - 1, playlistIndex < 0 ? 0 : playlistIndex);
+                                next = (cur + 1) % size;
+                            }
+                            setPlaylistIndexParam(next);
+                        }
+                        lastAutoChangeMs = nowMs;
+                    }
+                }
+            }
+            else
+            {
+                // Sync UI/param with projectM playlist position when auto is handled by projectM
+                if (autoOn)
+                {
+                    int pmPos = visWindow->getProjectMPlaylistPosition();
+                    if (pmPos >= 0 && pmPos != playlistIndex && pmPos < playlistItems.size())
+                    {
+                        setPlaylistIndexParam(pmPos);
+                    }
+                }
+            }
+
+            // Keep UI enablement in sync (Random/HardCut only when Auto-play enabled)
+            const bool wantEnable = autoOn;
+            if (btnAutoRandom.isEnabled() != wantEnable) btnAutoRandom.setEnabled(wantEnable);
+            if (btnAutoHardCut.isEnabled() != wantEnable) btnAutoHardCut.setEnabled(wantEnable);
+        }
     }
 
     // If we weren’t on desktop before, act on it here by creating the window when needed
@@ -1434,6 +1593,9 @@ void MilkDAWpAudioProcessorEditor::restorePlaylistFromState()
         presetBox.setVisible(false);
         btnPrev.setVisible(false);
         btnNext.setVisible(false);
+        btnAutoPlay.setVisible(false);
+        btnAutoRandom.setVisible(false);
+        btnAutoHardCut.setVisible(false);
         currentPresetLabel.setVisible(true);
         this->resized();
         return;
@@ -1481,7 +1643,27 @@ void MilkDAWpAudioProcessorEditor::restorePlaylistFromState()
     currentPresetLabel.setText(playlistItems[idx].getFileName(), juce::dontSendNotification);
     btnLoadPreset.setTooltip(playlistRoot.getFullPathName());
     if (visWindow)
-        visWindow->loadPresetByPath(lastPresetPath, true);
+    {
+        // Provide full playlist to projectM's playlist manager when available
+        juce::StringArray paths;
+        for (auto& f : playlistItems) paths.add(f.getFullPathName());
+        visWindow->setProjectMPlaylist(paths);
+        // Load initial selection: prefer projectM playlist position when available
+        if (visWindow->supportsProjectMAuto())
+        {
+            visWindow->setProjectMPlaylistPosition(idx, true);
+        }
+        else
+        {
+            visWindow->loadPresetByPath(lastPresetPath, true);
+            visWindow->setProjectMPlaylistPosition(idx, true);
+        }
+        // Push current auto-play flags
+        const bool ap  = processor.apvts.getRawParameterValue("autoPlay")->load() > 0.5f;
+        const bool rnd = processor.apvts.getRawParameterValue("autoPlayRandom")->load() > 0.5f;
+        const bool hct = processor.apvts.getRawParameterValue("autoPlayHardCut")->load() > 0.5f;
+        visWindow->setAutoPlayFlags(ap, rnd, hct);
+    }
 
     // Drive param to reflect
     setPlaylistIndexParam(idx);

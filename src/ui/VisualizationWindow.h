@@ -31,6 +31,12 @@ public:
     void setPresetIndex(int index);
     // New: load a preset directly by path (no scanning)
     void loadPresetByPath(const juce::String& absolutePath, bool hardCut = true);
+    // Auto-play/playlist integration
+    void setAutoPlayFlags(bool enabled, bool randomShuffle, bool hardCut);
+    void setProjectMPlaylist(const juce::StringArray& absolutePaths);
+    void setProjectMPlaylistPosition(int index, bool hardCut);
+    bool supportsProjectMAuto() const;
+    int getProjectMPlaylistPosition() const;
 
     // New: notify editor when user closes the window (to sync the "Show Window" param)
     void setOnUserClose(std::function<void()> cb) { onUserClosed = std::move(cb); }
@@ -60,6 +66,12 @@ private:
             void setSeed(int seed);
             void setPresetIndex(int index);
             void loadPresetByPath(const juce::String& absolutePath, bool hardCut = true);
+            // Auto-play/playlist integration
+            void setAutoPlayFlags(bool enabled, bool randomShuffle, bool hardCut);
+            void setProjectMPlaylist(const juce::StringArray& absolutePaths);
+            void setProjectMPlaylistPosition(int index, bool hardCut);
+            bool supportsProjectMAuto() const;
+            int getProjectMPlaylistPosition() const;
 
             // explicit GL teardown (must be called on the message thread)
             void shutdownGL();

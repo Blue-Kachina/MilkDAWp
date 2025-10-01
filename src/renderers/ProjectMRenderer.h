@@ -41,6 +41,46 @@ public:
         projectMEnabled.store(enabled, std::memory_order_relaxed);
     }
 
+    // Auto-play/playlist integration (thread-safe signals)
+    void setAutoPlay(bool enabled, bool shuffle, bool hardCut) noexcept
+    {
+        // Only mark dirty if something actually changed to avoid spamming the C API each frame
+        const bool prevAp  = autoPlayEnabled.load(std::memory_order_relaxed);
+        const bool prevShf = autoPlayShuffle.load(std::memory_order_relaxed);
+        const bool prevHc  = autoPlayHardCut.load(std::memory_order_relaxed);
+        autoPlayEnabled.store(enabled, std::memory_order_relaxed);
+        autoPlayShuffle.store(shuffle, std::memory_order_relaxed);
+        autoPlayHardCut.store(hardCut, std::memory_order_relaxed);
+        if (prevAp != enabled || prevShf != shuffle || prevHc != hardCut)
+            autoConfigDirty.store(true, std::memory_order_release);
+    }
+    // Request setting the playlist position via the projectM playlist API (applied on GL thread)
+    void setPlaylistPosition(int index, bool hardCut) noexcept
+    {
+        desiredPlaylistPos.store(index, std::memory_order_relaxed);
+        desiredPlaylistHardCut.store(hardCut, std::memory_order_relaxed);
+        playlistPosDirty.store(true, std::memory_order_release);
+    }
+    void setPlaylistPaths(const juce::StringArray& absolutePaths)
+    {
+        const juce::ScopedLock sl(playlistLock);
+        pendingPlaylist = absolutePaths;
+        playlistDirty.store(true, std::memory_order_release);
+    }
+
+    // Query whether the projectM backend (and playlist API) is active
+    bool isProjectMReady() const noexcept { return pmReady; }
+    bool hasPlaylistApi() const noexcept { return pmPlaylist != nullptr; }
+    // Query current playlist position as observed on the GL thread (or -1 if unknown)
+    int getPlaylistPosition() const noexcept
+    {
+       #if defined(HAVE_PROJECTM)
+        return currentPlaylistPos.load(std::memory_order_relaxed);
+       #else
+        return -1;
+       #endif
+    }
+
     static constexpr const char* kWindowTitle = "MilkDAWp";
 
     // Host-automatable preset selection
@@ -125,5 +165,23 @@ private:
         std::atomic<bool> hasPendingPreset { false };
         juce::String pendingPresetPath; // accessed on UI thread when setting; consumed on GL thread
         std::atomic<int> pendingPresetCut { 1 }; // 1=hard, 0=soft
+        // Auto-play config (thread-safe)
+        std::atomic<bool> autoPlayEnabled { false };
+        std::atomic<bool> autoPlayShuffle { false };
+        std::atomic<bool> autoPlayHardCut { false };
+        std::atomic<bool> autoConfigDirty { false };
+        // Pending playlist to feed into projectM playlist manager (if available)
+        juce::CriticalSection playlistLock;
+        juce::StringArray pendingPlaylist;
+        std::atomic<bool> playlistDirty { false };
+        // Requested playlist position (applied on GL thread)
+        std::atomic<int>  desiredPlaylistPos { -1 };
+        std::atomic<bool> desiredPlaylistHardCut { true };
+        std::atomic<bool> playlistPosDirty { false };
+        // Watchdog for auto-play progression (nudges playlist if internal auto stalls)
+        int lastObservedPlaylistPos { -1 };
+        double lastAutoWatchdogTimeSec { 0.0 };
+        // Cached playlist position (updated on GL thread)
+        std::atomic<int> currentPlaylistPos { -1 };
     #endif
 };

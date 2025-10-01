@@ -728,15 +728,130 @@ void ProjectMRenderer::renderOpenGL()
             // Ensure color writes enabled
             gl::glColorMask(gl::GL_TRUE, gl::GL_TRUE, gl::GL_TRUE, gl::GL_TRUE);
             
-            // Reassert lock and disabled transitions each frame to prevent library-driven transitions
+            // Apply auto-play configuration and pending playlist updates
            #if defined(PM_HAVE_V4_C_API)
             {
                 auto inst = (projectm_handle) pmHandle;
-                projectm_set_preset_locked(inst, true);
-                projectm_set_hard_cut_enabled(inst, false);
-                projectm_set_soft_cut_duration(inst, 0.0);
-                projectm_set_preset_duration(inst, 36000.0);
-                projectm_set_hard_cut_duration(inst, 36000.0);
+                // If auto config changed, push it to projectM
+                if (autoConfigDirty.load(std::memory_order_acquire))
+                {
+                    const bool ap  = autoPlayEnabled.load(std::memory_order_relaxed);
+                    const bool shf = autoPlayShuffle.load(std::memory_order_relaxed);
+                    const bool hcut= autoPlayHardCut.load(std::memory_order_relaxed);
+                    // Unlock to allow automatic transitions when enabled; lock to fully disable when off
+                    projectm_set_preset_locked(inst, !ap);
+                    // Configure durations: use a sane default max display time (20s) and soft cut around 3s
+                    const double presetSecs = 20.0;
+                    const double softSecs   = 3.0;
+                    const double hardMin    = 5.0; // minimum time before a hard cut may occur on beats
+                    projectm_set_preset_duration(inst, presetSecs);
+                    projectm_set_soft_cut_duration(inst, softSecs);
+                    projectm_set_hard_cut_duration(inst, hardMin);
+                    // Enable/disable hard cuts (beat-based) according to UI
+                    projectm_set_hard_cut_enabled(inst, hcut);
+                   #if defined(HAVE_PROJECTM_PLAYLIST)
+                    if (pmPlaylist != nullptr)
+                    {
+                        projectm_playlist_set_shuffle((projectm_playlist_handle) pmPlaylist, shf);
+                    }
+                   #endif
+                    MDW_LOG("PM", juce::String("Applied auto config: ap=") + (ap?"1":"0") + ", shuffle=" + (shf?"1":"0") + ", hardCut=" + (hcut?"1":"0"));
+                    autoConfigDirty.store(false, std::memory_order_release);
+                }
+                // If a new playlist was provided, feed it into the playlist manager
+               #if defined(HAVE_PROJECTM_PLAYLIST)
+                if (pmPlaylist != nullptr && playlistDirty.load(std::memory_order_acquire))
+                {
+                    juce::StringArray local;
+                    {
+                        const juce::ScopedLock sl(playlistLock);
+                        local = pendingPlaylist;
+                    }
+                    auto pl = (projectm_playlist_handle) pmPlaylist;
+                    projectm_playlist_clear(pl);
+                    if (local.size() > 0)
+                    {
+                        std::vector<std::string> holder; holder.reserve((size_t)local.size());
+                        std::vector<const char*> cstrs; cstrs.reserve((size_t)local.size());
+                        for (auto& s : local) { holder.emplace_back(s.toStdString()); cstrs.push_back(holder.back().c_str()); }
+                        projectm_playlist_add_presets(pl, cstrs.data(), (uint32_t) cstrs.size(), false);
+                    }
+                    playlistDirty.store(false, std::memory_order_release);
+                }
+                // Apply requested playlist position changes on the GL thread
+                if (pmPlaylist != nullptr && playlistPosDirty.load(std::memory_order_acquire))
+                {
+                    int pos = desiredPlaylistPos.load(std::memory_order_relaxed);
+                    const bool hard = desiredPlaylistHardCut.load(std::memory_order_relaxed);
+                    if (pos < 0) pos = 0;
+                    const uint32_t newPos = projectm_playlist_set_position((projectm_playlist_handle) pmPlaylist, (uint32_t) pos, hard);
+                    MDW_LOG("PM", juce::String("Playlist set_position -> ") + juce::String(pos) + ", applied pos=" + juce::String((int)newPos) + (hard?" (hard)":" (soft)"));
+                    playlistPosDirty.store(false, std::memory_order_release);
+                }
+               #endif
+            }
+           #endif
+            // Diagnostics: log projectM auto/playlist state periodically to aid debugging
+           #if defined(PM_HAVE_V4_C_API)
+            if (pmHandle)
+            {
+                auto inst = (projectm_handle) pmHandle;
+                const bool locked = projectm_get_preset_locked(inst);
+                const double dPreset = projectm_get_preset_duration(inst);
+                const double dSoft   = projectm_get_soft_cut_duration(inst);
+                const double dHard   = projectm_get_hard_cut_duration(inst);
+                const bool hardEn    = projectm_get_hard_cut_enabled(inst);
+                if (shouldLog)
+                {
+                    MDW_LOG("PM", juce::String("Auto diag: locked=") + (locked?"1":"0") +
+                                   ", presetSec=" + juce::String(dPreset, 2) +
+                                   ", softSec=" + juce::String(dSoft, 2) +
+                                   ", hardMin=" + juce::String(dHard, 2) +
+                                   ", hardEnabled=" + (hardEn?"1":"0"));
+                }
+               #if defined(HAVE_PROJECTM_PLAYLIST)
+                if (pmPlaylist)
+                {
+                    auto pl = (projectm_playlist_handle) pmPlaylist;
+                    const bool shuffle = projectm_playlist_get_shuffle(pl);
+                    const uint32_t size = projectm_playlist_size(pl);
+                    const uint32_t pos  = projectm_playlist_get_position(pl);
+                    if (shouldLog)
+                    {
+                        MDW_LOG("PM", juce::String("Playlist diag: shuffle=") + (shuffle?"1":"0") +
+                                       ", size=" + juce::String((int) size) +
+                                       ", pos=" + juce::String((int) pos));
+                    }
+                    // Update cached position for UI sync
+                    currentPlaylistPos.store((int) pos, std::memory_order_relaxed);
+                    // Watchdog: nudge playlist if auto-play is enabled but position doesn’t change for too long
+                    const bool ap = autoPlayEnabled.load(std::memory_order_relaxed);
+                    if (ap && !locked && size > 0)
+                    {
+                        const double nowSec = juce::Time::getMillisecondCounterHiRes() * 0.001;
+                        if (lastObservedPlaylistPos != (int) pos)
+                        {
+                            lastObservedPlaylistPos = (int) pos;
+                            lastAutoWatchdogTimeSec = nowSec;
+                        }
+                        else
+                        {
+                            // Allow preset duration + soft cut + 1.0s grace
+                            const double allowSec = juce::jmax(1.0, dPreset + dSoft + 1.0);
+                            if (lastAutoWatchdogTimeSec <= 0.0)
+                                lastAutoWatchdogTimeSec = nowSec;
+                            else if ((nowSec - lastAutoWatchdogTimeSec) > allowSec)
+                            {
+                                const bool hardCut = autoPlayHardCut.load(std::memory_order_relaxed);
+                                uint32_t newPos = projectm_playlist_play_next(pl, hardCut);
+                                lastObservedPlaylistPos = (int) newPos;
+                                lastAutoWatchdogTimeSec = nowSec;
+                                MDW_LOG("PM", juce::String("Auto-play watchdog: play_next -> ") + juce::String((int)newPos) + (hardCut?" (hard)":" (soft)"));
+                            }
+                        }
+                    }
+                }
+               #endif
             }
            #endif
             // Ensure core-profile compatibility: unbind any program and bind a dummy VAO before letting projectM render
@@ -1058,7 +1173,6 @@ void ProjectMRenderer::initProjectMIfNeeded()
         pmReady = false;
         return;
     }
-
     // Inform projectM of the current viewport size and basic runtime params
     projectm_set_window_size(inst, (size_t) w, (size_t) h);
     projectm_set_aspect_correction(inst, true);

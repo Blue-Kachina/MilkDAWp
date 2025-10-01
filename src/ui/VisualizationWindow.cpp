@@ -219,6 +219,38 @@ void VisualizationWindow::loadPresetByPath(const juce::String& absolutePath, boo
         glView->loadPresetByPath(absolutePath, hardCut);
 }
 
+void VisualizationWindow::setAutoPlayFlags(bool enabled, bool randomShuffle, bool hardCut)
+{
+    if (glView)
+        glView->setAutoPlayFlags(enabled, randomShuffle, hardCut);
+}
+
+void VisualizationWindow::setProjectMPlaylist(const juce::StringArray& absolutePaths)
+{
+    if (glView)
+        glView->setProjectMPlaylist(absolutePaths);
+}
+
+void VisualizationWindow::setProjectMPlaylistPosition(int index, bool hardCut)
+{
+    if (glView)
+        glView->setProjectMPlaylistPosition(index, hardCut);
+}
+
+bool VisualizationWindow::supportsProjectMAuto() const
+{
+    if (glView)
+        return glView->supportsProjectMAuto();
+    return false;
+}
+
+int VisualizationWindow::getProjectMPlaylistPosition() const
+{
+    if (glView)
+        return glView->getProjectMPlaylistPosition();
+    return -1;
+}
+
 // ===== GLComponent =====
 
 VisualizationWindow::GLComponent::GLComponent(LockFreeAudioFifo* fifo, int sampleRate, const juce::String& initialPresetPath, int initialPresetIndex)
@@ -312,6 +344,38 @@ void VisualizationWindow::GLComponent::loadPresetByPath(const juce::String& abso
 {
     if (renderer)
         renderer->loadPresetByPath(absolutePath, hardCut);
+}
+
+void VisualizationWindow::GLComponent::setAutoPlayFlags(bool enabled, bool randomShuffle, bool hardCut)
+{
+    if (renderer)
+        renderer->setAutoPlay(enabled, randomShuffle, hardCut);
+}
+
+void VisualizationWindow::GLComponent::setProjectMPlaylist(const juce::StringArray& absolutePaths)
+{
+    if (renderer)
+        renderer->setPlaylistPaths(absolutePaths);
+}
+
+void VisualizationWindow::GLComponent::setProjectMPlaylistPosition(int index, bool hardCut)
+{
+    if (renderer)
+        renderer->setPlaylistPosition(index, hardCut);
+}
+
+bool VisualizationWindow::GLComponent::supportsProjectMAuto() const
+{
+   #if defined(HAVE_PROJECTM)
+    return renderer && renderer->isProjectMReady() && renderer->hasPlaylistApi();
+   #else
+    return false;
+   #endif
+}
+
+int VisualizationWindow::GLComponent::getProjectMPlaylistPosition() const
+{
+    return renderer ? renderer->getPlaylistPosition() : -1;
 }
 
 // New: explicit GL teardown (must be called on the message thread)

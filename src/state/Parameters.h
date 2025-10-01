@@ -19,6 +19,10 @@ namespace om::milkdawp
         static constexpr const char* playlistPresetIndex = "playlistPresetIndex"; // current item number within active playlist
         static constexpr const char* playlistPrev        = "playlistPrev";        // trigger-style: go to previous item
         static constexpr const char* playlistNext        = "playlistNext";        // trigger-style: go to next item
+        // Auto-play transport controls
+        static constexpr const char* autoPlay            = "autoPlay";           // enable auto advance when playlist active
+        static constexpr const char* autoPlayRandom      = "autoPlayRandom";     // pick random next preset
+        static constexpr const char* autoPlayHardCut     = "autoPlayHardCut";    // use hard cut when switching
     }
 
     inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
@@ -50,6 +54,10 @@ namespace om::milkdawp
         // Momentary triggers for prev/next navigation (MIDI/automation mappable)
         params.push_back(std::make_unique<AudioParameterBool>(ParamIDs::playlistPrev, "Playlist Prev", false));
         params.push_back(std::make_unique<AudioParameterBool>(ParamIDs::playlistNext, "Playlist Next", false));
+        // Auto-play toggles
+        params.push_back(std::make_unique<AudioParameterBool>(ParamIDs::autoPlay, "Auto-play", false));
+        params.push_back(std::make_unique<AudioParameterBool>(ParamIDs::autoPlayRandom, "Random", false));
+        params.push_back(std::make_unique<AudioParameterBool>(ParamIDs::autoPlayHardCut, "Hard cut", false));
         return { params.begin(), params.end() };
     }
 }
