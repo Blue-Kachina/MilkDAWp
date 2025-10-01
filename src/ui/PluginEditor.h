@@ -69,6 +69,8 @@ private:
     juce::File playlistRoot;
     juce::DrawableButton btnPrev { "Prev", juce::DrawableButton::ImageOnButtonBackground };
     juce::DrawableButton btnNext { "Next", juce::DrawableButton::ImageOnButtonBackground };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> prevAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> nextAtt;
 
     // External visualization window
     std::unique_ptr<VisualizationWindow> visWindow;
@@ -103,7 +105,9 @@ private:
     // Helpers
     void populatePresetBox();
     void setPresetParam(int newIndex);
+    void setPlaylistIndexParam(int newIndex);
     void refreshPresetPathFromState();
+    void restorePlaylistFromState();
 
     // Remember last user-selected preset path (via Load Preset...)
     juce::String lastPresetPath;

@@ -15,6 +15,10 @@ namespace om::milkdawp
         static constexpr const char* colorHue    = "colorHue";       // 0..1
         static constexpr const char* colorSat    = "colorSat";       // 0..1
         static constexpr const char* speed       = "speed";          // playback/animation speed scale
+        // Playlist state/controls
+        static constexpr const char* playlistPresetIndex = "playlistPresetIndex"; // current item number within active playlist
+        static constexpr const char* playlistPrev        = "playlistPrev";        // trigger-style: go to previous item
+        static constexpr const char* playlistNext        = "playlistNext";        // trigger-style: go to next item
     }
 
     inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
@@ -40,6 +44,12 @@ namespace om::milkdawp
         // Host-automatable preset selector (index). We’ll map this to available presets at runtime.
         params.push_back(std::make_unique<AudioParameterInt>("presetIndex", "Preset",
             0, 1023, 0));
+        // Host-automatable current playlist preset index (active only when a playlist is loaded)
+        params.push_back(std::make_unique<AudioParameterInt>(ParamIDs::playlistPresetIndex, "Playlist Item",
+            0, 1023, 0));
+        // Momentary triggers for prev/next navigation (MIDI/automation mappable)
+        params.push_back(std::make_unique<AudioParameterBool>(ParamIDs::playlistPrev, "Playlist Prev", false));
+        params.push_back(std::make_unique<AudioParameterBool>(ParamIDs::playlistNext, "Playlist Next", false));
         return { params.begin(), params.end() };
     }
 }

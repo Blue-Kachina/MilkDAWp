@@ -89,6 +89,9 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
     // Register APVTS listeners (react to param changes ASAP)
     processor.apvts.addParameterListener("fullscreen", this);
     processor.apvts.addParameterListener("presetIndex", this);
+    processor.apvts.addParameterListener("playlistPresetIndex", this);
+    processor.apvts.addParameterListener("playlistPrev", this);
+    processor.apvts.addParameterListener("playlistNext", this);
     // Also listen to visual params so we can push immediate updates to the renderer
     processor.apvts.addParameterListener("ampScale", this);
     processor.apvts.addParameterListener("speed", this);
@@ -270,7 +273,10 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
         const int idx = presetBox.getSelectedItemIndex();
         if (playlistActive && idx >= 0 && idx < playlistItems.size())
         {
-            playlistIndex = idx;
+            // Drive via parameter so it’s automatable/MIDI-mappable
+            setPlaylistIndexParam(idx);
+            // State persistence
+            processor.apvts.state.setProperty("playlistIndex", idx, nullptr);
             auto path = playlistItems[(int) idx].getFullPathName();
             lastPresetPath = path;
             processor.apvts.state.setProperty("presetPath", lastPresetPath, nullptr);
@@ -321,15 +327,23 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
         Icons::setIconStates(btnNext, std::move(normal), std::move(over), std::move(down), std::move(normalOn), std::move(overOn), std::move(downOn));
     }
 
+    // Bind prev/next buttons to parameters so they’re MIDI/automation mappable
+    prevAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, "playlistPrev", btnPrev);
+    nextAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.apvts, "playlistNext", btnNext);
+
     btnPrev.onClick = [this]() {
         if (!playlistActive || playlistItems.isEmpty()) return;
-        playlistIndex = (playlistIndex - 1 + playlistItems.size()) % playlistItems.size();
-        presetBox.setSelectedItemIndex(playlistIndex, juce::sendNotificationSync);
+        const int size = playlistItems.size();
+        const int cur  = juce::jlimit(0, size - 1, playlistIndex < 0 ? 0 : playlistIndex);
+        const int next = (cur - 1 + size) % size;
+        setPlaylistIndexParam(next);
     };
     btnNext.onClick = [this]() {
         if (!playlistActive || playlistItems.isEmpty()) return;
-        playlistIndex = (playlistIndex + 1) % playlistItems.size();
-        presetBox.setSelectedItemIndex(playlistIndex, juce::sendNotificationSync);
+        const int size = playlistItems.size();
+        const int cur  = juce::jlimit(0, size - 1, playlistIndex < 0 ? 0 : playlistIndex);
+        const int next = (cur + 1) % size;
+        setPlaylistIndexParam(next);
     };
 
     btnLoadPreset.onClick = [this]()
@@ -381,6 +395,9 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
                     playlistActive = playlistItems.size() > 0;
                     if (playlistActive)
                     {
+                        // Persist playlist activation and root
+                        processor.apvts.state.setProperty("playlistActive", true, nullptr);
+                        processor.apvts.state.setProperty("playlistRootPath", playlistRoot.getFullPathName(), nullptr);
                         // Populate dropdown with playlist items
                         presetBox.clear(juce::dontSendNotification);
                         for (int i = 0; i < playlistItems.size(); ++i)
@@ -393,6 +410,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
                         btnNext.setVisible(true);
                         // Load first preset
                         playlistIndex = 0;
+                        processor.apvts.state.setProperty("playlistIndex", 0, nullptr);
                         lastPresetPath = playlistItems[0].getFullPathName();
                         processor.apvts.state.setProperty("presetPath", lastPresetPath, nullptr);
                         currentPresetLabel.setText(playlistItems[0].getFileName(), juce::dontSendNotification);
@@ -401,6 +419,8 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
                             visWindow->loadPresetByPath(lastPresetPath, true);
                         // Re-layout now that controls changed visibility
                         this->resized();
+                        // Drive parameter so hosts/MIDI reflect current index
+                        setPlaylistIndexParam(0);
                     }
                     else
                     {
@@ -424,6 +444,11 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
                     currentPresetLabel.setVisible(true);
                     btnPrev.setVisible(false);
                     btnNext.setVisible(false);
+
+                    // Persist playlist deactivation
+                    processor.apvts.state.setProperty("playlistActive", false, nullptr);
+                    processor.apvts.state.setProperty("playlistRootPath", "", nullptr);
+                    processor.apvts.state.setProperty("playlistIndex", -1, nullptr);
 
                     lastPresetPath = f.getFullPathName();
                     processor.apvts.state.setProperty("presetPath", lastPresetPath, nullptr);
@@ -454,10 +479,14 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
         lastPresetPath.clear();
         // Persist cleared state
         processor.apvts.state.setProperty("presetPath", "", nullptr);
+        processor.apvts.state.setProperty("playlistActive", false, nullptr);
+        processor.apvts.state.setProperty("playlistRootPath", "", nullptr);
+        processor.apvts.state.setProperty("playlistIndex", -1, nullptr);
         if (visWindow)
             visWindow->loadPresetByPath("idle://", true);
-        // Also clear the parameterized index to -1 equivalent (0 in APVTS range), to avoid unintended switches
+        // Also clear the parameterized indices to safe defaults
         setPresetParam(0);
+        setPlaylistIndexParam(0);
         // Re-layout now that controls changed visibility
         this->resized();
     };
@@ -508,17 +537,24 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
 void MilkDAWpAudioProcessorEditor::valueTreePropertyChanged(juce::ValueTree& treeWhosePropertyHasChanged, const juce::Identifier& property)
 {
     juce::ignoreUnused(treeWhosePropertyHasChanged);
-    if (property.toString() == "presetPath")
+    auto name = property.toString();
+    if (name == "presetPath")
     {
         MDW_LOG("UI", "Editor: state property changed -> presetPath");
         refreshPresetPathFromState();
+    }
+    else if (name == "playlistActive" || name == "playlistRootPath" || name == "playlistIndex")
+    {
+        MDW_LOG("UI", juce::String("Editor: state property changed -> ") + name);
+        restorePlaylistFromState();
     }
 }
 
 void MilkDAWpAudioProcessorEditor::valueTreeRedirected(juce::ValueTree& treeWhichHasBeenChanged)
 {
     juce::ignoreUnused(treeWhichHasBeenChanged);
-    MDW_LOG("UI", "Editor: state redirected (likely setStateInformation); refreshing presetPath");
+    MDW_LOG("UI", "Editor: state redirected (likely setStateInformation); refreshing state");
+    restorePlaylistFromState();
     refreshPresetPathFromState();
 }
 
@@ -870,6 +906,53 @@ void MilkDAWpAudioProcessorEditor::parameterChanged(const juce::String& paramID,
                 editorSP->presetBox.setSelectedItemIndex(idx, juce::dontSendNotification);
             if (editorSP->visWindow)
                 editorSP->visWindow->setPresetIndex(idx);
+        });
+    }
+    else if (paramID == "playlistPresetIndex")
+    {
+        const int idx = (int) newValue;
+        juce::Component::SafePointer<MilkDAWpAudioProcessorEditor> editorSP(this);
+        juce::MessageManager::callAsync([editorSP, idx]()
+        {
+            if (editorSP == nullptr) return;
+            if (!editorSP->playlistActive || editorSP->playlistItems.isEmpty()) return;
+            const int size = editorSP->playlistItems.size();
+            const int clamped = juce::jlimit(0, juce::jmax(0, size - 1), idx);
+            editorSP->playlistIndex = clamped;
+            // Update UI dropdown if needed
+            if (editorSP->presetBox.getSelectedItemIndex() != clamped)
+                editorSP->presetBox.setSelectedItemIndex(clamped, juce::dontSendNotification);
+            // Update labels and state
+            auto file = editorSP->playlistItems[clamped];
+            editorSP->currentPresetLabel.setText(file.getFileName(), juce::dontSendNotification);
+            editorSP->lastPresetPath = file.getFullPathName();
+            editorSP->processor.apvts.state.setProperty("presetPath", editorSP->lastPresetPath, nullptr);
+            editorSP->processor.apvts.state.setProperty("playlistIndex", clamped, nullptr);
+            if (editorSP->visWindow)
+                editorSP->visWindow->loadPresetByPath(editorSP->lastPresetPath, true);
+        });
+    }
+    else if (paramID == "playlistPrev" || paramID == "playlistNext")
+    {
+        const bool pressed = newValue > 0.5f;
+        if (!pressed) return; // act only on press
+        juce::Component::SafePointer<MilkDAWpAudioProcessorEditor> editorSP(this);
+        juce::MessageManager::callAsync([editorSP, isPrev = (paramID == "playlistPrev")]()
+        {
+            if (editorSP == nullptr) return;
+            if (!editorSP->playlistActive || editorSP->playlistItems.isEmpty()) return;
+            const int size = editorSP->playlistItems.size();
+            const int cur  = juce::jlimit(0, size - 1, editorSP->playlistIndex < 0 ? 0 : editorSP->playlistIndex);
+            const int next = isPrev ? (cur - 1 + size) % size : (cur + 1) % size;
+            editorSP->setPlaylistIndexParam(next);
+            // Reset trigger param back to false
+            auto* param = editorSP->processor.apvts.getParameter(isPrev ? "playlistPrev" : "playlistNext");
+            if (auto* pb = dynamic_cast<juce::AudioParameterBool*>(param))
+            {
+                pb->beginChangeGesture();
+                pb->setValueNotifyingHost(0.0f);
+                pb->endChangeGesture();
+            }
         });
     }
     else if (paramID == "ampScale" || paramID == "speed" || paramID == "colorHue" || paramID == "colorSat" || paramID == "seed")
@@ -1315,4 +1398,91 @@ void MilkDAWpAudioProcessorEditor::setPresetParam(int newIndex)
         p->setValueNotifyingHost(norm);
         p->endChangeGesture();
     }
+}
+
+void MilkDAWpAudioProcessorEditor::setPlaylistIndexParam(int newIndex)
+{
+    if (auto* p = dynamic_cast<juce::AudioParameterInt*>(processor.apvts.getParameter("playlistPresetIndex")))
+    {
+        newIndex = juce::jlimit(0, 1023, newIndex);
+        const float norm = p->convertTo0to1(newIndex);
+        p->beginChangeGesture();
+        p->setValueNotifyingHost(norm);
+        p->endChangeGesture();
+    }
+}
+
+void MilkDAWpAudioProcessorEditor::restorePlaylistFromState()
+{
+    // Read state properties
+    const bool wasActive = processor.apvts.state.getProperty("playlistActive");
+    const juce::var rootVar = processor.apvts.state.getProperty("playlistRootPath");
+    const juce::var idxVar  = processor.apvts.state.getProperty("playlistIndex");
+    const juce::String rootPath = rootVar.isString() ? rootVar.toString() : juce::String();
+    const int savedIndex = idxVar.isInt() ? (int) idxVar : -1;
+
+    if (!wasActive || rootPath.isEmpty())
+    {
+        // Deactivate playlist UI
+        playlistActive = false;
+        playlistItems.clear();
+        playlistIndex = -1;
+        presetBox.clear(juce::dontSendNotification);
+        presetBox.setVisible(false);
+        btnPrev.setVisible(false);
+        btnNext.setVisible(false);
+        currentPresetLabel.setVisible(true);
+        this->resized();
+        return;
+    }
+
+    // Scan folder for .milk and rebuild items
+    juce::File root(rootPath);
+    if (!root.isDirectory())
+        return;
+
+    playlistRoot = root;
+    playlistItems.clear();
+    juce::DirectoryIterator it(root, false, "*.milk", juce::File::findFiles);
+    while (it.next())
+        playlistItems.add(it.getFile());
+    struct FileNameLess { int compareElements(const juce::File& a, const juce::File& b) const { return a.getFileName().toLowerCase().compare(b.getFileName().toLowerCase()); } } cmp;
+    playlistItems.sort(cmp);
+
+    playlistActive = playlistItems.size() > 0;
+    if (!playlistActive)
+    {
+        // Nothing to show
+        processor.apvts.state.setProperty("playlistActive", false, nullptr);
+        return;
+    }
+
+    // Populate dropdown
+    presetBox.clear(juce::dontSendNotification);
+    for (int i = 0; i < playlistItems.size(); ++i)
+        presetBox.addItem(playlistItems.getReference(i).getFileName(), i + 1);
+    presetBox.setVisible(true);
+    currentPresetLabel.setVisible(false);
+    btnPrev.setVisible(true);
+    btnNext.setVisible(true);
+
+    int idx = savedIndex >= 0 ? savedIndex : 0;
+    idx = juce::jlimit(0, playlistItems.size() - 1, idx);
+    playlistIndex = idx;
+    processor.apvts.state.setProperty("playlistIndex", idx, nullptr);
+    presetBox.setSelectedItemIndex(idx, juce::dontSendNotification);
+
+    // Update labels and load
+    lastPresetPath = playlistItems[idx].getFullPathName();
+    processor.apvts.state.setProperty("presetPath", lastPresetPath, nullptr);
+    currentPresetLabel.setText(playlistItems[idx].getFileName(), juce::dontSendNotification);
+    btnLoadPreset.setTooltip(playlistRoot.getFullPathName());
+    if (visWindow)
+        visWindow->loadPresetByPath(lastPresetPath, true);
+
+    // Drive param to reflect
+    setPlaylistIndexParam(idx);
+
+    // Layout
+    this->resized();
 }
