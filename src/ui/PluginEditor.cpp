@@ -1404,7 +1404,10 @@ void MilkDAWpAudioProcessorEditor::setPlaylistIndexParam(int newIndex)
 {
     if (auto* p = dynamic_cast<juce::AudioParameterInt*>(processor.apvts.getParameter("playlistPresetIndex")))
     {
-        newIndex = juce::jlimit(0, 1023, newIndex);
+        int maxIdx = 1023;
+        if (playlistActive && playlistItems.size() > 0)
+            maxIdx = juce::jmax(0, playlistItems.size() - 1);
+        newIndex = juce::jlimit(0, maxIdx, newIndex);
         const float norm = p->convertTo0to1(newIndex);
         p->beginChangeGesture();
         p->setValueNotifyingHost(norm);
