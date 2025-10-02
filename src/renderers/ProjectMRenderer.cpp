@@ -542,10 +542,13 @@ void ProjectMRenderer::renderOpenGL()
 
         if (!pmReady)
         {
-            // Delay initialization until we have a valid framebuffer size and at least a couple of frames rendered
+            // Delay initialization until we have a valid framebuffer size, a short warm-up, and an explicit preset intent
             const bool viewportReady = (fbWidth > 0 && fbHeight > 0);
             const bool warmedUp = (frameCount > 2u);
-            if (viewportReady && warmedUp)
+            const bool presetIntent = hasPendingPreset.load(std::memory_order_acquire)
+                                      || indexExplicit.load(std::memory_order_relaxed)
+                                      || (lastPresetPath.isNotEmpty());
+            if (viewportReady && warmedUp && presetIntent)
             {
                 if (!pmInitAttempted || (nowSec - pmInitLastAttemptSec) >= retryIntervalSec)
                 {
@@ -559,16 +562,31 @@ void ProjectMRenderer::renderOpenGL()
             }
             else if (shouldLog)
             {
-                MDW_LOG("PM", juce::String("renderOpenGL: deferring projectM init (viewportReady=") + (viewportReady?"true":"false") + ", warmedUp=" + (warmedUp?"true":"false") + ")");
+                MDW_LOG("PM", juce::String("renderOpenGL: deferring projectM init (viewportReady=") + (viewportReady?"true":"false") + ", warmedUp=" + (warmedUp?"true":"false") + ", presetIntent=" + (presetIntent?"true":"false") + ")");
             }
         }
 
         if (pmReady)
         {
+            // If the host has not selected any preset yet, suppress projectM rendering to avoid default preset flash
+            const bool noPresetIntent = lastPresetPath.isEmpty()
+                                        && desiredPresetIndex.load(std::memory_order_relaxed) < 0
+                                        && !hasPendingPreset.load(std::memory_order_acquire);
+            if (noPresetIntent)
+            {
+                if (shouldLog)
+                    MDW_LOG("PM", "renderOpenGL: suppressing projectM render until a preset is selected");
+                // Keep the screen black (already cleared above) and skip projectM this frame
+                return;
+            }
+
             // Apply host-requested preset change if any
            #if defined(HAVE_PROJECTM) && defined(PM_HAVE_V4_C_API)
+            // Do not override an explicit path selection or a pending path with an index-based switch
+            const bool pathActive = pathMode.load(std::memory_order_relaxed) || hasPendingPreset.load(std::memory_order_acquire);
+            const bool explicitIdx = indexExplicit.load(std::memory_order_relaxed);
             const int want = desiredPresetIndex.load(std::memory_order_relaxed);
-            if (want >= 0 && !pmPresetList.isEmpty())
+            if (!pathActive && explicitIdx && want >= 0 && !pmPresetList.isEmpty())
             {
                 if (want != lastLoadedPresetIndex)
                 {
@@ -577,8 +595,6 @@ void ProjectMRenderer::renderOpenGL()
                     MDW_LOG("PM", juce::String("Switching preset by index: ") + juce::String(want) + " -> [" + juce::String(idx) + "] " + path);
                     if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, path.toRawUTF8(), 1))
                         MDW_LOG("PM", "SEH: projectm_load_preset_file threw during switch; continuing");
-                    // Force-disable blending for this hard-cut switch to avoid any visual transition
-                    projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
                     // Reapply current autoplay/transition config right away
                     {
                         const bool apNow = autoPlayEnabled.load(std::memory_order_relaxed);
@@ -602,17 +618,14 @@ void ProjectMRenderer::renderOpenGL()
             if (hasPendingPreset.load(std::memory_order_acquire))
             {
                 juce::String path = pendingPresetPath; // local copy
-                const int cut = pendingPresetCut.load(std::memory_order_relaxed);
+                int cut = pendingPresetCut.load(std::memory_order_relaxed);
                #if defined(PM_HAVE_V4_C_API)
                 MDW_LOG("PM", juce::String("Processing queued preset -> ") + path + (cut ? " (hard)" : " (soft)"));
                 if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, path.toRawUTF8(), cut))
                     MDW_LOG("PM", "SEH: projectm_load_preset_file threw while processing queued preset; continuing");
-                // If this was a hard cut, temporarily zero soft cut to avoid any residual blending, then restore configured value
+                // Apply current autoplay/transition config so subsequent transitions behave as expected
                 const bool apNow = autoPlayEnabled.load(std::memory_order_relaxed);
                 const bool hcNow = autoPlayHardCut.load(std::memory_order_relaxed);
-                if (cut != 0)
-                    projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
-                // Apply current autoplay/transition config so subsequent transitions behave as expected
                 projectm_set_preset_locked((projectm_handle) pmHandle, !apNow);
                 // Always enable beat-based switch requests when autoplay is on; choose transition style separately
                 projectm_set_hard_cut_enabled((projectm_handle) pmHandle, apNow);
@@ -621,12 +634,15 @@ void ProjectMRenderer::renderOpenGL()
                 projectm_set_hard_cut_duration((projectm_handle) pmHandle, 5.0);
                #elif defined(PM_HAVE_V4)
                 try {
-                    MDW_LOG("PM", juce::String("Processing queued preset (C++ API) -> ") + path + (cut ? " (hard)" : " (soft)"));
-                    static_cast<PM::ProjectM*>(pmHandle)->loadPresetFile(path.toStdString(), cut != 0);
+                    const bool effHard = (cut != 0);
+                    MDW_LOG("PM", juce::String("Processing queued preset (C++ API) -> ") + path + (effHard ? " (hard)" : " (soft)"));
+                    static_cast<PM::ProjectM*>(pmHandle)->loadPresetFile(path.toStdString(), effHard);
                 } catch (...) {
                     MDW_LOG("PM", "Exception in C++ API while processing queued preset; continuing");
                 }
                #endif
+                // After applying an explicit path, disable index-based switching until host sets a new index
+                desiredPresetIndex.store(-1, std::memory_order_relaxed);
                 lastLoadedPresetIndex = std::numeric_limits<int>::min();
                 hasPendingPreset.store(false, std::memory_order_release);
             }
@@ -1188,6 +1204,7 @@ void ProjectMRenderer::initProjectMIfNeeded()
     pmReady = true;
     MDW_LOG("PM", "projectM v4 initialized (C API)");
 
+
    #if defined(HAVE_PROJECTM_PLAYLIST)
     {
         auto pl = projectm_playlist_create(inst);
@@ -1281,9 +1298,6 @@ void ProjectMRenderer::initProjectMIfNeeded()
         MDW_LOG("PM", juce::String("Init: applying queued preset -> ") + path + (cut ? " (hard)" : " (soft)"));
         if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, path.toRawUTF8(), cut))
             MDW_LOG("PM", "SEH: projectm_load_preset_file threw during init; continuing");
-        // If hard cut, kill soft cut duration once to avoid initial blending
-        if (cut != 0)
-            projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
         // Apply current autoplay/transition config immediately
         {
             const bool apNow = autoPlayEnabled.load(std::memory_order_relaxed);
@@ -1303,16 +1317,17 @@ void ProjectMRenderer::initProjectMIfNeeded()
     // Otherwise, if a desired index is known and our list is populated, load it now
     if (!appliedInitial)
     {
+        // Only honor desiredPresetIndex at init if it was explicitly set by host/UI, and no path is pending/active
+        const bool pathActiveAtInit = pathMode.load(std::memory_order_relaxed) || hasPendingPreset.load(std::memory_order_acquire);
+        const bool explicitIdx = indexExplicit.load(std::memory_order_relaxed);
         const int wantIdx = desiredPresetIndex.load(std::memory_order_relaxed);
-        if (wantIdx >= 0 && !pmPresetList.isEmpty())
+        if (explicitIdx && !pathActiveAtInit && wantIdx >= 0 && !pmPresetList.isEmpty())
         {
             const int idx = juce::jlimit(0, pmPresetList.size() - 1, wantIdx % juce::jmax(1, pmPresetList.size()));
             auto path = pmPresetList[idx];
             MDW_LOG("PM", juce::String("Init: applying desired preset index -> ") + juce::String(wantIdx) + " => [" + juce::String(idx) + "] " + path);
-            if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, path.toRawUTF8(), 1))
+            if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, path.toRawUTF8(), 0))
                 MDW_LOG("PM", "SEH: projectm_load_preset_file threw during init index load; continuing");
-            // Ensure no initial blending when forcing the first preset
-            projectm_set_soft_cut_duration((projectm_handle) pmHandle, 0.0);
             // Apply current autoplay/transition config
             {
                 const bool apNow = autoPlayEnabled.load(std::memory_order_relaxed);
@@ -1333,7 +1348,7 @@ void ProjectMRenderer::initProjectMIfNeeded()
     // Otherwise, try the last-known preset path if available
     if (!appliedInitial && lastPresetPath.isNotEmpty())
     {
-        if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, lastPresetPath.toRawUTF8(), 1))
+        if (!mdw_seh_projectm_load_preset_file((projectm_handle) pmHandle, lastPresetPath.toRawUTF8(), 0))
             MDW_LOG("PM", "SEH: projectm_load_preset_file threw during init lastPresetPath load; continuing");
         // Apply current autoplay/transition config
         {
@@ -1370,6 +1385,8 @@ void ProjectMRenderer::initProjectMIfNeeded()
 void ProjectMRenderer::loadPresetByPath(const juce::String& absolutePath, bool hardCut)
 {
    #if defined(HAVE_PROJECTM)
+    // Enter path mode: explicit path selections take precedence over index switching
+    pathMode.store(true, std::memory_order_relaxed);
     // Remember last requested preset so GL re-inits can apply it immediately.
     lastPresetPath = absolutePath;
     // Always queue and let the GL thread apply the preset. This avoids calling

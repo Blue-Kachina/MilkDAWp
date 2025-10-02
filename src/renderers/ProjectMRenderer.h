@@ -84,7 +84,14 @@ public:
     static constexpr const char* kWindowTitle = "MilkDAWp";
 
     // Host-automatable preset selection
-    void setPresetIndex(int index) noexcept { desiredPresetIndex.store(index, std::memory_order_relaxed); }
+    void setPresetIndex(int index) noexcept {
+        // Switching by index implies leaving explicit path mode
+        pathMode.store(false, std::memory_order_relaxed);
+        // Treat index > 0 as explicit; index == 0 is often a default, so only mark explicit if we already have a preset path/pending
+        const bool explicitNow = (index > 0) || hasPendingPreset.load(std::memory_order_acquire) || (lastPresetPath.isNotEmpty());
+        indexExplicit.store(explicitNow, std::memory_order_relaxed);
+        desiredPresetIndex.store(index, std::memory_order_relaxed);
+    }
     // Direct preset loading by path (skips index mechanism)
     void loadPresetByPath(const juce::String& absolutePath, bool hardCut = true);
 
@@ -158,6 +165,16 @@ private:
         // Preset management
         juce::StringArray pmPresetList;
         std::atomic<int> desiredPresetIndex { -1 }; // -1 means "no preset requested"
+        // When a path-based selection is active, ignore index switching until host changes index.
+        std::atomic<bool> pathMode { false };
+        // Only apply desiredPresetIndex when it was explicitly set by host/UI (not a default)
+        std::atomic<bool> indexExplicit { false };
+        // Rollback: do not force the very first preset to hard cut
+        std::atomic<bool> firstPresetMustHardCut { false };
+        // Suppress a small number of projectM frames (e.g., first after init/preset) to avoid visual flash
+        std::atomic<int> suppressPmFrames { 0 };
+        // Gate rendering until at least one preset has been applied
+        std::atomic<bool> presetAppliedOnce { false };
         int lastLoadedPresetIndex = std::numeric_limits<int>::min();
         // Track last successfully requested preset path so we can reapply instantly on GL reinit
         juce::String lastPresetPath;

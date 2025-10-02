@@ -628,10 +628,17 @@ void MilkDAWpAudioProcessorEditor::refreshPresetPathFromState()
 
     if (visWindow)
     {
-        if (lastPresetPath.isNotEmpty())
-            visWindow->loadPresetByPath(lastPresetPath, true);
+        if (!playlistActive)
+        {
+            if (lastPresetPath.isNotEmpty())
+                visWindow->loadPresetByPath(lastPresetPath, true);
+            else
+                visWindow->loadPresetByPath("idle://", true);
+        }
         else
-            visWindow->loadPresetByPath("idle://", true);
+        {
+            MDW_LOG("UI", "Editor: presetPath change ignored because playlist is active");
+        }
     }
     else
     {
@@ -1101,13 +1108,20 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
     const int sd = (int) processor.apvts.getRawParameterValue("seed")->load();
     const bool wantFullscreen = processor.apvts.getRawParameterValue("fullscreen")->load() > 0.5f;
 
+    // Ensure playlist flags/items reflect persisted state before deciding initial preset/playlist behavior
+    restorePlaylistFromState();
+
     if (wantWindow)
     {
         if (!visWindow && !creationPending.exchange(true))
         {
             MDW_LOG("UI", "Editor: creating VisualizationWindow (event)");
-            const int initIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
-            visWindow = std::make_unique<VisualizationWindow>(processor.getAudioFifo(), processor.getCurrentSampleRateHz(), lastPresetPath, initIdx);
+            int initIdxParam = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
+            // If a playlist is active, avoid queuing an initial preset path/index at creation; let playlist restore drive it
+            const bool usePlaylist = playlistActive && (playlistItems.size() > 0);
+            const juce::String initPath = usePlaylist ? juce::String() : lastPresetPath;
+            const int initIdx = (!usePlaylist && lastPresetPath.isNotEmpty()) ? initIdxParam : -1;
+            visWindow = std::make_unique<VisualizationWindow>(processor.getAudioFifo(), processor.getCurrentSampleRateHz(), initPath, initIdx);
             // Dock to the main editor by default (embedded)
             visWindow->dockTo(this);
             // Ensure it is visible immediately (don't rely solely on addAndMakeVisible)
@@ -1132,14 +1146,53 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
             // Apply fullscreen if requested via the proper path (will undock if needed)
             if (wantFullscreen)
                 handleFullscreenChangeOnUI(true);
-            // Apply preset: prefer a manually chosen path, otherwise use the automatable preset index
-            if (! lastPresetPath.isEmpty())
-                visWindow->loadPresetByPath(lastPresetPath, true);
-            else
+            // Apply preset: prefer a manually chosen path when no playlist is active. If none, avoid forcing a default index at creation
+            if (!usePlaylist && !initPath.isEmpty())
+                visWindow->loadPresetByPath(initPath, true);
+            else if (!usePlaylist)
             {
-                int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
-                visWindow->setPresetIndex(presetIdx);
+                MDW_LOG("UI", "Editor: no presetPath at creation; deferring preset index application");
             }
+
+            // If a playlist was active when the plugin was closed, restore it now
+            if (playlistActive && playlistItems.size() > 0)
+            {
+                // Provide full playlist to renderer via the vis window
+                juce::StringArray paths;
+                for (auto& f : playlistItems) paths.add(f.getFullPathName());
+                visWindow->setProjectMPlaylist(paths);
+
+                // Determine transition style: default soft unless Auto-play with Hard Cut is enabled
+                const bool ap  = processor.apvts.getRawParameterValue("autoPlay")->load() > 0.5f;
+                const bool hct = processor.apvts.getRawParameterValue("autoPlayHardCut")->load() > 0.5f;
+                const bool hardCut = ap ? hct : false;
+
+                // Preferred index: use current playlistIndex member if valid; else fall back to saved state
+                int idx = playlistIndex;
+                if (idx < 0 || idx >= playlistItems.size())
+                {
+                    auto idxVar = processor.apvts.state.getProperty("playlistIndex");
+                    if (idxVar.isInt()) idx = (int) idxVar;
+                }
+                idx = juce::jlimit(0, juce::jmax(0, playlistItems.size() - 1), idx);
+
+                // Apply position to projectM playlist manager when available; else load by path and then position
+                if (visWindow->supportsProjectMAuto())
+                {
+                    visWindow->setProjectMPlaylistPosition(idx, hardCut);
+                }
+                else
+                {
+                    const juce::String path = playlistItems[idx].getFullPathName();
+                    visWindow->loadPresetByPath(path, hardCut);
+                    visWindow->setProjectMPlaylistPosition(idx, hardCut);
+                }
+
+                // Push current auto-play flags to the renderer
+                const bool rnd = processor.apvts.getRawParameterValue("autoPlayRandom")->load() > 0.5f;
+                visWindow->setAutoPlayFlags(ap, rnd, hct);
+            }
+
             visWindow->toFront(true);
             visWindow->repaint();
 
@@ -1211,8 +1264,7 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
                 visWindow->loadPresetByPath(lastPresetPath, true);
             else
             {
-                int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
-                visWindow->setPresetIndex(presetIdx);
+                MDW_LOG("UI", "Editor: show -> no presetPath; skipping default index reapply");
             }
         }
 
@@ -1242,8 +1294,7 @@ void MilkDAWpAudioProcessorEditor::handleShowWindowChangeOnUI(bool wantWindow)
             visWindow->setSeed(sd);
             if (lastPresetPath.isEmpty())
             {
-                int presetIdx = (int) processor.apvts.getRawParameterValue("presetIndex")->load();
-                visWindow->setPresetIndex(presetIdx);
+                MDW_LOG("UI", "Editor: tick -> no presetPath; skipping default index apply");
             }
         }
     }
