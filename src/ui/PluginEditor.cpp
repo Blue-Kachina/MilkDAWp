@@ -283,6 +283,10 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor (MilkDAWpAudioProcess
         const int idx = presetBox.getSelectedItemIndex();
         if (playlistActive && idx >= 0 && idx < playlistItems.size())
         {
+            // Apply a short grace window to prevent immediate auto-advance overriding the user's choice
+            const juce::int64 nowMs = (juce::int64) juce::Time::getMillisecondCounter();
+            lastAutoChangeMs = nowMs;                 // resets fallback timer
+            suppressAutoUntilMs = nowMs + 3000;       // 3s grace period
             // Drive via parameter so it’s automatable/MIDI-mappable
             setPlaylistIndexParam(idx);
             // State persistence
@@ -1437,50 +1441,62 @@ void MilkDAWpAudioProcessorEditor::timerCallback()
         {
             const bool autoOn = processor.apvts.getRawParameterValue("autoPlay")->load() > 0.5f;
             const bool randomOn = processor.apvts.getRawParameterValue("autoPlayRandom")->load() > 0.5f;
+            const bool hardCutFlag = processor.apvts.getRawParameterValue("autoPlayHardCut")->load() > 0.5f;
+            const juce::int64 nowMs = (juce::int64) juce::Time::getMillisecondCounter();
             // Push flags to renderer (idempotent)
             if (visWindow)
-                visWindow->setAutoPlayFlags(autoOn, randomOn, processor.apvts.getRawParameterValue("autoPlayHardCut")->load() > 0.5f);
+                visWindow->setAutoPlayFlags(autoOn, randomOn, hardCutFlag);
 
             const bool useProjectMAuto = (visWindow && visWindow->supportsProjectMAuto());
+
+            // Respect manual selection grace window: suppress any auto logic during the grace period
+            const bool inGrace = autoOn && (nowMs < suppressAutoUntilMs);
             if (!useProjectMAuto)
             {
-                // Fallback: fixed-interval auto advance
-                const juce::int64 intervalMs = 20000; // 20 seconds
-                const juce::int64 nowMs = (juce::int64) juce::Time::getMillisecondCounter();
-                if (!autoOn)
+                if (!inGrace)
                 {
-                    lastAutoChangeMs = 0;
+                    // Fallback: fixed-interval auto advance
+                    const juce::int64 intervalMs = 20000; // 20 seconds
+                    if (!autoOn)
+                    {
+                        lastAutoChangeMs = 0;
+                    }
+                    else
+                    {
+                        if (lastAutoChangeMs == 0)
+                            lastAutoChangeMs = nowMs;
+                        if (nowMs - lastAutoChangeMs >= intervalMs)
+                        {
+                            const int size = playlistItems.size();
+                            if (size > 0)
+                            {
+                                int next = 0;
+                                if (randomOn && size > 1)
+                                {
+                                    int cur = juce::jlimit(0, size - 1, playlistIndex < 0 ? 0 : playlistIndex);
+                                    do { next = rng.nextInt(size); } while (next == cur);
+                                }
+                                else
+                                {
+                                    int cur = juce::jlimit(0, size - 1, playlistIndex < 0 ? 0 : playlistIndex);
+                                    next = (cur + 1) % size;
+                                }
+                                setPlaylistIndexParam(next);
+                            }
+                            lastAutoChangeMs = nowMs;
+                        }
+                    }
                 }
                 else
                 {
-                    if (lastAutoChangeMs == 0)
-                        lastAutoChangeMs = nowMs;
-                    if (nowMs - lastAutoChangeMs >= intervalMs)
-                    {
-                        const int size = playlistItems.size();
-                        if (size > 0)
-                        {
-                            int next = 0;
-                            if (randomOn && size > 1)
-                            {
-                                int cur = juce::jlimit(0, size - 1, playlistIndex < 0 ? 0 : playlistIndex);
-                                do { next = rng.nextInt(size); } while (next == cur);
-                            }
-                            else
-                            {
-                                int cur = juce::jlimit(0, size - 1, playlistIndex < 0 ? 0 : playlistIndex);
-                                next = (cur + 1) % size;
-                            }
-                            setPlaylistIndexParam(next);
-                        }
-                        lastAutoChangeMs = nowMs;
-                    }
+                    // During grace, keep the fallback timer aligned to avoid immediate fire after grace ends
+                    lastAutoChangeMs = nowMs;
                 }
             }
             else
             {
                 // Sync UI/param with projectM playlist position when auto is handled by projectM
-                if (autoOn)
+                if (autoOn && !inGrace)
                 {
                     int pmPos = visWindow->getProjectMPlaylistPosition();
                     if (pmPos >= 0 && pmPos != playlistIndex && pmPos < playlistItems.size())

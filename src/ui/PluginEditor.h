@@ -80,6 +80,8 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoHardCutAtt;
     // Auto-play timing
     juce::int64 lastAutoChangeMs { 0 };
+    // Grace period after a manual selection where auto-play is suppressed
+    juce::int64 suppressAutoUntilMs { 0 };
     juce::Random rng;
 
     // External visualization window
