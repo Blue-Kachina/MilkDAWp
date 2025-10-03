@@ -283,3 +283,22 @@ if (WIN32 AND TARGET MilkDAWp_VST3)
     COMMENT "Deploying presets to per-user VST3 Resources"
     VERBATIM)
 endif()
+
+# ---- Non-Windows runtime staging for projectM (macOS/Linux) ----
+# Copy the libprojectM runtime(s) into the plugin bundle so end users do not need
+# to install projectM separately. This mirrors the Windows DLL staging above.
+if ((APPLE OR UNIX) AND TARGET MilkDAWp_VST3 AND projectM4_FOUND)
+  add_custom_command(TARGET MilkDAWp_VST3 POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E echo "Staging projectM runtime into plugin bundle"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "$<TARGET_FILE:libprojectM::projectM>"
+            "$<TARGET_FILE_DIR:MilkDAWp_VST3>/$<TARGET_FILE_NAME:libprojectM::projectM>"
+    VERBATIM)
+  if (TARGET libprojectM::playlist)
+    add_custom_command(TARGET MilkDAWp_VST3 POST_BUILD
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+              "$<TARGET_FILE:libprojectM::playlist>"
+              "$<TARGET_FILE_DIR:MilkDAWp_VST3>/$<TARGET_FILE_NAME:libprojectM::playlist>"
+      VERBATIM)
+  endif()
+endif()

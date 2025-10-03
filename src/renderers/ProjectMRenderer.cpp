@@ -1,6 +1,22 @@
 #include "ProjectMRenderer.h"
 
-#include <excpt.h>
+#if !defined(_MSC_VER) && (JUCE_MAC || JUCE_LINUX)
+ #include <signal.h>
+ #include <setjmp.h>
+ 
+ static thread_local sigjmp_buf g_pmJmpBuf;
+ static thread_local bool g_pmJmpBufValid = false;
+ 
+ static void mdw_pm_signal_handler(int sig) {
+     if (g_pmJmpBufValid) {
+         siglongjmp(g_pmJmpBuf, sig);
+     }
+ }
+#endif
+
+#if defined(_MSC_VER)
+ #include <excpt.h>
+#endif
 
 #include "../utils/Logging.h"
 using namespace juce;
@@ -156,14 +172,37 @@ static projectm_handle mdw_seh_projectm_minimal_init(size_t /*w*/, size_t /*h*/,
 }
 
 // SEH-safe wrappers for render and PCM ingestion (minimal)
-static int mdw_seh_projectm_render(projectm_handle h) noexcept
-{
-   #if defined(_MSC_VER)
+static int mdw_seh_projectm_render(projectm_handle h) noexcept {
+#if defined(_MSC_VER)
     __try { projectm_opengl_render_frame(h); return 1; }
     __except(EXCEPTION_EXECUTE_HANDLER) { return 0; }
-   #else
+#elif JUCE_MAC || JUCE_LINUX
+    struct sigaction sa_segv, sa_bus, old_segv, old_bus;
+    sa_segv.sa_handler = mdw_pm_signal_handler;
+    sigemptyset(&sa_segv.sa_mask);
+    sa_segv.sa_flags = 0;
+    sa_bus = sa_segv;
+    
+    sigaction(SIGSEGV, &sa_segv, &old_segv);
+    sigaction(SIGBUS, &sa_bus, &old_bus);
+    
+    g_pmJmpBufValid = true;
+    int sig = sigsetjmp(g_pmJmpBuf, 1);
+    if (sig == 0) {
+        projectm_opengl_render_frame(h);
+        g_pmJmpBufValid = false;
+        sigaction(SIGSEGV, &old_segv, nullptr);
+        sigaction(SIGBUS, &old_bus, nullptr);
+        return 1;
+    } else {
+        g_pmJmpBufValid = false;
+        sigaction(SIGSEGV, &old_segv, nullptr);
+        sigaction(SIGBUS, &old_bus, nullptr);
+        return 0;
+    }
+#else
     projectm_opengl_render_frame(h); return 1;
-   #endif
+#endif
 }
 
 static int mdw_seh_projectm_pcm_add_mono(projectm_handle h, const float* data, unsigned int count) noexcept
@@ -311,6 +350,16 @@ void ProjectMRenderer::newOpenGLContextCreated()
         MDW_LOG("GL", "Test program failed to compile");
     }
 
+#if defined(HAVE_PROJECTM) && defined(PM_HAVE_V4_C_API)
+{
+    // Test if projectM symbols resolve before attempting full init
+    void* testHandle = (void*)(&projectm_create);
+    if (testHandle == nullptr) {
+        MDW_LOG("PM", "projectM symbols not resolved; library not loaded. Staying on fallback.");
+        projectMEnabled.store(false, std::memory_order_relaxed);
+    }
+}
+#endif
 
     auto& ext = context.extensions;
     const float verts[] = {
@@ -410,7 +459,8 @@ void ProjectMRenderer::newOpenGLContextCreated()
         }
     }
 
-    // 5) Common Windows locations
+    // 5) Platform-specific common locations
+   #if JUCE_WINDOWS
     if (! chosen.isDirectory())
     {
         File appData = File::getSpecialLocation(File::userApplicationDataDirectory).getChildFile("projectM").getChildFile("presets");
@@ -421,6 +471,38 @@ void ProjectMRenderer::newOpenGLContextCreated()
         File pf = File("C:\\Program Files\\projectM\\presets");
         if (pf.isDirectory()) chosen = pf;
     }
+   #elif JUCE_MAC
+    // Homebrew (Apple Silicon)
+    if (! chosen.isDirectory())
+    {
+        File hb = File("/opt/homebrew/share/projectM/presets");
+        if (hb.isDirectory()) chosen = hb;
+    }
+    // Homebrew (Intel) /usr/local
+    if (! chosen.isDirectory())
+    {
+        File usrlocal = File("/usr/local/share/projectM/presets");
+        if (usrlocal.isDirectory()) chosen = usrlocal;
+    }
+    // MacPorts
+    if (! chosen.isDirectory())
+    {
+        File mp = File("/opt/local/share/projectM/presets");
+        if (mp.isDirectory()) chosen = mp;
+    }
+   #elif JUCE_LINUX
+    // System-wide installs
+    if (! chosen.isDirectory())
+    {
+        File usr = File("/usr/share/projectM/presets");
+        if (usr.isDirectory()) chosen = usr;
+    }
+    if (! chosen.isDirectory())
+    {
+        File usrlocal = File("/usr/local/share/projectM/presets");
+        if (usrlocal.isDirectory()) chosen = usrlocal;
+    }
+   #endif
 
     pmPresetDir = chosen.getFullPathName();
     const bool exists = chosen.isDirectory();
@@ -453,6 +535,25 @@ void ProjectMRenderer::newOpenGLContextCreated()
 
         MDW_LOG("GL", "newOpenGLContextCreated: end");
 }
+
+#if (JUCE_MAC || JUCE_LINUX) && defined(HAVE_PROJECTM)
+{
+    // Log library search diagnostics
+    auto exe = File::getSpecialLocation(File::currentApplicationFile);
+    auto libDir = exe.getParentDirectory();
+    
+    MDW_LOG("PM", "Executable: " + exe.getFullPathName());
+    MDW_LOG("PM", "Lib search dir: " + libDir.getFullPathName());
+    
+    #if JUCE_MAC
+    auto expectedLib = libDir.getChildFile("libprojectM.4.dylib");
+    MDW_LOG("PM", "Looking for: " + expectedLib.getFullPathName() + " exists=" + String(expectedLib.existsAsFile()));
+    #elif JUCE_LINUX
+    auto expectedLib = libDir.getChildFile("libprojectM.so.4");
+    MDW_LOG("PM", "Looking for: " + expectedLib.getFullPathName() + " exists=" + String(expectedLib.existsAsFile()));
+    #endif
+}
+#endif
 
 // Provide the missing definition (unconditional)
 
@@ -548,21 +649,32 @@ void ProjectMRenderer::renderOpenGL()
             const bool presetIntent = hasPendingPreset.load(std::memory_order_acquire)
                                       || indexExplicit.load(std::memory_order_relaxed)
                                       || (lastPresetPath.isNotEmpty());
-            if (viewportReady && warmedUp && presetIntent)
-            {
-                if (!pmInitAttempted || (nowSec - pmInitLastAttemptSec) >= retryIntervalSec)
-                {
-                    pmInitAttempted = true;
-                    pmInitLastAttemptSec = nowSec;
+            if (viewportReady && warmedUp && presetIntent) {
+                // Exponential backoff: 5s, 10s, 20s, then stop
+                static int retryAttempts = 0;
+                const double retryIntervals[] = {5.0, 10.0, 20.0};
+                const int maxRetries = 3;
 
-                    MDW_LOG("PM", juce::String("renderOpenGL: initProjectMIfNeeded (fb=") + String(fbWidth) + "x" + String(fbHeight) + ")");
-                    initProjectMIfNeeded();
-                    MDW_LOG("PM", juce::String("renderOpenGL: pmReady=") + (pmReady ? "true" : "false"));
+                if (retryAttempts < maxRetries) {
+                    const double retryInterval = retryIntervals[retryAttempts];
+                    if (!pmInitAttempted || (nowSec - pmInitLastAttemptSec) >= retryInterval) {
+                        pmInitAttempted = true;
+                        pmInitLastAttemptSec = nowSec;
+                        ++retryAttempts;
+
+                        MDW_LOG("PM", juce::String("Init attempt #") + String(retryAttempts) + " (fb=" + String(fbWidth) + "x" + String(fbHeight) + ")");
+                        initProjectMIfNeeded();
+                        if (!pmReady) {
+                            MDW_LOG("PM", juce::String("Init failed; will retry in ") + String(retryIntervals[juce::jmin(retryAttempts, maxRetries-1)]) + "s");
+                        } else {
+                            MDW_LOG("PM", "Init succeeded on retry");
+                            retryAttempts = maxRetries; // stop retrying
+                        }
+                    }
+                } else if (shouldLog && retryAttempts == maxRetries) {
+                    MDW_LOG("PM", "ProjectM init exhausted all retries; using fallback renderer permanently");
+                    ++retryAttempts; // prevent re-logging
                 }
-            }
-            else if (shouldLog)
-            {
-                MDW_LOG("PM", juce::String("renderOpenGL: deferring projectM init (viewportReady=") + (viewportReady?"true":"false") + ", warmedUp=" + (warmedUp?"true":"false") + ", presetIntent=" + (presetIntent?"true":"false") + ")");
             }
         }
 
