@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(MilkDAWp VERSION 0.3.0 LANGUAGES C CXX)
+project(MilkDAWp VERSION 0.4.0 LANGUAGES C CXX)
 if(POLICY CMP0169)
   cmake_policy(SET CMP0169 NEW)
 endif()
@@ -229,16 +229,32 @@ exit /b 0
     endif()
   endif()
 
-  # Packaging target: create a zip with the .vst3 bundle for distribution
+  # Packaging target: create an archive with the .vst3 bundle for distribution (cross-platform)
   set(_DIST_DIR "${CMAKE_BINARY_DIR}/dist")
+
+  # Choose archive extension and tar flags per platform
+  if (WIN32)
+    set(_ARCHIVE_PATH "${CMAKE_BINARY_DIR}/MilkDAWp-v${PROJECT_VERSION}.zip")
+    set(_TAR_FLAGS cfv)
+    set(_TAR_FORMAT --format=zip)
+  elseif(APPLE)
+    set(_ARCHIVE_PATH "${CMAKE_BINARY_DIR}/MilkDAWp-v${PROJECT_VERSION}.zip")
+    set(_TAR_FLAGS cfv)
+    set(_TAR_FORMAT --format=zip)
+  else()
+    set(_ARCHIVE_PATH "${CMAKE_BINARY_DIR}/MilkDAWp-v${PROJECT_VERSION}.tar.gz")
+    set(_TAR_FLAGS czf)
+    set(_TAR_FORMAT)
+  endif()
+
   add_custom_target(package_vst3_zip
     DEPENDS MilkDAWp_VST3
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_DIST_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${_DIST_DIR}/MilkDAWp.vst3"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "$<TARGET_FILE_DIR:MilkDAWp_VST3>/.." "${_DIST_DIR}/MilkDAWp.vst3"
-    # Use PowerShell to zip for maximum compatibility on Windows
-    COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Force -Path '${_DIST_DIR}/MilkDAWp.vst3' -DestinationPath '${CMAKE_BINARY_DIR}/MilkDAWp-v${PROJECT_VERSION}-win64.zip'"
-    COMMENT "Packaging MilkDAWp.vst3 into zip archive for distribution"
+    # Use CMake's built-in archiver for portability
+    COMMAND "${CMAKE_COMMAND}" -E chdir "${_DIST_DIR}" "${CMAKE_COMMAND}" -E tar ${_TAR_FLAGS} "${_ARCHIVE_PATH}" ${_TAR_FORMAT} "MilkDAWp.vst3"
+    COMMENT "Packaging MilkDAWp.vst3 into archive for distribution: ${_ARCHIVE_PATH}"
     VERBATIM)
 endif()
 
