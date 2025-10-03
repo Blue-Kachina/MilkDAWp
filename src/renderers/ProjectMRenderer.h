@@ -147,6 +147,7 @@ private:
     // Backoff management for projectM init attempts
     bool pmInitAttempted = false;
     double pmInitLastAttemptSec = 0.0;
+    int pmRetryAttempts = 0; // resets per renderer/context instance
 
     // TEST: attribute-free shader path (gl_VertexID) for robust diagnostics
     std::unique_ptr<juce::OpenGLShaderProgram> testProgram;

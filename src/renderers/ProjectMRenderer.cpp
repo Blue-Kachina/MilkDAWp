@@ -651,29 +651,28 @@ void ProjectMRenderer::renderOpenGL()
                                       || (lastPresetPath.isNotEmpty());
             if (viewportReady && warmedUp && presetIntent) {
                 // Exponential backoff: 5s, 10s, 20s, then stop
-                static int retryAttempts = 0;
                 const double retryIntervals[] = {5.0, 10.0, 20.0};
                 const int maxRetries = 3;
 
-                if (retryAttempts < maxRetries) {
-                    const double retryInterval = retryIntervals[retryAttempts];
+                if (pmRetryAttempts < maxRetries) {
+                    const double retryInterval = retryIntervals[pmRetryAttempts];
                     if (!pmInitAttempted || (nowSec - pmInitLastAttemptSec) >= retryInterval) {
                         pmInitAttempted = true;
                         pmInitLastAttemptSec = nowSec;
-                        ++retryAttempts;
+                        ++pmRetryAttempts;
 
-                        MDW_LOG("PM", juce::String("Init attempt #") + String(retryAttempts) + " (fb=" + String(fbWidth) + "x" + String(fbHeight) + ")");
+                        MDW_LOG("PM", juce::String("Init attempt #") + String(pmRetryAttempts) + " (fb=" + String(fbWidth) + "x" + String(fbHeight) + ")");
                         initProjectMIfNeeded();
                         if (!pmReady) {
-                            MDW_LOG("PM", juce::String("Init failed; will retry in ") + String(retryIntervals[juce::jmin(retryAttempts, maxRetries-1)]) + "s");
+                            MDW_LOG("PM", juce::String("Init failed; will retry in ") + String(retryIntervals[juce::jmin(pmRetryAttempts, maxRetries-1)]) + "s");
                         } else {
                             MDW_LOG("PM", "Init succeeded on retry");
-                            retryAttempts = maxRetries; // stop retrying
+                            pmRetryAttempts = maxRetries; // stop retrying
                         }
                     }
-                } else if (shouldLog && retryAttempts == maxRetries) {
+                } else if (shouldLog && pmRetryAttempts == maxRetries) {
                     MDW_LOG("PM", "ProjectM init exhausted all retries; using fallback renderer permanently");
-                    ++retryAttempts; // prevent re-logging
+                    ++pmRetryAttempts; // prevent re-logging
                 }
             }
         }
@@ -1191,6 +1190,7 @@ void ProjectMRenderer::openGLContextClosing()
     auto& ext = context.extensions;
     if (vbo != 0) { ext.glDeleteBuffers(1, &vbo); vbo = 0; }
     if (vao != 0) { ext.glDeleteVertexArrays(1, &vao); vao = 0; }
+    if (dummyVAO != 0) { ext.glDeleteVertexArrays(1, &dummyVAO); dummyVAO = 0; }
     program.reset();
 }
 
