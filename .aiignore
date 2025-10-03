@@ -3,7 +3,6 @@
 
 # you can ignore files
 .DS_Store
-*.log
 *.tmp
 
 # or folders
