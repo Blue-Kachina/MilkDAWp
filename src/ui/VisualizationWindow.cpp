@@ -137,6 +137,12 @@ void VisualizationWindow::dockTo(juce::Component* parentComponent)
     if (parentComponent == nullptr)
         return;
 
+    MDW_LOG("UI", juce::String("VisualizationWindow::dockTo BEGIN - hasPeer=") + (getPeer()?"yes":"no"));
+
+    // Prepare GL for peer transition (detach) before we destroy the current peer
+    if (glView)
+        glView->prepareForPeerChange();
+
     // Embed this window as a child component inside the editor instead of a separate native window
     removeFromDesktop(); // ensure we are not a top-level peer
     setUsingNativeTitleBar(false);
@@ -151,13 +157,25 @@ void VisualizationWindow::dockTo(juce::Component* parentComponent)
     if (auto* c = getContentComponent())
         c->setVisible(true);
     docked = true;
+
+    // Request GL reattach on the new peer
+    if (glView)
+        glView->requestReattach();
+
+    MDW_LOG("UI", juce::String("VisualizationWindow::dockTo END - hasPeer=") + (getPeer()?"yes":"no") + ", docked=yes");
 }
 
 void VisualizationWindow::undock()
 {
+    MDW_LOG("UI", juce::String("VisualizationWindow::undock BEGIN - hasPeer=") + (getPeer()?"yes":"no"));
+
     // Detach from parent if currently embedded
     if (auto* p = getParentComponent())
         p->removeChildComponent(this);
+
+    // Prepare GL for peer transition (detach) before we destroy the current peer
+    if (glView)
+        glView->prepareForPeerChange();
 
     // Make it a standalone top-level window again
     removeFromDesktop();
@@ -169,6 +187,12 @@ void VisualizationWindow::undock()
     addToDesktop(juce::ComponentPeer::windowHasTitleBar | juce::ComponentPeer::windowIsResizable);
     toFront(true);
     docked = false;
+
+    // Request GL reattach on the new peer
+    if (glView)
+        glView->requestReattach();
+
+    MDW_LOG("UI", juce::String("VisualizationWindow::undock END - hasPeer=") + (getPeer()?"yes":"no") + ", docked=no");
 }
 
 bool VisualizationWindow::keyPressed(const juce::KeyPress& key)
@@ -292,6 +316,13 @@ VisualizationWindow::GLComponent::~GLComponent()
 void VisualizationWindow::GLComponent::parentHierarchyChanged()
 {
     MDW_LOG("UI", juce::String("GLComponent: parentHierarchyChanged peer=") + (getPeer() ? "yes" : "no"));
+    // If we lost our peer, JUCE will have detached the GL context implicitly.
+    // Ensure our internal flag reflects that so we can reattach on the next opportunity.
+    if (glAttached && getPeer() == nullptr)
+    {
+        glAttached = false;
+        MDW_LOG("UI", "GLComponent: reset glAttached (peer lost)");
+    }
     attachIfReady();
 }
 
@@ -390,6 +421,26 @@ void VisualizationWindow::GLComponent::shutdownGL()
         glContext.detach();
     }
     glAttached = false;
+}
+
+void VisualizationWindow::GLComponent::prepareForPeerChange()
+{
+    MDW_LOG("UI", "GLComponent: detached for peer change");
+    jassert (juce::MessageManager::getInstance()->isThisTheMessageThread());
+    // Stop callbacks before detaching to avoid JUCE assertions during teardown
+    glContext.setRenderer(nullptr);
+    glContext.setContinuousRepainting(false);
+    if (glContext.isAttached())
+        glContext.detach();
+    glAttached = false;
+}
+
+void VisualizationWindow::GLComponent::requestReattach()
+{
+    // Give JUCE a moment to create/settle the new peer before attempting to reattach
+    juce::Timer::callAfterDelay(50, [this]() {
+        this->attachIfReady();
+    });
 }
 
 void VisualizationWindow::GLComponent::attachIfReady()

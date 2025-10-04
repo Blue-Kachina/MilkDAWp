@@ -273,6 +273,15 @@ bool ProjectMRenderer::setViewportForCurrentScale()
 void ProjectMRenderer::newOpenGLContextCreated()
 {
     MDW_LOG("GL", "newOpenGLContextCreated: begin");
+    // Fresh context: clear retry/backoff so projectM can attempt init again
+    pmInitAttempted = false;
+    pmInitLastAttemptSec = 0.0;
+    pmRetryAttempts = 0;
+   #if defined(HAVE_PROJECTM)
+    pmReady = false; // force re-init path
+    // Allow a couple frames of suppression to avoid flash on first frames
+    suppressPmFrames.store(2, std::memory_order_relaxed);
+   #endif
 
     // Initialize GLEW (if linked) now that the context is current. Some projectM builds rely on GLEW.
     #if defined(HAVE_PROJECTM)
@@ -1192,6 +1201,18 @@ void ProjectMRenderer::openGLContextClosing()
     if (vao != 0) { ext.glDeleteVertexArrays(1, &vao); vao = 0; }
     if (dummyVAO != 0) { ext.glDeleteVertexArrays(1, &dummyVAO); dummyVAO = 0; }
     program.reset();
+
+    // Reset context-dependent state so we can reinitialize cleanly on the next attach
+    pmInitAttempted = false;
+    pmInitLastAttemptSec = 0.0;
+    pmRetryAttempts = 0;
+   #if defined(HAVE_PROJECTM)
+    pmReady = false;
+    // Do not consider any preset applied across contexts
+    presetAppliedOnce.store(false, std::memory_order_relaxed);
+    // Allow a couple of frames for the new context to settle before first PM frame
+    suppressPmFrames.store(2, std::memory_order_relaxed);
+   #endif
 }
 
 #if defined(HAVE_PROJECTM)

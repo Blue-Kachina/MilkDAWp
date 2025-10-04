@@ -75,6 +75,10 @@ private:
 
             // explicit GL teardown (must be called on the message thread)
             void shutdownGL();
+            // Prepare for peer change: detach and clear glAttached
+            void prepareForPeerChange();
+            // Request reattachment on next message tick
+            void requestReattach();
 
         private:
             void attachIfReady();
