@@ -5,12 +5,20 @@
 #include <cmath>
 #include <juce_core/juce_core.h>
 #include "AudioAnalysisQueue.h"
+#include "MessageThreadBridge.h"
 
 namespace milkdawp {
 
 // Minimal stub for a projectM context. In later phases this will wrap real libprojectM.
 struct ProjectMContext {
     bool initialised = false;
+
+    // Parameters (stubbed storage)
+    std::atomic<float> beatSensitivity{1.0f};
+    std::atomic<float> transitionDurationSeconds{5.0f};
+    std::atomic<bool> shuffle{false};
+    std::atomic<bool> lockCurrentPreset{false};
+    std::atomic<int> presetIndex{0};
 
     bool init()
     {
@@ -24,9 +32,17 @@ struct ProjectMContext {
         initialised = false;
     }
 
+    // Setters that would map to libprojectM APIs later
+    void setBeatSensitivity(float v) { beatSensitivity.store(v, std::memory_order_relaxed); }
+    void setTransitionDurationSeconds(float v) { transitionDurationSeconds.store(v, std::memory_order_relaxed); }
+    void setShuffle(bool v) { shuffle.store(v, std::memory_order_relaxed); }
+    void setLockCurrentPreset(bool v) { lockCurrentPreset.store(v, std::memory_order_relaxed); }
+    void setPresetIndex(int v) { presetIndex.store(v, std::memory_order_relaxed); }
+
     void renderFrame(const AudioAnalysisSnapshot&)
     {
         // Placeholder: in future, feed spectrum/beat info to projectM
+        // We could use the parameters above to influence rendering.
     }
 };
 
@@ -78,7 +94,31 @@ public:
     double getTargetFps() const { return targetFps.load(std::memory_order_relaxed); }
     uint64_t getFramesRendered() const { return framesRendered.load(std::memory_order_acquire); }
 
+    // Thread-safe parameter posting API (can be called from audio or message thread)
+    bool postParameterChange(const juce::String& id, float value)
+    {
+        return paramChanges.tryPush(ParameterChange{ id, value, 0 });
+    }
+
 private:
+    void applyPendingParameterChanges()
+    {
+        ParameterChange pc;
+        while (paramChanges.tryPop(pc))
+        {
+            if (pc.paramID == "beatSensitivity")
+                pm.setBeatSensitivity(pc.value);
+            else if (pc.paramID == "transitionDurationSeconds")
+                pm.setTransitionDurationSeconds(pc.value);
+            else if (pc.paramID == "shuffle")
+                pm.setShuffle(pc.value >= 0.5f);
+            else if (pc.paramID == "lockCurrentPreset")
+                pm.setLockCurrentPreset(pc.value >= 0.5f);
+            else if (pc.paramID == "presetIndex")
+                pm.setPresetIndex((int)std::lround(pc.value));
+        }
+    }
+
     void run()
     {
         // Initialize projectM stub and surface on this thread
@@ -103,10 +143,13 @@ private:
                 framesConsumed.fetch_add(1, std::memory_order_relaxed);
             }
 
+            // Apply any pending parameter changes
+            applyPendingParameterChanges();
+
             const double fps = targetFps.load(std::memory_order_relaxed);
             const double frameDurMs = 1000.0 / fps;
             const double nowMs = juce::Time::getMillisecondCounterHiRes();
-
+            
             if (nowMs >= nextFrameTimeMs)
             {
                 // Render a frame independent of producer cadence
@@ -139,6 +182,7 @@ private:
     std::thread worker;
     ProjectMContext pm;
     RenderSurface surface;
+    ThreadSafeSPSCQueue<ParameterChange, 64> paramChanges;
 };
 
 } // namespace milkdawp

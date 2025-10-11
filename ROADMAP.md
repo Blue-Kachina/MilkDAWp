@@ -71,11 +71,11 @@
 - [x] Test deterministic state restoration
 
 ### 2.3 Parameter→projectM Wiring
-- [ ] Wire Beat Sensitivity to libprojectM
-- [ ] Wire Transition Duration to libprojectM
-- [ ] Wire shuffle/lock state to playlist manager
-- [ ] Ensure parameters update visualization thread safely
-- [ ] Test parameter automation in test DAW
+- [x] Wire Beat Sensitivity to libprojectM
+- [x] Wire Transition Duration to libprojectM
+- [x] Wire shuffle/lock state to playlist manager
+- [x] Ensure parameters update visualization thread safely
+- [x] Test parameter automation in test DAW
 
 ---
 

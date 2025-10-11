@@ -7,7 +7,7 @@
 #include "AudioAnalysisQueue.h"
 #include "VisualizationThread.h"
 
-class MilkDAWpAudioProcessor : public juce::AudioProcessor {
+class MilkDAWpAudioProcessor : public juce::AudioProcessor, public juce::AudioProcessorValueTreeState::Listener {
 public:
     using APVTS = juce::AudioProcessorValueTreeState;
     APVTS& getValueTreeState() noexcept { return apvts; }
@@ -40,10 +40,22 @@ public:
         fftBuffer.malloc(milkdawp::AudioAnalysisSnapshot::fftSize * 2);
         monoAccum.resize(milkdawp::AudioAnalysisSnapshot::fftSize);
         energyHistory.fill(0.0f);
+
+        // Register parameter listeners for wiring to visualization thread
+        apvts.addParameterListener("beatSensitivity", this);
+        apvts.addParameterListener("transitionDurationSeconds", this);
+        apvts.addParameterListener("shuffle", this);
+        apvts.addParameterListener("lockCurrentPreset", this);
+        apvts.addParameterListener("presetIndex", this);
     }
 
     ~MilkDAWpAudioProcessor() override {
         if (vizThread) vizThread->stop();
+        apvts.removeParameterListener("beatSensitivity", this);
+        apvts.removeParameterListener("transitionDurationSeconds", this);
+        apvts.removeParameterListener("shuffle", this);
+        apvts.removeParameterListener("lockCurrentPreset", this);
+        apvts.removeParameterListener("presetIndex", this);
         milkdawp::Logging::shutdown();
     }
 
@@ -64,6 +76,8 @@ public:
         if (!vizThread)
             vizThread = std::make_unique<milkdawp::VisualizationThread>(analysisQueue);
         vizThread->start();
+        // Send initial parameter values to visualization thread
+        sendAllParamsToViz();
 #endif
     }
 
@@ -123,6 +137,16 @@ public:
     // Editor
     bool hasEditor() const override { return true; }
     juce::AudioProcessorEditor* createEditor() override;
+
+    // APVTS listener: called on audio thread when a parameter changes
+    void parameterChanged(const juce::String& parameterID, float newValue) override {
+#if MILKDAWP_ENABLE_VIZ_THREAD
+        if (vizThread)
+            vizThread->postParameterChange(parameterID, newValue);
+#else
+        juce::ignoreUnused(parameterID, newValue);
+#endif
+    }
 
     // Program/state basics (single program)
     int getNumPrograms() override { return 1; }
@@ -184,6 +208,23 @@ private:
     // Phase 2.2: Non-parameter state
     juce::String currentPresetPath;           // Full path to current preset file (may be empty)
     juce::String currentPlaylistFolderPath;   // Folder path for current playlist (may be empty)
+
+    void sendAllParamsToViz()
+    {
+    #if MILKDAWP_ENABLE_VIZ_THREAD
+        if (!vizThread) return;
+        auto send = [&](const char* id){
+            if (auto* p = apvts.getRawParameterValue(id))
+                vizThread->postParameterChange(id, p->load());
+        };
+        send("beatSensitivity");
+        send("transitionDurationSeconds");
+        send("shuffle");
+        send("lockCurrentPreset");
+        send("presetIndex");
+    #endif
+    }
+
     void produceAnalysisSnapshot() noexcept {
         // Copy mono into FFT buffer and window to compute short-time energy; FFT results are reserved for future phases
         const int size = milkdawp::AudioAnalysisSnapshot::fftSize;
