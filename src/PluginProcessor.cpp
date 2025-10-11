@@ -9,9 +9,29 @@
 
 class MilkDAWpAudioProcessor : public juce::AudioProcessor {
 public:
+    using APVTS = juce::AudioProcessorValueTreeState;
+    APVTS& getValueTreeState() noexcept { return apvts; }
+    static APVTS::ParameterLayout createParameterLayout() {
+        std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+        params.emplace_back(std::make_unique<juce::AudioParameterFloat>(
+            "beatSensitivity", "Beat Sensitivity",
+            juce::NormalisableRange<float>(0.0f, 2.0f, 0.0f, 1.0f), 1.0f));
+        params.emplace_back(std::make_unique<juce::AudioParameterFloat>(
+            "transitionDurationSeconds", "Transition Duration (s)",
+            juce::NormalisableRange<float>(0.1f, 30.0f, 0.0f, 1.0f), 5.0f));
+        params.emplace_back(std::make_unique<juce::AudioParameterBool>(
+            "shuffle", "Shuffle", false));
+        params.emplace_back(std::make_unique<juce::AudioParameterBool>(
+            "lockCurrentPreset", "Lock Current Preset", false));
+        params.emplace_back(std::make_unique<juce::AudioParameterInt>(
+            "presetIndex", "Preset Index", 0, 128, 0));
+        return { params.begin(), params.end() };
+    }
+
     MilkDAWpAudioProcessor()
     : juce::AudioProcessor(BusesProperties().withInput("Input", juce::AudioChannelSet::stereo(), true)
                                              .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      apvts(*this, nullptr, "Params", createParameterLayout()),
       fft(milkdawp::AudioAnalysisSnapshot::fftOrder),
       window(milkdawp::AudioAnalysisSnapshot::fftSize, juce::dsp::WindowingFunction<float>::hann, true)
     {
@@ -125,6 +145,7 @@ public:
     milkdawp::AudioAnalysisQueue<64>& getAnalysisQueue() noexcept { return analysisQueue; }
 
 private:
+    APVTS apvts;
     void produceAnalysisSnapshot() noexcept {
         // Copy mono into FFT buffer and window to compute short-time energy; FFT results are reserved for future phases
         const int size = milkdawp::AudioAnalysisSnapshot::fftSize;

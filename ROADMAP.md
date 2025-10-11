@@ -55,12 +55,12 @@
 **Goal:** All controls automatable, MIDI-assignable, and state-persistent
 
 ### 2.1 Parameter Definitions
-- [ ] Define Beat Sensitivity parameter (0.0 - 2.0)
-- [ ] Define Transition Duration parameter (0.1 - 30.0 seconds)
-- [ ] Define Shuffle toggle parameter
-- [ ] Define Lock Current Preset toggle parameter
-- [ ] Define Preset Index parameter (0-128)
-- [ ] Mark all parameters as automatable
+- [x] Define Beat Sensitivity parameter (0.0 - 2.0)
+- [x] Define Transition Duration parameter (0.1 - 30.0 seconds)
+- [x] Define Shuffle toggle parameter
+- [x] Define Lock Current Preset toggle parameter
+- [x] Define Preset Index parameter (0-128)
+- [x] Mark all parameters as automatable
 
 ### 2.2 State Management
 - [ ] Implement plugin state save/restore
