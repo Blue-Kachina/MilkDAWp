@@ -6,6 +6,9 @@ project(MilkDAWp VERSION 0.0.1 LANGUAGES C CXX)
 # Options aligning with README technical details
 option(MILKDAWP_BUILD_STANDALONE "Also build Standalone build target" OFF)
 option(MILKDAWP_PREFER_STATIC_RUNTIME_MSVC "Link static MSVC runtime (/MT) where applicable" ON)
+option(MILKDAWP_WITH_PROJECTM "Build and link with libprojectM visualization library" OFF)
+# Control how libprojectM is linked when built from source (LGPL compliance recommends shared linking by default)
+option(MILKDAWP_PROJECTM_LINK_STATIC "Link libprojectM statically when building it (may have LGPL obligations)" OFF)
 
 # Multi-platform defaults to ensure builds on Windows, macOS, and Linux
 if(APPLE)
@@ -36,6 +39,7 @@ endif()
 # Note: Actual fetching requires internet; paths can be overridden by user/tooling.
 include(FetchContent)
 
+# JUCE
 set(JUCE_GIT_REPOSITORY "https://github.com/juce-framework/JUCE.git" CACHE STRING "JUCE repository URL")
 set(JUCE_GIT_TAG "7.0.12" CACHE STRING "JUCE tag/commit")
 
@@ -51,6 +55,25 @@ if(JUCE_LOCAL_PATH)
   add_subdirectory(${JUCE_LOCAL_PATH} ${CMAKE_BINARY_DIR}/JUCE)
 else()
   FetchContent_MakeAvailable(juce)
+endif()
+
+# libprojectM (optional)
+set(PROJECTM_GIT_REPOSITORY "https://github.com/projectM-visualizer/projectm.git" CACHE STRING "projectM repository URL")
+set(PROJECTM_GIT_TAG "v3.1.12" CACHE STRING "projectM tag/commit")
+set(PROJECTM_LOCAL_PATH "" CACHE PATH "Path to a local projectM checkout to use instead of fetching")
+
+if(MILKDAWP_WITH_PROJECTM)
+  message(STATUS "MILKDAWP_WITH_PROJECTM=ON: Integrating libprojectM")
+  if(PROJECTM_LOCAL_PATH)
+    add_subdirectory(${PROJECTM_LOCAL_PATH} ${CMAKE_BINARY_DIR}/projectM)
+  else()
+    FetchContent_Declare(
+      projectm
+      GIT_REPOSITORY ${PROJECTM_GIT_REPOSITORY}
+      GIT_TAG        ${PROJECTM_GIT_TAG}
+    )
+    FetchContent_MakeAvailable(projectm)
+  endif()
 endif()
 
 # Basic target
@@ -106,6 +129,21 @@ target_link_libraries(${PROJECT_NAME}
     juce::juce_gui_extra
     juce::juce_dsp
 )
+
+# Optional libprojectM linkage and feature define
+if(MILKDAWP_WITH_PROJECTM)
+  # Try common target names created by projectM's CMake
+  if(TARGET projectM::projectM)
+    target_link_libraries(${PROJECT_NAME} PRIVATE projectM::projectM)
+  elseif(TARGET projectM)
+    target_link_libraries(${PROJECT_NAME} PRIVATE projectM)
+  else()
+    message(WARNING "MILKDAWP_WITH_PROJECTM=ON but no projectM CMake target found. Provide PROJECTM_LOCAL_PATH or ensure FetchContent succeeded.")
+  endif()
+  target_compile_definitions(${PROJECT_NAME} PRIVATE MILKDAWP_HAS_PROJECTM=1)
+else()
+  target_compile_definitions(${PROJECT_NAME} PRIVATE MILKDAWP_HAS_PROJECTM=0)
+endif()
 
 # Optionally also build standalone (useful during development; MVP requires it but Phase 0.1 focuses on VST3)
 if(MILKDAWP_BUILD_STANDALONE)

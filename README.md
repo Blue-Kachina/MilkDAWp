@@ -87,3 +87,26 @@ We might need to take their licensing into consideration also
 - Adaptive Quality works under load.
 - Diagnostics and First-Run Benchmark operational.
 - Bundled presets and assets included.
+
+## Building
+Options are configured in CMake to support multi-platform builds and optional components.
+Key CMake options:
+- MILKDAWP_BUILD_STANDALONE: ON to also build a Standalone app alongside VST3 (default OFF)
+- MILKDAWP_WITH_PROJECTM: ON to fetch/build and link libprojectM for visualizations (default OFF in Phase 0)
+- JUCE_LOCAL_PATH: Path to a local JUCE checkout to avoid network fetch
+- PROJECTM_LOCAL_PATH: Path to a local projectM checkout to avoid network fetch
+- MILKDAWP_PREFER_STATIC_RUNTIME_MSVC: ON to prefer static MSVC runtime (/MT) per README (default ON)
+- MILKDAWP_PROJECTM_LINK_STATIC: Prefer static link of libprojectM when building it (default OFF; see Licensing)
+
+Example configure on Windows (PowerShell):
+- cmake -S . -B build -DMILKDAWP_BUILD_STANDALONE=ON -DMILKDAWP_WITH_PROJECTM=OFF
+- cmake --build build --config Release
+
+On macOS/Linux, a similar flow applies with your generator of choice.
+
+## Licensing & Linking Notes
+- JUCE: Dual-licensed. Community usage is under GPLv3; commercial license available. If distributing a closed-source plugin, a JUCE commercial license is typically required.
+- libprojectM: LGPL-2.1-or-later. To comply easily, prefer dynamic linking (the default here). Static linking may impose obligations to provide object files or a relink mechanism to end users under the LGPL.
+- Our defaults: We prefer static linking for the MSVC runtime and for third-party libs only where licenses allow and where it meaningfully reduces external DLLs. For libprojectM specifically, the default is shared linking to keep compliance straightforward. If you opt into MILKDAWP_PROJECTM_LINK_STATIC, ensure you meet LGPL requirements for end-user relinking.
+
+Given the current intent (no dependency modifications, no charging users), dynamic linking to LGPL components like libprojectM is recommended. We'll continue to refine the LICENSE and NOTICE files in later phases as we integrate more code.

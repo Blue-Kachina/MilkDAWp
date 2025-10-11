@@ -11,11 +11,11 @@
 - [x] Create basic project directory structure
 
 ### 0.2 Dependency Integration
-- [ ] Integrate JUCE framework (latest stable version)
-- [ ] Integrate libprojectM library
+- [x] Integrate JUCE framework (latest stable version)
+- [x] Integrate libprojectM library
 - [ ] Verify licenses compatibility for static linking
-- [ ] Configure build scripts to link dependencies
-- [ ] Create minimal "hello world" plugin that loads successfully
+- [x] Configure build scripts to link dependencies
+- [x] Create minimal "hello world" plugin that loads successfully
 
 ### 0.3 Development Infrastructure
 - [ ] Set up logging framework

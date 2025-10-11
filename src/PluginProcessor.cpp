@@ -61,7 +61,13 @@ public:
         g.fillAll(juce::Colours::black);
         g.setColour(juce::Colours::white);
         g.setFont(18.0f);
-        g.drawFittedText("MilkDAWp v" MILKDAWP_VERSION_STRING " (scaffold)", getLocalBounds(), juce::Justification::centred, 2);
+#if MILKDAWP_HAS_PROJECTM
+        constexpr const char* pm = "projectM: enabled";
+#else
+        constexpr const char* pm = "projectM: disabled";
+#endif
+        juce::String text = juce::String("MilkDAWp v") + MILKDAWP_VERSION_STRING + " (scaffold)\n" + pm;
+        g.drawFittedText(text, getLocalBounds(), juce::Justification::centred, 2);
     }
 
     void resized() override {}
