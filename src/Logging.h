@@ -1,43 +1,39 @@
 #pragma once
+
 #include <juce_core/juce_core.h>
 
 namespace milkdawp {
 
-// Simple logging facade over JUCE's Logger/FileLogger.
-class Logging {
-public:
-    // Initialize file logging once; safe to call multiple times.
-    static void init(const juce::String& appName, const juce::String& versionString) {
-        static std::once_flag once;
-        std::call_once(once, [&]() {
-            auto logsDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                               .getChildFile(appName)
-                               .getChildFile("Logs");
-            logsDir.createDirectory();
-
-            auto timestamp = juce::Time::getCurrentTime().formatted("%Y-%m-%d_%H-%M-%S");
-            auto logFile = logsDir.getChildFile(appName + "_" + timestamp + ".log");
-
-            auto fileLogger = std::make_unique<juce::FileLogger>(logFile, appName + " log started", 1024 * 128);
-            juce::Logger::setCurrentLogger(fileLogger.release());
-
-            juce::Logger::writeToLog(appName + " v" + versionString + " starting up");
-#if MILKDAWP_HAS_PROJECTM
-            juce::Logger::writeToLog("Feature: libprojectM enabled");
-#else
-            juce::Logger::writeToLog("Feature: libprojectM disabled");
-#endif
-        });
+// Lightweight logging facade for early phases.
+struct Logging {
+    static void init(const juce::String& appName, const juce::String& version)
+    {
+        juce::ignoreUnused(appName, version);
+        // JUCE's default Logger writes to OS debug output / stdout depending on platform.
+        // We just emit a banner once; guard against duplicate banners using a static flag.
+        static std::atomic<bool> initialised{ false };
+        bool expected = false;
+        if (initialised.compare_exchange_strong(expected, true))
+        {
+            juce::Logger::writeToLog("[MilkDAWp] Logging initialised");
+        }
     }
 
-    static void shutdown() {
-        juce::Logger::setCurrentLogger(nullptr);
+    static void shutdown()
+    {
+        // Nothing to clean up for now; placeholder for future log sinks.
     }
 };
 
-// Convenience macros
-#define MDW_LOG_INFO(msg)   do { juce::Logger::writeToLog(juce::String("INFO: ") + (msg)); } while(false)
-#define MDW_LOG_WARN(msg)   do { juce::Logger::writeToLog(juce::String("WARN: ") + (msg)); } while(false)
-#define MDW_LOG_ERROR(msg)  do { juce::Logger::writeToLog(juce::String("ERROR: ") + (msg)); } while(false)
-
 } // namespace milkdawp
+
+// Simple macros that map to JUCE Logger for now.
+#ifndef MDW_LOG_INFO
+#define MDW_LOG_INFO(msg)  do { juce::Logger::writeToLog(juce::String("[INFO] ") + (msg)); } while(false)
+#endif
+#ifndef MDW_LOG_WARN
+#define MDW_LOG_WARN(msg)  do { juce::Logger::writeToLog(juce::String("[WARN] ") + (msg)); } while(false)
+#endif
+#ifndef MDW_LOG_ERROR
+#define MDW_LOG_ERROR(msg) do { juce::Logger::writeToLog(juce::String("[ERROR] ") + (msg)); } while(false)
+#endif

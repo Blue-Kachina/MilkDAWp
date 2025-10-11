@@ -1,80 +1,63 @@
 #pragma once
+
+#include <atomic>
+#include <thread>
 #include <juce_core/juce_core.h>
 #include "AudioAnalysisQueue.h"
-#include "Logging.h"
 
 namespace milkdawp {
 
-// Phase 1.2 scaffolding: a dedicated visualization thread that consumes
-// audio analysis snapshots from the lock-free queue. This does not do any
-// rendering yet; it simply simulates a render loop decoupled from the audio
-// thread and tracks consumption stats.
-class VisualizationThread : private juce::Thread {
+// Simple visualization consumer thread for Phase 1.x scaffolding.
+class VisualizationThread {
 public:
-    explicit VisualizationThread(AudioAnalysisQueue<64>& q)
-        : juce::Thread("MilkDAWpVizThread"), queue(q) {}
-
-    ~VisualizationThread() override { stop(); }
-
-    void start() {
-        if (!isThreadRunning()) {
-            framesConsumed.store(0);
-            lastConsumeTimeMs.store(0);
-            startThread();
-            MDW_LOG_INFO("Visualization thread started");
-        }
+    explicit VisualizationThread(IAudioAnalysisQueue& q)
+        : queue(q)
+    {
     }
 
-    void stop(int timeoutMs = 1000) {
-        if (isThreadRunning()) {
-            signalThreadShouldExit();
-            notify();
-            stopThread(timeoutMs);
-            MDW_LOG_INFO("Visualization thread stopped");
-        }
+    ~VisualizationThread() { stop(); }
+
+    void start()
+    {
+        bool expected = false;
+        if (!running.compare_exchange_strong(expected, true))
+            return; // already running
+        worker = std::thread([this]{ this->run(); });
     }
 
-    bool running() const noexcept { return isThreadRunning(); }
+    void stop()
+    {
+        bool expected = true;
+        if (!running.compare_exchange_strong(expected, false))
+            return; // not running
+        if (worker.joinable())
+            worker.join();
+    }
 
-    // Stats:
-    uint64_t getFramesConsumed() const noexcept { return framesConsumed.load(); }
-
-    // For testing: retrieve last snapshot (not thread-safe against concurrent write,
-    // but good enough for tests where we stop the thread first or accept a race).
-    AudioAnalysisSnapshot getLastSnapshot() const noexcept { return lastSnapshot; }
+    uint64_t getFramesConsumed() const { return framesConsumed.load(std::memory_order_acquire); }
 
 private:
-    void run() override {
-        juce::int64 lastTime = juce::Time::getMillisecondCounter();
-        while (! threadShouldExit()) {
-            // Consume whatever is available without blocking
-            int consumedThisLoop = 0;
-            AudioAnalysisSnapshot snap;
-            while (queue.tryPop(snap)) {
-                lastSnapshot = snap;
-                framesConsumed.fetch_add(1);
-                ++consumedThisLoop;
+    void run()
+    {
+        // Consume snapshots opportunistically
+        AudioAnalysisSnapshot s;
+        while (running.load(std::memory_order_relaxed))
+        {
+            bool any = false;
+            while (queue.tryPop(s))
+            {
+                any = true;
+                framesConsumed.fetch_add(1, std::memory_order_relaxed);
             }
-
-            // Simulate a target frame rate ~60 Hz without tying to audio thread
-            const juce::int64 now = juce::Time::getMillisecondCounter();
-            lastConsumeTimeMs.store((uint32_t)(now - lastTime));
-            lastTime = now;
-
-            if (consumedThisLoop == 0) {
-                // Sleep briefly to avoid busy-spin when there's nothing to consume
-                wait(5);
-            } else {
-                // Yield to allow other threads to run
-                juce::Thread::yield();
-            }
+            if (!any)
+                juce::Thread::sleep(5);
         }
     }
 
-    AudioAnalysisQueue<64>& queue;
-    std::atomic<uint64_t> framesConsumed{0};
-    std::atomic<uint32_t> lastConsumeTimeMs{0};
-    AudioAnalysisSnapshot lastSnapshot{};
+    IAudioAnalysisQueue& queue;
+    std::atomic<bool> running{ false };
+    std::atomic<uint64_t> framesConsumed{ 0 };
+    std::thread worker;
 };
 
 } // namespace milkdawp
