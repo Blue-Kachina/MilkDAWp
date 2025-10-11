@@ -29,11 +29,11 @@
 **Goal:** Establish zero-latency audio path and proper threading model
 
 ### 1.1 Audio Thread Setup
-- [ ] Implement plugin audio processor skeleton
-- [ ] Verify zero-latency passthrough (audio in = audio out)
-- [ ] Create FFT analysis capture on audio thread
-- [ ] Implement beat detection capture on audio thread
-- [ ] Add thread-safe queue for audio→visualization data
+- [x] Implement plugin audio processor skeleton
+- [x] Verify zero-latency passthrough (audio in = audio out)
+- [x] Create FFT analysis capture on audio thread
+- [x] Implement beat detection capture on audio thread
+- [x] Add thread-safe queue for audio→visualization data
 
 ### 1.2 Visualization Thread
 - [ ] Create dedicated visualization rendering thread
