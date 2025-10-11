@@ -7,6 +7,17 @@ project(MilkDAWp VERSION 0.0.1 LANGUAGES C CXX)
 option(MILKDAWP_BUILD_STANDALONE "Also build Standalone build target" OFF)
 option(MILKDAWP_PREFER_STATIC_RUNTIME_MSVC "Link static MSVC runtime (/MT) where applicable" ON)
 
+# Multi-platform defaults to ensure builds on Windows, macOS, and Linux
+if(APPLE)
+  # Universal build (Intel + Apple Silicon) and reasonable deployment target
+  set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "Architectures for macOS builds" FORCE)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version" FORCE)
+elseif(UNIX)
+  # Linux: ensure position independent code and X11 usage for JUCE GUI modules
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+  add_compile_definitions(JUCE_USE_X11=1)
+endif()
+
 # Configure MSVC runtime preference (static linking preference per README)
 if(MSVC AND MILKDAWP_PREFER_STATIC_RUNTIME_MSVC)
   foreach(flag_var

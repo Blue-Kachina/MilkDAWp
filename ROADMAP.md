@@ -6,7 +6,7 @@
 ### 0.1 Project Scaffolding
 - [x] Initialize JUCE project with Projucer/CMake
 - [x] Configure VST3 plugin format with audio effect type
-- [ ] Set up multi-platform build targets (Windows, macOS, Linux)
+- [x] Set up multi-platform build targets (Windows, macOS, Linux)
 - [x] Configure static linking preferences per README technical details
 - [x] Create basic project directory structure
 
@@ -116,7 +116,7 @@
 
 ### 4.1 Main Window Layout
 - [ ] Create 1200x650 default window size
-- [ ] Design layout: controls on left/top, visualization area on right
+- [ ] Design layout: controls displayed across the top, visualization area below
 - [ ] Add branded logo display
 - [ ] Create professional hardware-style control appearance
 
