@@ -6,6 +6,7 @@
 #include <juce_core/juce_core.h>
 #include "AudioAnalysisQueue.h"
 #include "MessageThreadBridge.h"
+#include "Logging.h"
 
 namespace milkdawp {
 
@@ -19,6 +20,8 @@ struct ProjectMContext {
     std::atomic<bool> shuffle{false};
     std::atomic<bool> lockCurrentPreset{false};
     std::atomic<int> presetIndex{0};
+
+    juce::String currentPresetName; // for UI display
 
     bool init()
     {
@@ -38,6 +41,24 @@ struct ProjectMContext {
     void setShuffle(bool v) { shuffle.store(v, std::memory_order_relaxed); }
     void setLockCurrentPreset(bool v) { lockCurrentPreset.store(v, std::memory_order_relaxed); }
     void setPresetIndex(int v) { presetIndex.store(v, std::memory_order_relaxed); }
+
+    bool loadPreset(const juce::String& path, juce::String& outError)
+    {
+        outError = {};
+        juce::File f(path);
+        if (! f.existsAsFile()) {
+            outError = "Preset file does not exist";
+            return false;
+        }
+        auto ext = f.getFileExtension().toLowerCase();
+        if (ext != ".milk") {
+            outError = "Unsupported preset file type (expected .milk)";
+            return false;
+        }
+        currentPresetName = f.getFileNameWithoutExtension();
+        // In a future phase, we will call real libprojectM API here and handle errors.
+        return true;
+    }
 
     void renderFrame(const AudioAnalysisSnapshot&)
     {
@@ -100,6 +121,15 @@ public:
         return paramChanges.tryPush(ParameterChange{ id, value, 0 });
     }
 
+    // Thread-safe preset load request
+    bool postLoadPreset(const juce::String& path)
+    {
+        return presetLoadRequests.tryPush(path);
+    }
+
+    // Accessor for current preset name (for UI polling if needed)
+    juce::String getCurrentPresetName() const { return pm.currentPresetName; }
+
 private:
     void applyPendingParameterChanges()
     {
@@ -119,6 +149,20 @@ private:
         }
     }
 
+    void applyPendingPresetLoads()
+    {
+        juce::String path;
+        while (presetLoadRequests.tryPop(path))
+        {
+            juce::String err;
+            if (!pm.loadPreset(path, err)) {
+                MDW_LOG_ERROR(juce::String("Failed to load preset: ") + path + ": " + err);
+            } else {
+                MDW_LOG_INFO(juce::String("Loaded preset: ") + path);
+            }
+        }
+    }
+
     void run()
     {
         // Initialize projectM stub and surface on this thread
@@ -129,7 +173,7 @@ private:
         bool haveLatest = false;
 
         double nextFrameTimeMs = juce::Time::getMillisecondCounterHiRes();
-
+        
         while (running.load(std::memory_order_relaxed))
         {
             // Drain queue quickly; keep the most recent snapshot
@@ -145,6 +189,8 @@ private:
 
             // Apply any pending parameter changes
             applyPendingParameterChanges();
+            // Apply any pending preset loads
+            applyPendingPresetLoads();
 
             const double fps = targetFps.load(std::memory_order_relaxed);
             const double frameDurMs = 1000.0 / fps;
@@ -183,6 +229,7 @@ private:
     ProjectMContext pm;
     RenderSurface surface;
     ThreadSafeSPSCQueue<ParameterChange, 64> paramChanges;
+    ThreadSafeSPSCQueue<juce::String, 8> presetLoadRequests;
 };
 
 } // namespace milkdawp

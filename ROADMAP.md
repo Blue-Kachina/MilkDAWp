@@ -83,11 +83,11 @@
 **Goal:** Load single presets and preset playlists
 
 ### 3.1 Single Preset Loading
-- [ ] Implement file picker UI component (initially basic)
-- [ ] Load single .milk preset into libprojectM
-- [ ] Display current preset name in UI
-- [ ] Handle preset load errors gracefully
-- [ ] Store current preset in state
+- [x] Implement file picker UI component (initially basic)
+- [x] Load single .milk preset into libprojectM
+- [x] Display current preset name in UI
+- [x] Handle preset load errors gracefully
+- [x] Store current preset in state
 
 ### 3.2 Playlist System
 - [ ] Implement folder picker UI component

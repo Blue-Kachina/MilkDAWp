@@ -11,6 +11,15 @@ class MilkDAWpAudioProcessor : public juce::AudioProcessor, public juce::AudioPr
 public:
     using APVTS = juce::AudioProcessorValueTreeState;
     APVTS& getValueTreeState() noexcept { return apvts; }
+    juce::String getCurrentPresetPath() const noexcept { return currentPresetPath; }
+    void setCurrentPresetPathAndPostLoad(const juce::String& path)
+    {
+        currentPresetPath = path;
+    #if MILKDAWP_ENABLE_VIZ_THREAD
+        if (vizThread)
+            vizThread->postLoadPreset(path);
+    #endif
+    }
     static APVTS::ParameterLayout createParameterLayout() {
         std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
         params.emplace_back(std::make_unique<juce::AudioParameterFloat>(
@@ -283,8 +292,39 @@ private:
 class MilkDAWpAudioProcessorEditor : public juce::AudioProcessorEditor {
 public:
     explicit MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcessor& proc)
-        : juce::AudioProcessorEditor(&proc), processor(proc) {
+        : juce::AudioProcessorEditor(&proc), processor(proc)
+    {
         setSize(1200, 650); // per README default window size
+
+        addAndMakeVisible(loadButton);
+        loadButton.setButtonText("Load Preset...");
+        loadButton.onClick = [this]
+        {
+            fileChooser = std::make_unique<juce::FileChooser>("Select a MilkDrop preset", juce::File(), "*.milk");
+            auto flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
+            fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc)
+            {
+                auto f = fc.getResult();
+                fileChooser.reset();
+                if (! f.existsAsFile())
+                {
+                    // User may have cancelled; just return silently in that case
+                    return;
+                }
+                if (f.getFileExtension().toLowerCase() != ".milk")
+                {
+                    juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Preset Load", "Please select a .milk preset file.");
+                    return;
+                }
+                processor.setCurrentPresetPathAndPostLoad(f.getFullPathName());
+                presetNameLabel.setText(f.getFileNameWithoutExtension(), juce::dontSendNotification);
+            });
+        };
+
+        addAndMakeVisible(presetNameLabel);
+        presetNameLabel.setText(initialPresetName(), juce::dontSendNotification);
+        presetNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+        presetNameLabel.setJustificationType(juce::Justification::centredLeft);
     }
 
     void paint(juce::Graphics& g) override {
@@ -296,14 +336,30 @@ public:
 #else
         constexpr const char* pm = "projectM: disabled";
 #endif
-        juce::String text = juce::String("MilkDAWp v") + MILKDAWP_VERSION_STRING + " (core: audio thread setup)\n" + pm;
-        g.drawFittedText(text, getLocalBounds(), juce::Justification::centred, 2);
+        juce::String text = juce::String("MilkDAWp v") + MILKDAWP_VERSION_STRING + "\n" + pm;
+        g.drawFittedText(text, getLocalBounds().removeFromTop(80), juce::Justification::centred, 2);
     }
 
-    void resized() override {}
+    void resized() override {
+        auto r = getLocalBounds().reduced(16);
+        auto top = r.removeFromTop(40);
+        loadButton.setBounds(top.removeFromLeft(180));
+        top.removeFromLeft(12);
+        presetNameLabel.setBounds(top);
+    }
 
 private:
+    juce::String initialPresetName() const
+    {
+        juce::File f(processor.getCurrentPresetPath());
+        if (f.existsAsFile()) return f.getFileNameWithoutExtension();
+        return "(no preset)";
+    }
+
     MilkDAWpAudioProcessor& processor;
+    juce::TextButton loadButton;
+    juce::Label presetNameLabel;
+    std::unique_ptr<juce::FileChooser> fileChooser;
 };
 
 juce::AudioProcessorEditor* MilkDAWpAudioProcessor::createEditor() {
