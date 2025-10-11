@@ -131,9 +131,43 @@ public:
     const juce::String getProgramName(int) override { return {}; }
     void changeProgramName(int, const juce::String&) override {}
 
-    // State info (placeholder)
-    void getStateInformation(juce::MemoryBlock& destData) override { juce::ignoreUnused(destData); }
-    void setStateInformation(const void* data, int sizeInBytes) override { juce::ignoreUnused(data, sizeInBytes); }
+    // State info
+    void getStateInformation(juce::MemoryBlock& destData) override {
+        juce::ValueTree root { juce::Identifier("MilkDAWpState") };
+        root.setProperty("version", juce::String(MILKDAWP_VERSION_STRING), nullptr);
+        root.setProperty("presetPath", currentPresetPath, nullptr);
+        root.setProperty("playlistFolderPath", currentPlaylistFolderPath, nullptr);
+
+        // Embed parameter state
+        auto paramsState = apvts.copyState();
+        root.addChild(paramsState, -1, nullptr);
+
+        juce::MemoryOutputStream mos(destData, false);
+        root.writeToStream(mos);
+    }
+
+    void setStateInformation(const void* data, int sizeInBytes) override {
+        if (data == nullptr || sizeInBytes <= 0)
+            return;
+
+        auto root = juce::ValueTree::readFromData(data, (size_t) sizeInBytes);
+        if (! root.isValid())
+            return;
+
+        if (root.hasType(juce::Identifier("MilkDAWpState"))) {
+            currentPresetPath = root.getProperty("presetPath").toString();
+            currentPlaylistFolderPath = root.getProperty("playlistFolderPath").toString();
+
+            // Find APVTS child by type
+            const auto paramsType = apvts.state.getType();
+            auto paramTree = root.getChildWithName(paramsType);
+            if (! paramTree.isValid() && root.getNumChildren() > 0)
+                paramTree = root.getChild(0);
+
+            if (paramTree.isValid())
+                apvts.replaceState(paramTree);
+        }
+    }
 
     // MIDI/latency settings per README Phase 0: audio effect, no MIDI
     bool acceptsMidi() const override { return false; }
@@ -146,6 +180,10 @@ public:
 
 private:
     APVTS apvts;
+
+    // Phase 2.2: Non-parameter state
+    juce::String currentPresetPath;           // Full path to current preset file (may be empty)
+    juce::String currentPlaylistFolderPath;   // Folder path for current playlist (may be empty)
     void produceAnalysisSnapshot() noexcept {
         // Copy mono into FFT buffer and window to compute short-time energy; FFT results are reserved for future phases
         const int size = milkdawp::AudioAnalysisSnapshot::fftSize;

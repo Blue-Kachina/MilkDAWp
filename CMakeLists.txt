@@ -210,6 +210,9 @@ if(BUILD_TESTING)
     tests/VisualizationThreadTests.cpp
     tests/AudioAnalysisQueueTests.cpp
     tests/MessageThreadTests.cpp
+    tests/StateTests.cpp
+    src/PluginProcessor.cpp
+    src/PluginEditor.cpp
     src/Version.h
     src/Logging.h
     src/AudioAnalysisQueue.h
@@ -218,6 +221,12 @@ if(BUILD_TESTING)
     src/MessageThreadBridge.h
   )
   target_compile_features(${PROJECT_NAME}_tests PRIVATE cxx_std_17)
-  target_link_libraries(${PROJECT_NAME}_tests PRIVATE juce::juce_core)
+  target_link_libraries(${PROJECT_NAME}_tests PRIVATE
+    juce::juce_core
+    juce::juce_audio_basics
+    juce::juce_audio_processors
+    juce::juce_gui_basics
+    juce::juce_gui_extra
+    juce::juce_dsp)
   add_test(NAME ${PROJECT_NAME}_tests COMMAND ${PROJECT_NAME}_tests)
 endif()

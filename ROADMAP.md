@@ -63,12 +63,12 @@
 - [x] Mark all parameters as automatable
 
 ### 2.2 State Management
-- [ ] Implement plugin state save/restore
-- [ ] Save/restore current preset path
-- [ ] Save/restore current playlist folder path
-- [ ] Save/restore preset index in playlist
-- [ ] Save/restore all control values
-- [ ] Test deterministic state restoration
+- [x] Implement plugin state save/restore
+- [x] Save/restore current preset path
+- [x] Save/restore current playlist folder path
+- [x] Save/restore preset index in playlist
+- [x] Save/restore all control values
+- [x] Test deterministic state restoration
 
 ### 2.3 Parameter→projectM Wiring
 - [ ] Wire Beat Sensitivity to libprojectM
