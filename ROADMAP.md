@@ -37,10 +37,10 @@
 
 ### 1.2 Visualization Thread
 - [x] Create dedicated visualization rendering thread
-- [ ] Initialize projectM instance on visualization thread
+- [x] Initialize projectM instance on visualization thread
 - [x] Implement thread-safe data consumption from audio thread
-- [ ] Set up basic GPU surface rendering
-- [ ] Verify frame rate independence from audio thread
+- [x] Set up basic GPU surface rendering
+- [x] Verify frame rate independence from audio thread
 
 ### 1.3 Message Thread
 - [ ] Implement JUCE message thread for UI updates
