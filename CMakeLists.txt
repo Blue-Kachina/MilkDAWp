@@ -1,0 +1,116 @@
+cmake_minimum_required(VERSION 3.20)
+
+# MilkDAWp - JUCE-based VST3 effect (scaffolding)
+project(MilkDAWp VERSION 0.0.1 LANGUAGES C CXX)
+
+# Options aligning with README technical details
+option(MILKDAWP_BUILD_STANDALONE "Also build Standalone build target" OFF)
+option(MILKDAWP_PREFER_STATIC_RUNTIME_MSVC "Link static MSVC runtime (/MT) where applicable" ON)
+
+# Configure MSVC runtime preference (static linking preference per README)
+if(MSVC AND MILKDAWP_PREFER_STATIC_RUNTIME_MSVC)
+  foreach(flag_var
+          CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_DEBUG
+          CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_DEBUG)
+    if(${flag_var} MATCHES "/MD")
+      string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
+    endif()
+    if(${flag_var} MATCHES "/MDd")
+      string(REGEX REPLACE "/MDd" "/MTd" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach()
+endif()
+
+# Dependencies (JUCE, projectM) – set up as FetchContent placeholders.
+# Note: Actual fetching requires internet; paths can be overridden by user/tooling.
+include(FetchContent)
+
+set(JUCE_GIT_REPOSITORY "https://github.com/juce-framework/JUCE.git" CACHE STRING "JUCE repository URL")
+set(JUCE_GIT_TAG "7.0.12" CACHE STRING "JUCE tag/commit")
+
+FetchContent_Declare(
+  juce
+  GIT_REPOSITORY ${JUCE_GIT_REPOSITORY}
+  GIT_TAG        ${JUCE_GIT_TAG}
+)
+
+# Allow user to provide a local JUCE path to avoid network fetch
+set(JUCE_LOCAL_PATH "" CACHE PATH "Path to a local JUCE checkout to use instead of fetching")
+if(JUCE_LOCAL_PATH)
+  add_subdirectory(${JUCE_LOCAL_PATH} ${CMAKE_BINARY_DIR}/JUCE)
+else()
+  FetchContent_MakeAvailable(juce)
+endif()
+
+# Basic target
+set(PRODUCT_NAME "MilkDAWp")
+set(COMPANY_NAME "Otitis Media")
+
+# Choose plugin formats
+set(MILKDAWP_PLUGIN_FORMATS VST3)
+if(MILKDAWP_BUILD_STANDALONE)
+  list(APPEND MILKDAWP_PLUGIN_FORMATS Standalone)
+endif()
+
+# JUCE plugin target: VST3 audio effect; optionally Standalone in dev
+juce_add_plugin(${PROJECT_NAME}
+  COMPANY_NAME        ${COMPANY_NAME}
+  BUNDLE_ID           com.otitismedia.${PROJECT_NAME}
+  IS_SYNTH            FALSE
+  NEEDS_MIDI_INPUT    FALSE
+  NEEDS_MIDI_OUTPUT   FALSE
+  IS_MIDI_EFFECT      FALSE
+  EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+  PLUGIN_MANUFACTURER_CODE OMda
+  PLUGIN_CODE         Mlkw
+  FORMATS             ${MILKDAWP_PLUGIN_FORMATS}
+  PRODUCT_NAME        ${PRODUCT_NAME}
+)
+
+# Sources
+target_sources(${PROJECT_NAME}
+  PRIVATE
+    src/PluginProcessor.cpp
+    src/PluginEditor.cpp
+    src/Version.h
+)
+
+# Public compile definitions and config toggles
+target_compile_definitions(${PROJECT_NAME}
+  PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+)
+
+target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
+
+# Link JUCE modules we know we'll need as a base (extend in later phases)
+target_link_libraries(${PROJECT_NAME}
+  PRIVATE
+    juce::juce_audio_utils
+    juce::juce_audio_basics
+    juce::juce_audio_processors
+    juce::juce_gui_basics
+    juce::juce_gui_extra
+    juce::juce_dsp
+)
+
+# Optionally also build standalone (useful during development; MVP requires it but Phase 0.1 focuses on VST3)
+if(MILKDAWP_BUILD_STANDALONE)
+  juce_add_binary_data(${PROJECT_NAME}Assets SOURCES)
+  target_link_libraries(${PROJECT_NAME} PRIVATE juce::juce_product_unlocking)
+endif()
+
+# Platform tweaks
+if(WIN32)
+  # Ensure Unicode and lean Windows headers
+  target_compile_definitions(${PROJECT_NAME} PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+endif()
+
+# Organize source in IDEs
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES
+  src/PluginProcessor.cpp
+  src/PluginEditor.cpp
+  src/Version.h
+)
