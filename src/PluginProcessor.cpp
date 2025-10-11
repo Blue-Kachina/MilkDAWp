@@ -2,6 +2,7 @@
 #include "Version.h"
 #include "Logging.h"
 #include "AudioAnalysisQueue.h"
+#include "VisualizationThread.h"
 
 class MilkDAWpAudioProcessor : public juce::AudioProcessor {
 public:
@@ -18,6 +19,11 @@ public:
         energyHistory.fill(0.0f);
     }
 
+    ~MilkDAWpAudioProcessor() override {
+        if (vizThread) vizThread->stop();
+        milkdawp::Logging::shutdown();
+    }
+
     const juce::String getName() const override { return "MilkDAWp"; }
 
     void prepareToPlay(double sampleRate, int /*samplesPerBlockExpected*/) override {
@@ -28,9 +34,22 @@ public:
         energyAverage = 0.0f;
         beatCooldown = 0;
         analysisQueue.clear();
+#if !defined(MILKDAWP_ENABLE_VIZ_THREAD)
+#define MILKDAWP_ENABLE_VIZ_THREAD 1
+#endif
+#if MILKDAWP_ENABLE_VIZ_THREAD
+        if (!vizThread)
+            vizThread = std::make_unique<milkdawp::VisualizationThread>(analysisQueue);
+        vizThread->start();
+#endif
     }
 
-    void releaseResources() override {}
+    void releaseResources() override {
+#if MILKDAWP_ENABLE_VIZ_THREAD
+        if (vizThread)
+            vizThread->stop();
+#endif
+    }
 
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override {
         // Only allow matching input/output channel counts, mono or stereo
@@ -171,6 +190,7 @@ private:
     uint64_t runningSamplePos = 0;
 
     milkdawp::AudioAnalysisQueue<64> analysisQueue;
+    std::unique_ptr<milkdawp::VisualizationThread> vizThread;
 };
 
 class MilkDAWpAudioProcessorEditor : public juce::AudioProcessorEditor {

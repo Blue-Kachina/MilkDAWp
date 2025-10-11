@@ -115,6 +115,9 @@ if(MILKDAWP_BUILD_PLUGIN)
       src/PluginProcessor.cpp
       src/PluginEditor.cpp
       src/Version.h
+      src/Logging.h
+      src/AudioAnalysisQueue.h
+      src/VisualizationThread.h
   )
 
   # Public compile definitions and config toggles
@@ -179,8 +182,11 @@ if(BUILD_TESTING)
   add_executable(${PROJECT_NAME}_tests
     tests/Main.cpp
     tests/SampleTests.cpp
+    tests/VisualizationThreadTests.cpp
     src/Version.h
     src/Logging.h
+    src/AudioAnalysisQueue.h
+    src/VisualizationThread.h
   )
   target_compile_features(${PROJECT_NAME}_tests PRIVATE cxx_std_17)
   target_link_libraries(${PROJECT_NAME}_tests PRIVATE juce::juce_core)

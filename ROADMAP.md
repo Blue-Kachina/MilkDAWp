@@ -36,9 +36,9 @@
 - [x] Add thread-safe queue for audio→visualization data
 
 ### 1.2 Visualization Thread
-- [ ] Create dedicated visualization rendering thread
+- [x] Create dedicated visualization rendering thread
 - [ ] Initialize projectM instance on visualization thread
-- [ ] Implement thread-safe data consumption from audio thread
+- [x] Implement thread-safe data consumption from audio thread
 - [ ] Set up basic GPU surface rendering
 - [ ] Verify frame rate independence from audio thread
 
