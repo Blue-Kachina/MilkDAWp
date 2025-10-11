@@ -80,81 +80,90 @@ endif()
 set(PRODUCT_NAME "MilkDAWp")
 set(COMPANY_NAME "Otitis Media")
 
+# Enable CTest for test discovery
+include(CTest)
+enable_testing()
+
+# Allow building the plugin separately from tests/CI to avoid GUI deps
+option(MILKDAWP_BUILD_PLUGIN "Build the JUCE plugin target" ON)
+
 # Choose plugin formats
-set(MILKDAWP_PLUGIN_FORMATS VST3)
-if(MILKDAWP_BUILD_STANDALONE)
-  list(APPEND MILKDAWP_PLUGIN_FORMATS Standalone)
-endif()
-
-# JUCE plugin target: VST3 audio effect; optionally Standalone in dev
-juce_add_plugin(${PROJECT_NAME}
-  COMPANY_NAME        ${COMPANY_NAME}
-  BUNDLE_ID           com.otitismedia.${PROJECT_NAME}
-  IS_SYNTH            FALSE
-  NEEDS_MIDI_INPUT    FALSE
-  NEEDS_MIDI_OUTPUT   FALSE
-  IS_MIDI_EFFECT      FALSE
-  EDITOR_WANTS_KEYBOARD_FOCUS FALSE
-  PLUGIN_MANUFACTURER_CODE OMda
-  PLUGIN_CODE         Mlkw
-  FORMATS             ${MILKDAWP_PLUGIN_FORMATS}
-  PRODUCT_NAME        ${PRODUCT_NAME}
-)
-
-# Sources
-target_sources(${PROJECT_NAME}
-  PRIVATE
-    src/PluginProcessor.cpp
-    src/PluginEditor.cpp
-    src/Version.h
-)
-
-# Public compile definitions and config toggles
-target_compile_definitions(${PROJECT_NAME}
-  PRIVATE
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    JUCE_VST3_CAN_REPLACE_VST2=0
-)
-
-target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
-
-# Link JUCE modules we know we'll need as a base (extend in later phases)
-target_link_libraries(${PROJECT_NAME}
-  PRIVATE
-    juce::juce_audio_utils
-    juce::juce_audio_basics
-    juce::juce_audio_processors
-    juce::juce_gui_basics
-    juce::juce_gui_extra
-    juce::juce_dsp
-)
-
-# Optional libprojectM linkage and feature define
-if(MILKDAWP_WITH_PROJECTM)
-  # Try common target names created by projectM's CMake
-  if(TARGET projectM::projectM)
-    target_link_libraries(${PROJECT_NAME} PRIVATE projectM::projectM)
-  elseif(TARGET projectM)
-    target_link_libraries(${PROJECT_NAME} PRIVATE projectM)
-  else()
-    message(WARNING "MILKDAWP_WITH_PROJECTM=ON but no projectM CMake target found. Provide PROJECTM_LOCAL_PATH or ensure FetchContent succeeded.")
+if(MILKDAWP_BUILD_PLUGIN)
+  set(MILKDAWP_PLUGIN_FORMATS VST3)
+  if(MILKDAWP_BUILD_STANDALONE)
+    list(APPEND MILKDAWP_PLUGIN_FORMATS Standalone)
   endif()
-  target_compile_definitions(${PROJECT_NAME} PRIVATE MILKDAWP_HAS_PROJECTM=1)
-else()
-  target_compile_definitions(${PROJECT_NAME} PRIVATE MILKDAWP_HAS_PROJECTM=0)
-endif()
 
-# Optionally also build standalone (useful during development; MVP requires it but Phase 0.1 focuses on VST3)
-if(MILKDAWP_BUILD_STANDALONE)
-  juce_add_binary_data(${PROJECT_NAME}Assets SOURCES)
-  target_link_libraries(${PROJECT_NAME} PRIVATE juce::juce_product_unlocking)
-endif()
+  # JUCE plugin target: VST3 audio effect; optionally Standalone in dev
+  juce_add_plugin(${PROJECT_NAME}
+    COMPANY_NAME        ${COMPANY_NAME}
+    BUNDLE_ID           com.otitismedia.${PROJECT_NAME}
+    IS_SYNTH            FALSE
+    NEEDS_MIDI_INPUT    FALSE
+    NEEDS_MIDI_OUTPUT   FALSE
+    IS_MIDI_EFFECT      FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    PLUGIN_MANUFACTURER_CODE OMda
+    PLUGIN_CODE         Mlkw
+    FORMATS             ${MILKDAWP_PLUGIN_FORMATS}
+    PRODUCT_NAME        ${PRODUCT_NAME}
+  )
 
-# Platform tweaks
-if(WIN32)
-  # Ensure Unicode and lean Windows headers
-  target_compile_definitions(${PROJECT_NAME} PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+  # Sources
+  target_sources(${PROJECT_NAME}
+    PRIVATE
+      src/PluginProcessor.cpp
+      src/PluginEditor.cpp
+      src/Version.h
+  )
+
+  # Public compile definitions and config toggles
+  target_compile_definitions(${PROJECT_NAME}
+    PRIVATE
+      JUCE_WEB_BROWSER=0
+      JUCE_USE_CURL=0
+      JUCE_VST3_CAN_REPLACE_VST2=0
+  )
+
+  target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
+
+  # Link JUCE modules we know we'll need as a base (extend in later phases)
+  target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+      juce::juce_audio_utils
+      juce::juce_audio_basics
+      juce::juce_audio_processors
+      juce::juce_gui_basics
+      juce::juce_gui_extra
+      juce::juce_dsp
+  )
+
+  # Optional libprojectM linkage and feature define
+  if(MILKDAWP_WITH_PROJECTM)
+    # Try common target names created by projectM's CMake
+    if(TARGET projectM::projectM)
+      target_link_libraries(${PROJECT_NAME} PRIVATE projectM::projectM)
+    elseif(TARGET projectM)
+      target_link_libraries(${PROJECT_NAME} PRIVATE projectM)
+    else()
+      message(WARNING "MILKDAWP_WITH_PROJECTM=ON but no projectM CMake target found. Provide PROJECTM_LOCAL_PATH or ensure FetchContent succeeded.")
+    endif()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE MILKDAWP_HAS_PROJECTM=1)
+  else()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE MILKDAWP_HAS_PROJECTM=0)
+  endif()
+
+  # Optionally also build standalone (useful during development; MVP requires it but Phase 0.1 focuses on VST3)
+  if(MILKDAWP_BUILD_STANDALONE)
+    juce_add_binary_data(${PROJECT_NAME}Assets SOURCES)
+    target_link_libraries(${PROJECT_NAME} PRIVATE juce::juce_product_unlocking)
+  endif()
+
+  # Platform tweaks
+  if(WIN32)
+    # Ensure Unicode and lean Windows headers
+    target_compile_definitions(${PROJECT_NAME} PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+  endif()
 endif()
 
 # Organize source in IDEs
@@ -162,4 +171,18 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES
   src/PluginProcessor.cpp
   src/PluginEditor.cpp
   src/Version.h
+  src/Logging.h
 )
+
+# Tests: JUCE UnitTest runner
+if(BUILD_TESTING)
+  add_executable(${PROJECT_NAME}_tests
+    tests/Main.cpp
+    tests/SampleTests.cpp
+    src/Version.h
+    src/Logging.h
+  )
+  target_compile_features(${PROJECT_NAME}_tests PRIVATE cxx_std_17)
+  target_link_libraries(${PROJECT_NAME}_tests PRIVATE juce::juce_core)
+  add_test(NAME ${PROJECT_NAME}_tests COMMAND ${PROJECT_NAME}_tests)
+endif()

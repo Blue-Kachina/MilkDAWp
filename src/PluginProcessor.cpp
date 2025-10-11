@@ -1,11 +1,15 @@
 #include <JuceHeader.h>
 #include "Version.h"
+#include "Logging.h"
 
 class MilkDAWpAudioProcessor : public juce::AudioProcessor {
 public:
     MilkDAWpAudioProcessor()
     : juce::AudioProcessor(BusesProperties().withInput("Input", juce::AudioChannelSet::stereo(), true)
-                                             .withOutput("Output", juce::AudioChannelSet::stereo(), true)) {}
+                                             .withOutput("Output", juce::AudioChannelSet::stereo(), true)) {
+        milkdawp::Logging::init("MilkDAWp", MILKDAWP_VERSION_STRING);
+        MDW_LOG_INFO("AudioProcessor constructed");
+    }
 
     const juce::String getName() const override { return "MilkDAWp"; }
     void prepareToPlay(double, int) override {}

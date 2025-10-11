@@ -104,6 +104,17 @@ Example configure on Windows (PowerShell):
 
 On macOS/Linux, a similar flow applies with your generator of choice.
 
+## Tests
+- The repository includes a JUCE UnitTest-based console test runner.
+- Configure with tests enabled and plugin disabled (faster, no GUI deps in CI):
+  - cmake -S . -B build -DBUILD_TESTING=ON -DMILKDAWP_BUILD_PLUGIN=OFF
+  - cmake --build build --config Release
+  - ctest -C Release --output-on-failure
+
+## Continuous Integration
+- GitHub Actions workflow runs on Windows, macOS, and Linux, building and running tests using CMake/CTest.
+- See .github/workflows/ci.yml. Status badges can be added once the repo is hosted on GitHub.
+
 ## Licensing & Linking Notes
 - JUCE: Dual-licensed. Community usage is under GPLv3; commercial license available. If distributing a closed-source plugin, a JUCE commercial license is typically required.
 - libprojectM: LGPL-2.1-or-later. To comply easily, prefer dynamic linking (the default here). Static linking may impose obligations to provide object files or a relink mechanism to end users under the LGPL.

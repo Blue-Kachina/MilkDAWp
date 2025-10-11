@@ -18,10 +18,10 @@
 - [x] Create minimal "hello world" plugin that loads successfully
 
 ### 0.3 Development Infrastructure
-- [ ] Set up logging framework
-- [ ] Create test framework structure (unit + integration)
-- [ ] Configure CI/CD pipelines for three platforms
-- [ ] Create initial build documentation
+- [x] Set up logging framework
+- [x] Create test framework structure (unit + integration)
+- [x] Configure CI/CD pipelines for three platforms
+- [x] Create initial build documentation
 
 ---
 
