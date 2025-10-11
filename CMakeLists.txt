@@ -3,6 +3,28 @@ cmake_minimum_required(VERSION 3.20)
 # MilkDAWp - JUCE-based VST3 effect (scaffolding)
 project(MilkDAWp VERSION 0.0.1 LANGUAGES C CXX)
 
+# Copy built plugin to a VST3 folder after build (helps DAWs like Cubase discover it)
+# Default: copy to the per-user VST3 directory to avoid requiring admin rights.
+# You can:
+#  - Set MILKDAWP_VST3_OVERRIDE_COPY_DIR to an absolute path (preferred for custom Cubase paths), OR
+#  - Turn OFF MILKDAWP_VST3_COPY_TO_USER_DIR to use JUCE's default (CommonProgramFiles/Common Files/VST3), OR
+#  - Leave defaults to use %APPDATA%/VST3 (per-user).
+option(MILKDAWP_VST3_COPY_TO_USER_DIR "Copy VST3 to per-user VST3 directory (%APPDATA%/VST3) after build" ON)
+set(MILKDAWP_VST3_OVERRIDE_COPY_DIR "" CACHE PATH "Override VST3 copy destination (e.g. C:/Users/Admin/AppData/Local/Programs/Common/VST3)")
+# Enable JUCE's post-build copy step
+set_property(DIRECTORY PROPERTY JUCE_COPY_PLUGIN_AFTER_BUILD TRUE)
+# Choose destination order on Windows
+if(WIN32)
+  if(MILKDAWP_VST3_OVERRIDE_COPY_DIR)
+    # Custom override provided by the developer/user
+    set_property(DIRECTORY PROPERTY JUCE_VST3_COPY_DIR "${MILKDAWP_VST3_OVERRIDE_COPY_DIR}")
+  elseif(MILKDAWP_VST3_COPY_TO_USER_DIR)
+    # Per-user VST3 location recognized by the VST3 spec
+    # JUCE expects forward slashes; CMake will normalize for Windows
+    set_property(DIRECTORY PROPERTY JUCE_VST3_COPY_DIR "$ENV{APPDATA}/VST3")
+  endif()
+endif()
+
 # Options aligning with README technical details
 option(MILKDAWP_BUILD_STANDALONE "Also build Standalone build target" OFF)
 option(MILKDAWP_PREFER_STATIC_RUNTIME_MSVC "Link static MSVC runtime (/MT) where applicable" ON)

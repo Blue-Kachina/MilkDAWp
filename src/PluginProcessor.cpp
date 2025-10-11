@@ -1,4 +1,7 @@
-#include <JuceHeader.h>
+#include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h>
+#include <juce_gui_basics/juce_gui_basics.h>
+#include <juce_gui_extra/juce_gui_extra.h>
 #include "Version.h"
 #include "Logging.h"
 #include "AudioAnalysisQueue.h"
@@ -123,52 +126,36 @@ public:
 
 private:
     void produceAnalysisSnapshot() noexcept {
-        // Copy mono into FFT buffer and window
+        // Copy mono into FFT buffer and window to compute short-time energy; FFT results are reserved for future phases
         const int size = milkdawp::AudioAnalysisSnapshot::fftSize;
         auto* fftData = fftBuffer.get();
         for (int n = 0; n < size; ++n) fftData[n] = monoAccum[(size_t)n];
         window.multiplyWithWindowingTable(fftData, size);
-        // zero imaginary part
+        // zero imaginary part (not used currently)
         std::fill(fftData + size, fftData + size * 2, 0.0f);
 
-        // Perform real-only FFT (in-place, interleaved real/imag in fftData)
+        // Optionally perform FFT (kept for future); results currently unused
         fft.performRealOnlyForwardTransform(fftData);
 
-        milkdawp::AudioAnalysisSnapshot snap;
-        // Compute magnitudes from interleaved data: re = fftData[2*k], im = fftData[2*k+1]
-        float energy = 0.0f;
-        for (int k = 0; k < milkdawp::AudioAnalysisSnapshot::fftBins; ++k) {
-            const float re = fftData[2 * k];
-            const float im = fftData[2 * k + 1];
-            const float mag = std::sqrt(re * re + im * im);
-            snap.magnitudes[(size_t)k] = mag;
-        }
         // Short-time energy on time-domain window
+        float energy = 0.0f;
         for (int n = 0; n < size; ++n) {
             const float s = monoAccum[(size_t)n];
             energy += s * s;
         }
         energy /= static_cast<float>(size);
-        snap.shortTimeEnergy = energy;
 
-        // Update moving average and detect beat
+        milkdawp::AudioAnalysisSnapshot snap;
+        snap.shortTimeEnergy = energy;
+        snap.samplePosition = runningSamplePos;
+
+        // Maintain moving average internally for future beat detection (no output yet)
         constexpr int historyLen = (int)energyHistorySize;
         const float old = energyHistory[(size_t)energyIndex];
         energyHistory[(size_t)energyIndex] = energy;
         energyIndex = (energyIndex + 1) % historyLen;
         energyAverage += (energy - old) / (float)historyLen;
-
-        bool beat = false;
-        const float threshold = energyAverage * 1.3f;
-        if (beatCooldown == 0 && energy > threshold) {
-            beat = true;
-            beatCooldown = 10; // simple debounce over ~10 windows
-        } else {
-            beat = false;
-            if (beatCooldown > 0) --beatCooldown;
-        }
-        snap.beatDetected = beat;
-        snap.samplePosition = runningSamplePos;
+        if (beatCooldown > 0) --beatCooldown;
 
         // Enqueue (drop if full)
         (void)analysisQueue.tryPush(snap);
