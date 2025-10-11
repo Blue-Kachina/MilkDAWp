@@ -118,6 +118,8 @@ if(MILKDAWP_BUILD_PLUGIN)
       src/Logging.h
       src/AudioAnalysisQueue.h
       src/VisualizationThread.h
+      src/ThreadSafeQueue.h
+      src/MessageThreadBridge.h
   )
 
   # Public compile definitions and config toggles
@@ -183,10 +185,14 @@ if(BUILD_TESTING)
     tests/Main.cpp
     tests/SampleTests.cpp
     tests/VisualizationThreadTests.cpp
+    tests/AudioAnalysisQueueTests.cpp
+    tests/MessageThreadTests.cpp
     src/Version.h
     src/Logging.h
     src/AudioAnalysisQueue.h
     src/VisualizationThread.h
+    src/ThreadSafeQueue.h
+    src/MessageThreadBridge.h
   )
   target_compile_features(${PROJECT_NAME}_tests PRIVATE cxx_std_17)
   target_link_libraries(${PROJECT_NAME}_tests PRIVATE juce::juce_core)
