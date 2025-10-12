@@ -9,6 +9,12 @@
 
 class MilkDAWpAudioProcessor : public juce::AudioProcessor, public juce::AudioProcessorValueTreeState::Listener {
 public:
+    struct AutoAdvanceTimer : juce::Timer {
+        MilkDAWpAudioProcessor& proc;
+        explicit AutoAdvanceTimer(MilkDAWpAudioProcessor& p) : proc(p) {}
+        void timerCallback() override { proc.onAutoAdvanceTimer(); }
+    };
+public:
     using APVTS = juce::AudioProcessorValueTreeState;
     APVTS& getValueTreeState() noexcept { return apvts; }
     juce::String getCurrentPresetPath() const noexcept { return currentPresetPath; }
@@ -152,8 +158,17 @@ public:
 #if MILKDAWP_ENABLE_VIZ_THREAD
         if (vizThread)
             vizThread->postParameterChange(parameterID, newValue);
-#else
-        juce::ignoreUnused(parameterID, newValue);
+#endif
+        // React to shuffle changes by rebuilding order
+        if (parameterID == "shuffle") {
+            if (!playlistFiles.isEmpty()) {
+                rebuildPlaylistOrder();
+                // Reload current selection based on new order
+                goToPlaylistRelative(0);
+            }
+        }
+#if !MILKDAWP_ENABLE_VIZ_THREAD
+        juce::ignoreUnused(newValue);
 #endif
     }
 
@@ -199,6 +214,10 @@ public:
 
             if (paramTree.isValid())
                 apvts.replaceState(paramTree);
+
+            // Re-scan playlist if path present
+            if (currentPlaylistFolderPath.isNotEmpty())
+                setPlaylistFolderAndScan(currentPlaylistFolderPath);
         }
     }
 
@@ -211,12 +230,96 @@ public:
     // Access to the queue (for viz thread later)
     milkdawp::AudioAnalysisQueue<64>& getAnalysisQueue() noexcept { return analysisQueue; }
 
+public:
+    // Phase 3.2 public API for editor
+    void setPlaylistFolderAndScanPublic(const juce::String& folderPath) { setPlaylistFolderAndScan(folderPath); }
+    bool hasActivePlaylistPublic() const noexcept { return hasActivePlaylist(); }
+    void nextPresetInPlaylist() { goToPlaylistRelative(1); }
+    void prevPresetInPlaylist() { goToPlaylistRelative(-1); }
+    juce::String getCurrentPlaylistItemName() const {
+        if (!hasActivePlaylist()) return {};
+        const int idx = playlistOrder[(int)playlistPos];
+        if ((unsigned)idx < (unsigned)playlistFiles.size())
+            return playlistFiles[(int)idx].getFileNameWithoutExtension();
+        return {};
+    }
+
 private:
     APVTS apvts;
 
     // Phase 2.2: Non-parameter state
     juce::String currentPresetPath;           // Full path to current preset file (may be empty)
     juce::String currentPlaylistFolderPath;   // Folder path for current playlist (may be empty)
+
+    // Phase 3.2: Playlist state
+    juce::Array<juce::File> playlistFiles;    // Files discovered in playlist folder
+    juce::Array<int> playlistOrder;           // Order of indices into playlistFiles (shuffled or sequential)
+    int playlistPos = -1;                     // Position within playlistOrder (-1 if no playlist)
+
+    void rebuildPlaylistOrder()
+    {
+        playlistOrder.clear();
+        for (int i = 0; i < playlistFiles.size(); ++i)
+            playlistOrder.add(i);
+        // Shuffle support via parameter
+        if (auto* p = apvts.getRawParameterValue("shuffle"); p && p->load() >= 0.5f)
+        {
+            juce::Random rng(0xC0FFEE); // deterministic for now; can be improved later
+            for (int i = playlistOrder.size() - 1; i > 0; --i)
+            {
+                int j = rng.nextInt(i + 1);
+                std::swap(playlistOrder.getReference(i), playlistOrder.getReference(j));
+            }
+        }
+        // Clamp current position
+        if (playlistOrder.isEmpty()) playlistPos = -1; else playlistPos = juce::jlimit(0, playlistOrder.size()-1, playlistPos < 0 ? 0 : playlistPos);
+    }
+
+    bool hasActivePlaylist() const noexcept { return playlistPos >= 0 && playlistPos < playlistOrder.size(); }
+
+    void setPlaylistFolderAndScan(const juce::String& folderPath)
+    {
+        currentPlaylistFolderPath = folderPath;
+        playlistFiles.clear();
+        playlistOrder.clear();
+        playlistPos = -1;
+        juce::File dir(folderPath);
+        if (dir.isDirectory())
+        {
+            juce::Array<juce::File> found;
+            juce::DirectoryIterator it(dir, false, "*.milk", juce::File::findFiles);
+            while (it.next())
+                found.add(it.getFile());
+            struct FileNameComparator { int compareElements(juce::File a, juce::File b) const { return a.getFileName().compareIgnoreCase(b.getFileName()); } } comp;
+            found.sort(comp);
+            playlistFiles = found;
+            rebuildPlaylistOrder();
+            if (hasActivePlaylist())
+            {
+                const auto idx = playlistOrder[(int)playlistPos];
+                if ((unsigned)idx < (unsigned)playlistFiles.size())
+                {
+                    const auto& f = playlistFiles.getReference(idx);
+                    setCurrentPresetPathAndPostLoad(f.getFullPathName());
+                }
+            }
+        }
+    }
+
+    void goToPlaylistRelative(int delta)
+    {
+        if (!hasActivePlaylist()) return;
+        if (playlistOrder.isEmpty()) return;
+        const int N = playlistOrder.size();
+        playlistPos = (playlistPos + delta) % N;
+        if (playlistPos < 0) playlistPos += N;
+        const int idx = playlistOrder[playlistPos];
+        if ((unsigned)idx < (unsigned)playlistFiles.size())
+        {
+            const auto& f = playlistFiles.getReference(idx);
+            setCurrentPresetPathAndPostLoad(f.getFullPathName());
+        }
+    }
 
     void sendAllParamsToViz()
     {
@@ -318,13 +421,44 @@ public:
                 }
                 processor.setCurrentPresetPathAndPostLoad(f.getFullPathName());
                 presetNameLabel.setText(f.getFileNameWithoutExtension(), juce::dontSendNotification);
+                refreshTransportVisibility();
             });
         };
+
+        addAndMakeVisible(loadFolderButton);
+        loadFolderButton.setButtonText("Load Playlist Folder...");
+        loadFolderButton.onClick = [this]
+        {
+            fileChooser = std::make_unique<juce::FileChooser>("Select a folder with .milk presets", juce::File(), juce::String());
+            auto flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories;
+            fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc)
+            {
+                auto f = fc.getResult();
+                fileChooser.reset();
+                if (! f.isDirectory())
+                    return;
+                processor.setPlaylistFolderAndScanPublic(f.getFullPathName());
+                // Update UI: preset label and transport visibility
+                auto name = processor.getCurrentPlaylistItemName();
+                if (name.isNotEmpty())
+                    presetNameLabel.setText(name, juce::dontSendNotification);
+                refreshTransportVisibility();
+            });
+        };
+
+        addAndMakeVisible(prevButton);
+        prevButton.setButtonText("Prev");
+        prevButton.onClick = [this]{ processor.prevPresetInPlaylist(); presetNameLabel.setText(currentDisplayName(), juce::dontSendNotification); };
+        addAndMakeVisible(nextButton);
+        nextButton.setButtonText("Next");
+        nextButton.onClick = [this]{ processor.nextPresetInPlaylist(); presetNameLabel.setText(currentDisplayName(), juce::dontSendNotification); };
 
         addAndMakeVisible(presetNameLabel);
         presetNameLabel.setText(initialPresetName(), juce::dontSendNotification);
         presetNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
         presetNameLabel.setJustificationType(juce::Justification::centredLeft);
+
+        refreshTransportVisibility();
     }
 
     void paint(juce::Graphics& g) override {
@@ -343,12 +477,35 @@ public:
     void resized() override {
         auto r = getLocalBounds().reduced(16);
         auto top = r.removeFromTop(40);
-        loadButton.setBounds(top.removeFromLeft(180));
+        loadButton.setBounds(top.removeFromLeft(150));
+        top.removeFromLeft(8);
+        loadFolderButton.setBounds(top.removeFromLeft(200));
         top.removeFromLeft(12);
-        presetNameLabel.setBounds(top);
+        presetNameLabel.setBounds(top.removeFromLeft(top.getWidth() - 160));
+        auto right = getLocalBounds().reduced(16).removeFromTop(40).removeFromRight(160);
+        prevButton.setBounds(right.removeFromLeft(70));
+        right.removeFromLeft(10);
+        nextButton.setBounds(right.removeFromLeft(70));
     }
 
 private:
+    void refreshTransportVisibility()
+    {
+        const bool show = processor.hasActivePlaylistPublic();
+        prevButton.setVisible(show);
+        nextButton.setVisible(show);
+    }
+
+    juce::String currentDisplayName() const
+    {
+        if (processor.hasActivePlaylistPublic())
+        {
+            auto name = processor.getCurrentPlaylistItemName();
+            if (name.isNotEmpty()) return name;
+        }
+        return initialPresetName();
+    }
+
     juce::String initialPresetName() const
     {
         juce::File f(processor.getCurrentPresetPath());
@@ -358,6 +515,9 @@ private:
 
     MilkDAWpAudioProcessor& processor;
     juce::TextButton loadButton;
+    juce::TextButton loadFolderButton;
+    juce::TextButton prevButton;
+    juce::TextButton nextButton;
     juce::Label presetNameLabel;
     std::unique_ptr<juce::FileChooser> fileChooser;
 };

@@ -90,11 +90,11 @@
 - [x] Store current preset in state
 
 ### 3.2 Playlist System
-- [ ] Implement folder picker UI component
-- [ ] Scan folder for .milk files and build playlist
-- [ ] Implement playlist data structure with shuffle support
-- [ ] Implement Next/Prev navigation logic
-- [ ] Show playlist transport panel conditionally
+- [x] Implement folder picker UI component
+- [x] Scan folder for .milk files and build playlist
+- [x] Implement playlist data structure with shuffle support
+- [x] Implement Next/Prev navigation logic
+- [x] Show playlist transport panel conditionally
 
 ### 3.3 Playlist Transport Logic
 - [ ] Wire Lock toggle (prevents auto-transitions)
