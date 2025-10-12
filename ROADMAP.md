@@ -97,11 +97,11 @@
 - [x] Show playlist transport panel conditionally
 
 ### 3.3 Playlist Transport Logic
-- [ ] Wire Lock toggle (prevents auto-transitions)
-- [ ] Wire Shuffle toggle (randomizes order)
-- [ ] Implement timed auto-transitions based on duration
-- [ ] Wire Prev/Next buttons
-- [ ] Handle playlist index automation parameter
+- [x] Wire Lock toggle (prevents auto-transitions)
+- [x] Wire Shuffle toggle (randomizes order)
+- [x] Implement timed auto-transitions based on duration
+- [x] Wire Prev/Next buttons
+- [x] Handle playlist index automation parameter
 
 ### 3.4 Transition Styles
 - [ ] Research libprojectM transition options

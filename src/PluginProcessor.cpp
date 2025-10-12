@@ -159,12 +159,35 @@ public:
         if (vizThread)
             vizThread->postParameterChange(parameterID, newValue);
 #endif
-        // React to shuffle changes by rebuilding order
         if (parameterID == "shuffle") {
             if (!playlistFiles.isEmpty()) {
                 rebuildPlaylistOrder();
                 // Reload current selection based on new order
                 goToPlaylistRelative(0);
+                restartAutoAdvanceTimer();
+            }
+        } else if (parameterID == "transitionDurationSeconds") {
+            // Restart timer with new interval if applicable
+            restartAutoAdvanceTimer();
+        } else if (parameterID == "lockCurrentPreset") {
+            const bool locked = newValue >= 0.5f;
+            if (locked) stopAutoAdvanceTimer(); else restartAutoAdvanceTimer();
+        } else if (parameterID == "presetIndex") {
+            if (ignorePresetIndexParamChange) return;
+            if (!hasActivePlaylist()) return;
+            // newValue is actual value (0..128). Clamp to available entries
+            int desired = (int) juce::roundToInt(newValue);
+            const int N = playlistOrder.size();
+            if (N <= 0) return;
+            desired = juce::jlimit(0, N - 1, desired);
+            if (desired != playlistPos) {
+                playlistPos = desired;
+                const int idx = playlistOrder[playlistPos];
+                if ((unsigned)idx < (unsigned)playlistFiles.size()) {
+                    const auto& f = playlistFiles.getReference(idx);
+                    setCurrentPresetPathAndPostLoad(f.getFullPathName());
+                }
+                restartAutoAdvanceTimer();
             }
         }
 #if !MILKDAWP_ENABLE_VIZ_THREAD
@@ -256,6 +279,47 @@ private:
     juce::Array<int> playlistOrder;           // Order of indices into playlistFiles (shuffled or sequential)
     int playlistPos = -1;                     // Position within playlistOrder (-1 if no playlist)
 
+    // Phase 3.3: Auto-advance timer and param sync
+    std::unique_ptr<AutoAdvanceTimer> autoTimer; 
+    bool ignorePresetIndexParamChange = false;
+
+    void stopAutoAdvanceTimer() {
+        if (autoTimer) autoTimer->stopTimer();
+    }
+    void restartAutoAdvanceTimer() {
+        // Only if playlist active and not locked
+        const bool locked = (apvts.getRawParameterValue("lockCurrentPreset") && apvts.getRawParameterValue("lockCurrentPreset")->load() >= 0.5f);
+        if (!hasActivePlaylist() || locked) { stopAutoAdvanceTimer(); return; }
+        float secs = 5.0f;
+        if (auto* p = apvts.getRawParameterValue("transitionDurationSeconds")) secs = p->load();
+        int ms = juce::jlimit(100, 10 * 60 * 1000, (int) juce::roundToInt(secs * 1000.0f));
+        if (!autoTimer) autoTimer = std::make_unique<AutoAdvanceTimer>(*this);
+        autoTimer->stopTimer();
+        autoTimer->startTimer(ms);
+    }
+    void onAutoAdvanceTimer() {
+        const bool locked = (apvts.getRawParameterValue("lockCurrentPreset") && apvts.getRawParameterValue("lockCurrentPreset")->load() >= 0.5f);
+        if (!hasActivePlaylist() || locked) { stopAutoAdvanceTimer(); return; }
+        goToPlaylistRelative(1);
+        // restart for next interval
+        restartAutoAdvanceTimer();
+    }
+    void syncPresetIndexParam() {
+        if (!hasActivePlaylist()) return;
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*>(apvts.getParameter("presetIndex"))) {
+            const float actual = (float) playlistPos;
+            const float norm = rp->convertTo0to1(actual);
+            const float currentNorm = rp->getValue();
+            if (std::abs(currentNorm - norm) > 1.0e-6f) {
+                ignorePresetIndexParamChange = true;
+                rp->beginChangeGesture();
+                rp->setValueNotifyingHost(norm);
+                rp->endChangeGesture();
+                ignorePresetIndexParamChange = false;
+            }
+        }
+    }
+
     void rebuildPlaylistOrder()
     {
         playlistOrder.clear();
@@ -302,6 +366,8 @@ private:
                     const auto& f = playlistFiles.getReference(idx);
                     setCurrentPresetPathAndPostLoad(f.getFullPathName());
                 }
+                syncPresetIndexParam();
+                restartAutoAdvanceTimer();
             }
         }
     }
@@ -319,6 +385,8 @@ private:
             const auto& f = playlistFiles.getReference(idx);
             setCurrentPresetPathAndPostLoad(f.getFullPathName());
         }
+        syncPresetIndexParam();
+        restartAutoAdvanceTimer();
     }
 
     void sendAllParamsToViz()
