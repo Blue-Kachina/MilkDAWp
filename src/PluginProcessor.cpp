@@ -187,7 +187,12 @@ public:
                     const auto& f = playlistFiles.getReference(idx);
                     setCurrentPresetPathAndPostLoad(f.getFullPathName());
                 }
+                // Ensure parameter reflects clamped/actual position to avoid mismatch with host automation
+                syncPresetIndexParam();
                 restartAutoAdvanceTimer();
+            } else {
+                // Even if same, if host sent an out-of-range value that clamped to current, resync param
+                syncPresetIndexParam();
             }
         }
 #if !MILKDAWP_ENABLE_VIZ_THREAD
@@ -256,6 +261,7 @@ public:
 public:
     // Phase 3.2 public API for editor
     void setPlaylistFolderAndScanPublic(const juce::String& folderPath) { setPlaylistFolderAndScan(folderPath); }
+    void clearPlaylistPublic() { clearPlaylist(); }
     bool hasActivePlaylistPublic() const noexcept { return hasActivePlaylist(); }
     void nextPresetInPlaylist() { goToPlaylistRelative(1); }
     void prevPresetInPlaylist() { goToPlaylistRelative(-1); }
@@ -320,6 +326,22 @@ private:
         }
     }
 
+    void clearPlaylist()
+    {
+        playlistFiles.clear();
+        playlistOrder.clear();
+        playlistPos = -1;
+        stopAutoAdvanceTimer();
+        // Reset presetIndex parameter to 0 for single-preset mode visibility
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*>(apvts.getParameter("presetIndex"))) {
+            ignorePresetIndexParamChange = true;
+            rp->beginChangeGesture();
+            rp->setValueNotifyingHost(rp->convertTo0to1(0.0f));
+            rp->endChangeGesture();
+            ignorePresetIndexParamChange = false;
+        }
+    }
+
     void rebuildPlaylistOrder()
     {
         playlistOrder.clear();
@@ -377,8 +399,32 @@ private:
         if (!hasActivePlaylist()) return;
         if (playlistOrder.isEmpty()) return;
         const int N = playlistOrder.size();
-        playlistPos = (playlistPos + delta) % N;
-        if (playlistPos < 0) playlistPos += N;
+
+        bool shuffleOn = false;
+        if (auto* p = apvts.getRawParameterValue("shuffle")) shuffleOn = p->load() >= 0.5f;
+
+        if (shuffleOn && delta != 0)
+        {
+            // Choose a random next position (different from current when possible)
+            if (N > 1)
+            {
+                int newPos = playlistPos;
+                auto& rng = juce::Random::getSystemRandom();
+                do { newPos = rng.nextInt(N); } while (newPos == playlistPos);
+                playlistPos = newPos;
+            }
+            else
+            {
+                playlistPos = 0;
+            }
+        }
+        else
+        {
+            // Sequential step or reload when delta == 0
+            playlistPos = (playlistPos + delta) % N;
+            if (playlistPos < 0) playlistPos += N;
+        }
+
         const int idx = playlistOrder[playlistPos];
         if ((unsigned)idx < (unsigned)playlistFiles.size())
         {
@@ -460,7 +506,7 @@ private:
     std::unique_ptr<milkdawp::VisualizationThread> vizThread;
 };
 
-class MilkDAWpAudioProcessorEditor : public juce::AudioProcessorEditor {
+class MilkDAWpAudioProcessorEditor : public juce::AudioProcessorEditor, private juce::Timer {
 public:
     explicit MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcessor& proc)
         : juce::AudioProcessorEditor(&proc), processor(proc)
@@ -488,6 +534,8 @@ public:
                     return;
                 }
                 processor.setCurrentPresetPathAndPostLoad(f.getFullPathName());
+                // Switch to single-preset mode: clear any active playlist and stop transport
+                processor.clearPlaylistPublic();
                 presetNameLabel.setText(f.getFileNameWithoutExtension(), juce::dontSendNotification);
                 refreshTransportVisibility();
             });
@@ -527,6 +575,8 @@ public:
         presetNameLabel.setJustificationType(juce::Justification::centredLeft);
 
         refreshTransportVisibility();
+        lastDisplayedName = currentDisplayName();
+        startTimerHz(10);
     }
 
     void paint(juce::Graphics& g) override {
@@ -557,6 +607,16 @@ public:
     }
 
 private:
+    void timerCallback() override
+    {
+        auto name = currentDisplayName();
+        if (name != lastDisplayedName)
+        {
+            lastDisplayedName = name;
+            presetNameLabel.setText(name, juce::dontSendNotification);
+        }
+    }
+
     void refreshTransportVisibility()
     {
         const bool show = processor.hasActivePlaylistPublic();
@@ -587,6 +647,7 @@ private:
     juce::TextButton prevButton;
     juce::TextButton nextButton;
     juce::Label presetNameLabel;
+    juce::String lastDisplayedName;
     std::unique_ptr<juce::FileChooser> fileChooser;
 };
 
