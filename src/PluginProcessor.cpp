@@ -524,6 +524,9 @@ private:
             setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xFF1C1F22));
             setColour(juce::ComboBox::textColourId, juce::Colours::white);
             setColour(juce::Label::textColourId, juce::Colours::white);
+            setColour(juce::Slider::thumbColourId, juce::Colour(0xFFE0E0E0));
+            setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(0xFF4A90E2));
+            setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(0xFF2A2E33));
         }
         void drawButtonBackground(juce::Graphics& g, juce::Button& button, const juce::Colour& backgroundColour,
                                   bool isMouseOverButton, bool isButtonDown) override
@@ -537,8 +540,34 @@ private:
             g.setColour(juce::Colours::black.withAlpha(0.6f));
             g.drawRoundedRectangle(bounds.reduced(0.5f), 6.0f, 1.0f);
         }
+        void drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height, float sliderPosProportional,
+                              float rotaryStartAngle, float rotaryEndAngle, juce::Slider& slider) override
+        {
+            auto bounds = juce::Rectangle<float>(x, y, (float) width, (float) height).reduced(4);
+            auto radius = juce::jmin(bounds.getWidth(), bounds.getHeight()) * 0.5f;
+            auto toAngle = rotaryStartAngle + sliderPosProportional * (rotaryEndAngle - rotaryStartAngle);
+            auto lineW = juce::jmax(2.0f, radius * 0.08f);
+            auto arcRadius = radius - lineW * 0.5f;
+
+            // background arc
+            juce::Path backgroundArc;
+            backgroundArc.addCentredArc(bounds.getCentreX(), bounds.getCentreY(), arcRadius, arcRadius, 0.0f, rotaryStartAngle, rotaryEndAngle, true);
+            g.setColour(findColour(juce::Slider::rotarySliderOutlineColourId));
+            g.strokePath(backgroundArc, juce::PathStrokeType(lineW));
+
+            // value arc
+            juce::Path valueArc;
+            valueArc.addCentredArc(bounds.getCentreX(), bounds.getCentreY(), arcRadius, arcRadius, 0.0f, rotaryStartAngle, toAngle, true);
+            g.setColour(findColour(juce::Slider::rotarySliderFillColourId));
+            g.strokePath(valueArc, juce::PathStrokeType(lineW));
+
+            // thumb
+            juce::Point<float> thumbPoint(bounds.getCentreX() + arcRadius * std::cos(toAngle - juce::MathConstants<float>::halfPi),
+                                          bounds.getCentreY() + arcRadius * std::sin(toAngle - juce::MathConstants<float>::halfPi));
+            g.setColour(findColour(juce::Slider::thumbColourId));
+            g.fillEllipse(thumbPoint.x - lineW, thumbPoint.y - lineW, lineW * 2.0f, lineW * 2.0f);
+        }
     };
-public:
 public:
     static constexpr int topHeight = 80;
     explicit MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcessor& proc)
@@ -555,6 +584,41 @@ public:
 
         // Visualization placeholder
         addAndMakeVisible(vizPlaceholder);
+
+        // Knobs and toggles (Phase 4.2)
+        addAndMakeVisible(beatLabel);
+        beatLabel.setText("Beat", juce::dontSendNotification);
+        beatLabel.setJustificationType(juce::Justification::centred);
+        beatLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+        addAndMakeVisible(beatSlider);
+        beatSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        beatSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        beatSlider.setTooltip("Beat Sensitivity (0.0 - 2.0)");
+        beatAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+            processor.getValueTreeState(), "beatSensitivity", beatSlider);
+
+        addAndMakeVisible(durationLabel);
+        durationLabel.setText("Duration", juce::dontSendNotification);
+        durationLabel.setJustificationType(juce::Justification::centred);
+        durationLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+        addAndMakeVisible(durationSlider);
+        durationSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        durationSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        durationSlider.setTooltip("Transition Duration (seconds)");
+        durationAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+            processor.getValueTreeState(), "transitionDurationSeconds", durationSlider);
+
+        addAndMakeVisible(lockToggle);
+        lockToggle.setButtonText("Lock");
+        lockToggle.setTooltip("Lock current preset (disable auto transitions)");
+        lockAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+            processor.getValueTreeState(), "lockCurrentPreset", lockToggle);
+
+        addAndMakeVisible(shuffleToggle);
+        shuffleToggle.setButtonText("Shuffle");
+        shuffleToggle.setTooltip("Shuffle playlist order");
+        shuffleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+            processor.getValueTreeState(), "shuffle", shuffleToggle);
 
         addAndMakeVisible(loadButton);
         loadButton.setButtonText("Load Preset...");
@@ -665,6 +729,29 @@ public:
         loadFolderButton.setBounds(innerTop.removeFromLeft(220));
         innerTop.removeFromLeft(12);
 
+        // Knobs area
+        auto knobW = 64;
+        {
+            auto area = innerTop.removeFromLeft(knobW);
+            auto lab = area.removeFromTop(14);
+            beatLabel.setBounds(lab);
+            beatSlider.setBounds(area);
+        }
+        innerTop.removeFromLeft(8);
+        {
+            auto area = innerTop.removeFromLeft(knobW);
+            auto lab = area.removeFromTop(14);
+            durationLabel.setBounds(lab);
+            durationSlider.setBounds(area);
+        }
+        innerTop.removeFromLeft(12);
+
+        // Toggle buttons
+        lockToggle.setBounds(innerTop.removeFromLeft(70));
+        innerTop.removeFromLeft(6);
+        shuffleToggle.setBounds(innerTop.removeFromLeft(80));
+        innerTop.removeFromLeft(12);
+
         // Transition Style controls
         transitionStyleLabel.setBounds(innerTop.removeFromLeft(100));
         innerTop.removeFromLeft(6);
@@ -736,6 +823,15 @@ private:
     VizPlaceholder vizPlaceholder;
 
     MilkDAWpAudioProcessor& processor;
+
+    // Phase 4.2 controls
+    juce::Label beatLabel;
+    juce::Slider beatSlider;
+    juce::Label durationLabel;
+    juce::Slider durationSlider;
+    juce::ToggleButton lockToggle;
+    juce::ToggleButton shuffleToggle;
+
     juce::TextButton loadButton;
     juce::TextButton loadFolderButton;
     juce::TextButton prevButton;
@@ -744,7 +840,14 @@ private:
     juce::String lastDisplayedName;
     juce::Label transitionStyleLabel;
     juce::ComboBox transitionStyleCombo;
+
+    // Attachments
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> beatAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> durationAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> lockAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> shuffleAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> transitionStyleAttachment;
+
     std::unique_ptr<juce::FileChooser> fileChooser;
 };
 

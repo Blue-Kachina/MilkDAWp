@@ -121,12 +121,12 @@
 - [x] Create professional hardware-style control appearance
 
 ### 4.2 Control Widgets
-- [ ] Implement Beat Sensitivity knob (hardware style)
-- [ ] Implement Transition Duration knob
-- [ ] Implement Lock/Shuffle toggle buttons
-- [ ] Implement Prev/Next transport buttons
-- [ ] Implement file/folder picker widgets
-- [ ] Style all controls per README spec
+- [x] Implement Beat Sensitivity knob (hardware style)
+- [x] Implement Transition Duration knob
+- [x] Implement Lock/Shuffle toggle buttons
+- [x] Implement Prev/Next transport buttons
+- [x] Implement file/folder picker widgets
+- [x] Style all controls per README spec
 
 ### 4.3 Embedded Visualization Display
 - [ ] Create embedded OpenGL/GPU canvas component
