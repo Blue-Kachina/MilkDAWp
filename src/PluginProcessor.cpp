@@ -513,11 +513,48 @@ private:
 };
 
 class MilkDAWpAudioProcessorEditor : public juce::AudioProcessorEditor, private juce::Timer {
+private:
+    struct HardwareLookAndFeel : public juce::LookAndFeel_V4 {
+        HardwareLookAndFeel()
+        {
+            setColour(juce::ResizableWindow::backgroundColourId, juce::Colour(0xFF101214));
+            setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF2A2E33));
+            setColour(juce::TextButton::textColourOnId, juce::Colours::white);
+            setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+            setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xFF1C1F22));
+            setColour(juce::ComboBox::textColourId, juce::Colours::white);
+            setColour(juce::Label::textColourId, juce::Colours::white);
+        }
+        void drawButtonBackground(juce::Graphics& g, juce::Button& button, const juce::Colour& backgroundColour,
+                                  bool isMouseOverButton, bool isButtonDown) override
+        {
+            auto bounds = button.getLocalBounds().toFloat();
+            auto base = backgroundColour;
+            if (isButtonDown) base = base.brighter(0.1f);
+            else if (isMouseOverButton) base = base.brighter(0.06f);
+            g.setColour(base);
+            g.fillRoundedRectangle(bounds, 6.0f);
+            g.setColour(juce::Colours::black.withAlpha(0.6f));
+            g.drawRoundedRectangle(bounds.reduced(0.5f), 6.0f, 1.0f);
+        }
+    };
 public:
+public:
+    static constexpr int topHeight = 80;
     explicit MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcessor& proc)
         : juce::AudioProcessorEditor(&proc), processor(proc)
     {
+        setLookAndFeel(&hardwareLAF);
         setSize(1200, 650); // per README default window size
+
+        // Logo
+        addAndMakeVisible(logoLabel);
+        logoLabel.setText("MilkDAWp", juce::dontSendNotification);
+        logoLabel.setFont(juce::Font(24.0f, juce::Font::bold));
+        logoLabel.setJustificationType(juce::Justification::centredLeft);
+
+        // Visualization placeholder
+        addAndMakeVisible(vizPlaceholder);
 
         addAndMakeVisible(loadButton);
         loadButton.setButtonText("Load Preset...");
@@ -596,37 +633,55 @@ public:
         startTimerHz(10);
     }
 
+    ~MilkDAWpAudioProcessorEditor() override {
+        setLookAndFeel(nullptr);
+    }
+
     void paint(juce::Graphics& g) override {
-        g.fillAll(juce::Colours::black);
-        g.setColour(juce::Colours::white);
-        g.setFont(18.0f);
-#if MILKDAWP_HAS_PROJECTM
-        constexpr const char* pm = "projectM: enabled";
-#else
-        constexpr const char* pm = "projectM: disabled";
-#endif
-        juce::String text = juce::String("MilkDAWp v") + MILKDAWP_VERSION_STRING + "\n" + pm;
-        g.drawFittedText(text, getLocalBounds().removeFromTop(80), juce::Justification::centred, 2);
+        auto bg = findColour(juce::ResizableWindow::backgroundColourId);
+        g.fillAll(bg);
+        // Top strip
+        auto r = getLocalBounds();
+        auto top = r.removeFromTop(topHeight);
+        juce::Colour topColour = juce::Colour(0xFF171A1E);
+        g.setColour(topColour);
+        g.fillRoundedRectangle(top.reduced(8).toFloat(), 8.0f);
+        g.setColour(juce::Colours::black.withAlpha(0.5f));
+        g.drawRoundedRectangle(top.reduced(8).toFloat(), 8.0f, 1.0f);
     }
 
     void resized() override {
-        auto r = getLocalBounds().reduced(16);
-        auto top = r.removeFromTop(40);
-        loadButton.setBounds(top.removeFromLeft(150));
-        top.removeFromLeft(8);
-        loadFolderButton.setBounds(top.removeFromLeft(200));
-        top.removeFromLeft(12);
-        // Place Transition Style controls
-        transitionStyleLabel.setBounds(top.removeFromLeft(90));
-        top.removeFromLeft(6);
-        transitionStyleCombo.setBounds(top.removeFromLeft(140));
-        top.removeFromLeft(12);
-        // Remaining space goes to preset label, leaving room at right for transport
-        presetNameLabel.setBounds(top.removeFromLeft(top.getWidth() - 160));
-        auto right = getLocalBounds().reduced(16).removeFromTop(40).removeFromRight(160);
+        auto bounds = getLocalBounds();
+        auto top = bounds.removeFromTop(topHeight);
+        auto innerTop = top.reduced(16);
+
+        // Left logo
+        logoLabel.setBounds(innerTop.removeFromLeft(220));
+        innerTop.removeFromLeft(12);
+
+        // File/picker controls
+        loadButton.setBounds(innerTop.removeFromLeft(150));
+        innerTop.removeFromLeft(8);
+        loadFolderButton.setBounds(innerTop.removeFromLeft(220));
+        innerTop.removeFromLeft(12);
+
+        // Transition Style controls
+        transitionStyleLabel.setBounds(innerTop.removeFromLeft(100));
+        innerTop.removeFromLeft(6);
+        transitionStyleCombo.setBounds(innerTop.removeFromLeft(140));
+        innerTop.removeFromLeft(12);
+
+        // Preset label uses remaining, leaving space for transport
+        auto transportWidth = 160;
+        presetNameLabel.setBounds(innerTop.removeFromLeft(juce::jmax(0, innerTop.getWidth() - transportWidth)));
+
+        auto right = innerTop.removeFromRight(transportWidth);
         prevButton.setBounds(right.removeFromLeft(70));
         right.removeFromLeft(10);
         nextButton.setBounds(right.removeFromLeft(70));
+
+        // Visualization area fills remaining
+        vizPlaceholder.setBounds(bounds.reduced(12));
     }
 
 private:
@@ -663,6 +718,22 @@ private:
         if (f.existsAsFile()) return f.getFileNameWithoutExtension();
         return "(no preset)";
     }
+
+    struct VizPlaceholder : public juce::Component {
+        void paint(juce::Graphics& g) override
+        {
+            g.fillAll(juce::Colour(0xFF111417));
+            g.setColour(juce::Colour(0xFF2A2E33));
+            g.drawRect(getLocalBounds(), 1);
+            g.setColour(juce::Colours::white.withAlpha(0.6f));
+            g.setFont(18.0f);
+            g.drawFittedText("Visualization Area", getLocalBounds(), juce::Justification::centred, 1);
+        }
+    };
+
+    HardwareLookAndFeel hardwareLAF;
+    juce::Label logoLabel;
+    VizPlaceholder vizPlaceholder;
 
     MilkDAWpAudioProcessor& processor;
     juce::TextButton loadButton;
