@@ -40,6 +40,9 @@ public:
             "lockCurrentPreset", "Lock Current Preset", false));
         params.emplace_back(std::make_unique<juce::AudioParameterInt>(
             "presetIndex", "Preset Index", 0, 128, 0));
+        params.emplace_back(std::make_unique<juce::AudioParameterChoice>(
+            "transitionStyle", "Transition Style",
+            juce::StringArray{ "Cut", "Crossfade", "Blend" }, 0));
         return { params.begin(), params.end() };
     }
 
@@ -62,6 +65,7 @@ public:
         apvts.addParameterListener("shuffle", this);
         apvts.addParameterListener("lockCurrentPreset", this);
         apvts.addParameterListener("presetIndex", this);
+        apvts.addParameterListener("transitionStyle", this);
     }
 
     ~MilkDAWpAudioProcessor() override {
@@ -71,6 +75,7 @@ public:
         apvts.removeParameterListener("shuffle", this);
         apvts.removeParameterListener("lockCurrentPreset", this);
         apvts.removeParameterListener("presetIndex", this);
+        apvts.removeParameterListener("transitionStyle", this);
         milkdawp::Logging::shutdown();
     }
 
@@ -448,8 +453,9 @@ private:
         send("shuffle");
         send("lockCurrentPreset");
         send("presetIndex");
+        send("transitionStyle");
     #endif
-    }
+        }
 
     void produceAnalysisSnapshot() noexcept {
         // Copy mono into FFT buffer and window to compute short-time energy; FFT results are reserved for future phases
@@ -569,6 +575,17 @@ public:
         nextButton.setButtonText("Next");
         nextButton.onClick = [this]{ processor.nextPresetInPlaylist(); presetNameLabel.setText(currentDisplayName(), juce::dontSendNotification); };
 
+        // Transition Style UI
+        addAndMakeVisible(transitionStyleLabel);
+        transitionStyleLabel.setText("Transition:", juce::dontSendNotification);
+        transitionStyleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+        addAndMakeVisible(transitionStyleCombo);
+        transitionStyleCombo.addItem("Cut", 1);
+        transitionStyleCombo.addItem("Crossfade", 2);
+        transitionStyleCombo.addItem("Blend", 3);
+        transitionStyleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+            processor.getValueTreeState(), "transitionStyle", transitionStyleCombo);
+
         addAndMakeVisible(presetNameLabel);
         presetNameLabel.setText(initialPresetName(), juce::dontSendNotification);
         presetNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
@@ -599,6 +616,12 @@ public:
         top.removeFromLeft(8);
         loadFolderButton.setBounds(top.removeFromLeft(200));
         top.removeFromLeft(12);
+        // Place Transition Style controls
+        transitionStyleLabel.setBounds(top.removeFromLeft(90));
+        top.removeFromLeft(6);
+        transitionStyleCombo.setBounds(top.removeFromLeft(140));
+        top.removeFromLeft(12);
+        // Remaining space goes to preset label, leaving room at right for transport
         presetNameLabel.setBounds(top.removeFromLeft(top.getWidth() - 160));
         auto right = getLocalBounds().reduced(16).removeFromTop(40).removeFromRight(160);
         prevButton.setBounds(right.removeFromLeft(70));
@@ -648,6 +671,9 @@ private:
     juce::TextButton nextButton;
     juce::Label presetNameLabel;
     juce::String lastDisplayedName;
+    juce::Label transitionStyleLabel;
+    juce::ComboBox transitionStyleCombo;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> transitionStyleAttachment;
     std::unique_ptr<juce::FileChooser> fileChooser;
 };
 

@@ -20,6 +20,7 @@ struct ProjectMContext {
     std::atomic<bool> shuffle{false};
     std::atomic<bool> lockCurrentPreset{false};
     std::atomic<int> presetIndex{0};
+    std::atomic<int> transitionStyle{0}; // 0=Cut, 1=Crossfade, 2=Blend
 
     juce::String currentPresetName; // for UI display
 
@@ -41,6 +42,7 @@ struct ProjectMContext {
     void setShuffle(bool v) { shuffle.store(v, std::memory_order_relaxed); }
     void setLockCurrentPreset(bool v) { lockCurrentPreset.store(v, std::memory_order_relaxed); }
     void setPresetIndex(int v) { presetIndex.store(v, std::memory_order_relaxed); }
+    void setTransitionStyle(int v) { transitionStyle.store(v, std::memory_order_relaxed); }
 
     bool loadPreset(const juce::String& path, juce::String& outError)
     {
@@ -146,6 +148,8 @@ private:
                 pm.setLockCurrentPreset(pc.value >= 0.5f);
             else if (pc.paramID == "presetIndex")
                 pm.setPresetIndex((int)std::lround(pc.value));
+            else if (pc.paramID == "transitionStyle")
+                pm.setTransitionStyle((int)std::lround(pc.value));
         }
     }
 

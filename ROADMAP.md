@@ -104,10 +104,10 @@
 - [x] Handle playlist index automation parameter
 
 ### 3.4 Transition Styles
-- [ ] Research libprojectM transition options
-- [ ] Implement transition style picker UI
-- [ ] Wire transition style to libprojectM
-- [ ] Store transition style in state
+- [x] Research libprojectM transition options
+- [x] Implement transition style picker UI
+- [x] Wire transition style to libprojectM
+- [x] Store transition style in state
 
 ---
 
