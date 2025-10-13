@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2025 Otitis Media
 #pragma once
 
 #include <juce_core/juce_core.h>

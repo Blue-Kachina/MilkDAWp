@@ -3,37 +3,86 @@ name: CI
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
 
 jobs:
   build-and-test:
+    name: Build and Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-        build_type: [Release]
-    runs-on: ${{ matrix.os }}
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
 
       - name: Set up CMake
-        uses: lukka/get-cmake@v3.30.3
+        uses: lukka/get-cmake@v3.28.3
 
-      - name: Install dependencies (Linux)
-        if: runner.os == 'Linux'
+      - name: Bootstrap dependencies (POSIX)
+        if: runner.os != 'Windows'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev mesa-common-dev libglu1-mesa-dev
+          chmod +x scripts/bootstrap.sh
+          ./scripts/bootstrap.sh
 
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMILKDAWP_BUILD_PLUGIN=OFF -DBUILD_TESTING=ON
+      - name: Bootstrap dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          scripts\bootstrap.bat
 
-      - name: Build
-        run: cmake --build build --config ${{ matrix.build_type }} --parallel
+      - name: Configure (tests only)
+        run: |
+          cmake -S . -B build-ci -G "Ninja" -DBUILD_TESTING=ON -DMILKDAWP_BUILD_PLUGIN=OFF
 
-      - name: Test
-        working-directory: build
-        run: ctest --output-on-failure -C ${{ matrix.build_type }}
+      - name: Build tests
+        run: cmake --build build-ci --config RelWithDebInfo --parallel
+
+      - name: Run tests
+        run: ctest --test-dir build-ci -C RelWithDebInfo --output-on-failure
+
+  # Optional: package plugin on Windows to catch regressions (does not run tests)
+  windows-plugin-build:
+    name: Windows Plugin Build
+    runs-on: windows-latest
+    needs: build-and-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up CMake
+        uses: lukka/get-cmake@v3.28.3
+
+      - name: Bootstrap
+        shell: cmd
+        run: scripts\bootstrap.bat
+
+      - name: Configure (plugin)
+        run: cmake -S . -B build -G "Ninja Multi-Config" -DMILKDAWP_BUILD_PLUGIN=ON -DBUILD_TESTING=OFF -DMILKDAWP_WITH_PROJECTM=ON
+
+      - name: Build VST3 (Debug)
+        run: cmake --build build --target MilkDAWp_VST3 --config Debug --parallel
+
+      - name: Verify runtime layout (projectM DLL next to VST3)
+        shell: pwsh
+        run: |
+          ./scripts/ci/check_runtime_win.ps1 -BuildDir "build" -Config "Debug"
+
+      - name: Upload artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-vst3-debug
+          path: |
+            build/MilkDAWp_artefacts/Debug/VST3/**/*.vst3
+            build/MilkDAWp_artefacts/Debug/VST3/**/*.dll
+          if-no-files-found: warn

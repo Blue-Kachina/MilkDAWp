@@ -67,6 +67,11 @@ I'm not sure of what the best way to include these in our project is, however, I
 I want to use the latest versions of these that we can successfully implement given our requirements
 We might need to take their licensing into consideration also
 
+Note (Phase 1): Dependencies are being pinned via Git submodules under extern/.
+For setup and maintenance commands, see docs/submodules.md. During Phase 1, the build continues to use FetchContent by default; you may point to the submodules with:
+- -DJUCE_LOCAL_PATH="${CMAKE_SOURCE_DIR}/extern/JUCE"
+- -DPROJECTM_LOCAL_PATH="${CMAKE_SOURCE_DIR}/extern/projectm"
+
 ### Looking For Recommendations
 - Is there a more elegant way to handle the DJ window situation than pop-out, move visualization window to proper monitor, toggle fullscreen?
 
@@ -115,9 +120,32 @@ On macOS/Linux, a similar flow applies with your generator of choice.
 - GitHub Actions workflow runs on Windows, macOS, and Linux, building and running tests using CMake/CTest.
 - See .github/workflows/ci.yml. Status badges can be added once the repo is hosted on GitHub.
 
-## Licensing & Linking Notes
-- JUCE: Dual-licensed. Community usage is under GPLv3; commercial license available. If distributing a closed-source plugin, a JUCE commercial license is typically required.
-- libprojectM: LGPL-2.1-or-later. To comply easily, prefer dynamic linking (the default here). Static linking may impose obligations to provide object files or a relink mechanism to end users under the LGPL.
-- Our defaults: We prefer static linking for the MSVC runtime and for third-party libs only where licenses allow and where it meaningfully reduces external DLLs. For libprojectM specifically, the default is shared linking to keep compliance straightforward. If you opt into MILKDAWP_PROJECTM_LINK_STATIC, ensure you meet LGPL requirements for end-user relinking.
+## Validation & QA (Phase 7)
+- See docs/QA.md for automated checks and manual DAW scan/load procedures.
 
-Given the current intent (no dependency modifications, no charging users), dynamic linking to LGPL components like libprojectM is recommended. We'll continue to refine the LICENSE and NOTICE files in later phases as we integrate more code.
+## Licensing & Linking Notes
+- MilkDAWp is licensed under AGPL-3.0-or-later. When distributing binaries, you must provide the complete corresponding source code. Source is this repository.
+- JUCE is used under AGPLv3; see LICENSES/JUCE-AGPL-3.0.txt and THIRD_PARTY_NOTICES.md.
+- libprojectM (LGPL-2.1-or-later) is dynamically linked by default; see LICENSES/projectM-LGPL-2.1.txt and THIRD_PARTY_NOTICES.md.
+- Distributions must include the LICENSES/ directory and THIRD_PARTY_NOTICES.md.
+
+Notes:
+- On Windows we use the dynamic MSVC runtime (/MD). Installers should ensure the VC++ redistributable is present.
+- If you change linkage modes (e.g., static link libprojectM), you are responsible for ensuring continued compliance with LGPL and AGPL obligations.
+
+
+## Developer Onboarding (Bootstrap)
+For a fresh clone, use the bootstrap scripts to initialize submodules and create a default build directory.
+
+- POSIX:
+  - ./scripts/bootstrap.sh
+  - cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+  - cmake --build build --config Release
+- Windows (PowerShell or cmd):
+  - scripts\bootstrap.bat
+  - cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+  - cmake --build build --config Release
+
+Notes:
+- The bootstrap scripts run: `git submodule update --init --recursive` and ensure a `build/` folder exists.
+- See docs/submodules.md for details on pinning and updating dependency submodules.

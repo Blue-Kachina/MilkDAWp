@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.22)
 
 # MilkDAWp - JUCE-based VST3 effect (scaffolding)
 project(MilkDAWp VERSION 0.0.1 LANGUAGES C CXX)
@@ -25,10 +25,10 @@ if(WIN32)
   endif()
 endif()
 
-# Options aligning with README technical details
+# Options aligning with README technical details (Phase 2 updates)
 option(MILKDAWP_BUILD_STANDALONE "Also build Standalone build target" OFF)
-option(MILKDAWP_PREFER_STATIC_RUNTIME_MSVC "Link static MSVC runtime (/MT) where applicable" ON)
-option(MILKDAWP_WITH_PROJECTM "Build and link with libprojectM visualization library" OFF)
+# Phase 2: Prefer dynamic runtime and dynamic projectM by default
+option(MILKDAWP_WITH_PROJECTM "Build and link with libprojectM visualization library" ON)
 # Control how libprojectM is linked when built from source (LGPL compliance recommends shared linking by default)
 option(MILKDAWP_PROJECTM_LINK_STATIC "Link libprojectM statically when building it (may have LGPL obligations)" OFF)
 
@@ -43,58 +43,94 @@ elseif(UNIX)
   add_compile_definitions(JUCE_USE_X11=1)
 endif()
 
-# Configure MSVC runtime preference (static linking preference per README)
-if(MSVC AND MILKDAWP_PREFER_STATIC_RUNTIME_MSVC)
-  foreach(flag_var
-          CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_DEBUG
-          CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_DEBUG)
-    if(${flag_var} MATCHES "/MD")
-      string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
-    endif()
-    if(${flag_var} MATCHES "/MDd")
-      string(REGEX REPLACE "/MDd" "/MTd" ${flag_var} "${${flag_var}}")
-    endif()
-  endforeach()
+# Phase 2: Enforce dynamic MSVC runtime (/MD). Static runtime is no longer supported.
+if(MSVC)
+  # Use modern CMake variable to control runtime library
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL" CACHE STRING "MSVC runtime" FORCE)
 endif()
 
 # Dependencies (JUCE, projectM) – set up as FetchContent placeholders.
 # Note: Actual fetching requires internet; paths can be overridden by user/tooling.
 include(FetchContent)
 
-# JUCE
+# JUCE (Phase 2: prefer local submodule under extern/ if present)
 set(JUCE_GIT_REPOSITORY "https://github.com/juce-framework/JUCE.git" CACHE STRING "JUCE repository URL")
 set(JUCE_GIT_TAG "7.0.12" CACHE STRING "JUCE tag/commit")
 
-FetchContent_Declare(
-  juce
-  GIT_REPOSITORY ${JUCE_GIT_REPOSITORY}
-  GIT_TAG        ${JUCE_GIT_TAG}
-)
-
-# Allow user to provide a local JUCE path to avoid network fetch
+# Default JUCE_LOCAL_PATH to extern/JUCE if it exists
 set(JUCE_LOCAL_PATH "" CACHE PATH "Path to a local JUCE checkout to use instead of fetching")
+if(NOT JUCE_LOCAL_PATH)
+  if(EXISTS "${CMAKE_SOURCE_DIR}/extern/JUCE/CMakeLists.txt")
+    set(JUCE_LOCAL_PATH "${CMAKE_SOURCE_DIR}/extern/JUCE" CACHE PATH "Local JUCE submodule" FORCE)
+  endif()
+endif()
+
 if(JUCE_LOCAL_PATH)
   add_subdirectory(${JUCE_LOCAL_PATH} ${CMAKE_BINARY_DIR}/JUCE)
 else()
+  include(FetchContent)
+  FetchContent_Declare(
+    juce
+    GIT_REPOSITORY ${JUCE_GIT_REPOSITORY}
+    GIT_TAG        ${JUCE_GIT_TAG}
+  )
   FetchContent_MakeAvailable(juce)
 endif()
 
-# libprojectM (optional)
+# libprojectM (Phase 2: shared library, prefer local submodule under extern/)
 set(PROJECTM_GIT_REPOSITORY "https://github.com/projectM-visualizer/projectm.git" CACHE STRING "projectM repository URL")
-set(PROJECTM_GIT_TAG "v3.1.12" CACHE STRING "projectM tag/commit")
+set(PROJECTM_GIT_TAG "v4.1.4" CACHE STRING "projectM tag/commit")
 set(PROJECTM_LOCAL_PATH "" CACHE PATH "Path to a local projectM checkout to use instead of fetching")
 
 if(MILKDAWP_WITH_PROJECTM)
-  message(STATUS "MILKDAWP_WITH_PROJECTM=ON: Integrating libprojectM")
+  message(STATUS "MILKDAWP_WITH_PROJECTM=ON: Integrating libprojectM (Phase 2, shared)")
+
+  # Default PROJECTM_LOCAL_PATH to extern/projectm if it exists
+  if(NOT PROJECTM_LOCAL_PATH)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/extern/projectm/CMakeLists.txt")
+      set(PROJECTM_LOCAL_PATH "${CMAKE_SOURCE_DIR}/extern/projectm" CACHE PATH "Local projectM submodule" FORCE)
+    endif()
+  endif()
+
+  # Phase 2: Require shared linkage. Do not allow static for projectM.
+  if(MILKDAWP_PROJECTM_LINK_STATIC)
+    message(FATAL_ERROR "MILKDAWP_PROJECTM_LINK_STATIC=ON is not supported in Phase 2. Please use shared linking for libprojectM (LGPL).")
+  endif()
+
+  # Try to add projectM
+  set(_projectm_added FALSE)
+  # Ensure shared libs by default when building projectM from source
+  set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared libraries by default" FORCE)
+
   if(PROJECTM_LOCAL_PATH)
     add_subdirectory(${PROJECTM_LOCAL_PATH} ${CMAKE_BINARY_DIR}/projectM)
+    set(_projectm_added TRUE)
   else()
+    include(FetchContent)
     FetchContent_Declare(
       projectm
       GIT_REPOSITORY ${PROJECTM_GIT_REPOSITORY}
       GIT_TAG        ${PROJECTM_GIT_TAG}
     )
     FetchContent_MakeAvailable(projectm)
+    set(_projectm_added TRUE)
+  endif()
+
+  # Validate projectM target presence and that it is a SHARED library
+  set(_PROJECTM_TARGET "")
+  if(TARGET projectM::projectM)
+    set(_PROJECTM_TARGET projectM::projectM)
+  elseif(TARGET projectM)
+    set(_PROJECTM_TARGET projectM)
+  endif()
+
+  if(NOT _PROJECTM_TARGET)
+    message(FATAL_ERROR "libprojectM was requested but no CMake target was found. Ensure submodule exists at extern/projectm or network access for FetchContent.")
+  endif()
+
+  get_target_property(_PM_TYPE ${_PROJECTM_TARGET} TYPE)
+  if(NOT _PM_TYPE STREQUAL "SHARED_LIBRARY")
+    message(FATAL_ERROR "libprojectM target '${_PROJECTM_TARGET}' is not a SHARED library (TYPE=${_PM_TYPE}). Phase 2 requires shared linking.")
   endif()
 endif()
 
@@ -166,15 +202,12 @@ if(MILKDAWP_BUILD_PLUGIN)
       juce::juce_dsp
   )
 
-  # Optional libprojectM linkage and feature define
+  # Optional libprojectM linkage and feature define (Phase 2 enforces presence/type when enabled)
   if(MILKDAWP_WITH_PROJECTM)
-    # Try common target names created by projectM's CMake
-    if(TARGET projectM::projectM)
-      target_link_libraries(${PROJECT_NAME} PRIVATE projectM::projectM)
-    elseif(TARGET projectM)
-      target_link_libraries(${PROJECT_NAME} PRIVATE projectM)
+    if(DEFINED _PROJECTM_TARGET AND TARGET ${_PROJECTM_TARGET})
+      target_link_libraries(${PROJECT_NAME} PRIVATE ${_PROJECTM_TARGET})
     else()
-      message(WARNING "MILKDAWP_WITH_PROJECTM=ON but no projectM CMake target found. Provide PROJECTM_LOCAL_PATH or ensure FetchContent succeeded.")
+      message(FATAL_ERROR "MILKDAWP_WITH_PROJECTM=ON but no projectM CMake target variable was set. This should have been configured earlier.")
     endif()
     target_compile_definitions(${PROJECT_NAME} PRIVATE MILKDAWP_HAS_PROJECTM=1)
   else()
@@ -191,6 +224,55 @@ if(MILKDAWP_BUILD_PLUGIN)
   if(WIN32)
     # Ensure Unicode and lean Windows headers
     target_compile_definitions(${PROJECT_NAME} PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+  endif()
+
+  # Phase 3 — Platform packaging/runtime loading for libprojectM
+  # We bundle the projectM shared library next to the plugin so the host can resolve it at scan/load time.
+  if(MILKDAWP_WITH_PROJECTM)
+    if(WIN32)
+      if(DEFINED _PROJECTM_TARGET AND TARGET ${_PROJECTM_TARGET})
+        # Copy projectM DLL next to the built VST3 file in the artefacts output directory
+        add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${_PROJECTM_TARGET}> $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>
+          VERBATIM)
+
+        # Also copy to JUCE's post-build VST3 copy directory (if configured), so DAWs scanning that location can resolve the DLL
+        get_property(_JUCE_VST3_COPY_DIR DIRECTORY PROPERTY JUCE_VST3_COPY_DIR)
+        if(_JUCE_VST3_COPY_DIR)
+          # Some JUCE generators may include stray quotes in JUCE_VST3_COPY_DIR; strip any trailing quotes to avoid path"" issues
+          string(REGEX REPLACE "\"$" "" _JUCE_VST3_COPY_DIR "${_JUCE_VST3_COPY_DIR}")
+          add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${_JUCE_VST3_COPY_DIR}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${_PROJECTM_TARGET}> ${_JUCE_VST3_COPY_DIR}
+            VERBATIM)
+        endif()
+
+        # Note: We intentionally DO NOT rename the DLL (e.g., to projectM-milkdawp.dll) on Windows.
+        # The dependent DLL name is embedded at link time; renaming would break binding unless we switch to manual LoadLibrary.
+        # TODO (future): consider delay-loading and manual resolution to support private, uniquely named copies.
+      endif()
+    elseif(APPLE)
+      # macOS: copy libprojectM.dylib into the bundle Frameworks dir and set rpath accordingly
+      # Bundle layout: MilkDAWp.vst3/Contents/MacOS/<binary>; frameworks at MilkDAWp.vst3/Contents/Frameworks
+      if(DEFINED _PROJECTM_TARGET AND TARGET ${_PROJECTM_TARGET})
+        # Ensure rpath points to Frameworks so the loader can resolve libprojectM at runtime
+        target_link_options(${PROJECT_NAME}_VST3 PRIVATE "-Wl,-rpath,@loader_path/../Frameworks")
+        add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/../Frameworks"
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${_PROJECTM_TARGET}> "$<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/../Frameworks/"
+          VERBATIM)
+        # Note: Codesigning steps are not added here to keep Phase 3 minimal and cross-platform-safe.
+      endif()
+    elseif(UNIX)
+      # Linux: place libprojectM.so under .../YourPlugin.vst3/Contents/Resources/lib and add rpath
+      if(DEFINED _PROJECTM_TARGET AND TARGET ${_PROJECTM_TARGET})
+        target_link_options(${PROJECT_NAME}_VST3 PRIVATE "-Wl,-rpath,$ORIGIN/../Resources/lib")
+        add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/../Resources/lib"
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${_PROJECTM_TARGET}> "$<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/../Resources/lib/"
+          VERBATIM)
+      endif()
+    endif()
   endif()
 endif()
 

@@ -1,0 +1,65 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 22,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev-win",
+      "displayName": "Developer (Windows)",
+      "description": "Local dev on Windows with plugin enabled and tests off by default",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build-win",
+      "cacheVariables": {
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL",
+        "MILKDAWP_BUILD_PLUGIN": "ON",
+        "BUILD_TESTING": "OFF",
+        "MILKDAWP_WITH_PROJECTM": "ON",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      }
+    },
+    {
+      "name": "dev-mac",
+      "displayName": "Developer (macOS)",
+      "description": "Local dev on macOS universal build",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build-mac",
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "x86_64;arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "11.0",
+        "MILKDAWP_BUILD_PLUGIN": "ON",
+        "BUILD_TESTING": "OFF",
+        "MILKDAWP_WITH_PROJECTM": "ON"
+      }
+    },
+    {
+      "name": "ci-linux",
+      "displayName": "CI (Linux, tests only)",
+      "description": "Headless CI build: disable plugin, enable tests",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-ci",
+      "cacheVariables": {
+        "MILKDAWP_BUILD_PLUGIN": "OFF",
+        "BUILD_TESTING": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev-win-Release", "configurePreset": "dev-win", "configuration": "Release" },
+    { "name": "dev-win-Debug",   "configurePreset": "dev-win", "configuration": "Debug" },
+    { "name": "dev-mac-Release", "configurePreset": "dev-mac", "configuration": "Release" },
+    { "name": "dev-mac-Debug",   "configurePreset": "dev-mac", "configuration": "Debug" },
+    { "name": "ci-linux-RelWithDebInfo", "configurePreset": "ci-linux", "configuration": "RelWithDebInfo" },
+    { "name": "ci-linux-Debug", "configurePreset": "ci-linux", "configuration": "Debug" }
+  ],
+  "testPresets": [
+    {
+      "name": "ci-tests",
+      "configurePreset": "ci-linux",
+      "configuration": "RelWithDebInfo",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

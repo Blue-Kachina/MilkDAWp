@@ -129,8 +129,8 @@
 - [x] Style all controls per README spec
 
 ### 4.3 Embedded Visualization Display
-- [ ] Create embedded OpenGL/GPU canvas component
-- [ ] Render libprojectM output to embedded canvas
+- [ ] Create embedded ProjectM/OpenGL/GPU canvas component
+- [ ] Render projectM output to embedded canvas
 - [ ] Ensure visualization respects allocated space
 - [ ] Handle resize events properly
 - [ ] Test visualization appears on plugin load

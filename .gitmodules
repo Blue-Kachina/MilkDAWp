@@ -1,0 +1,12 @@
+# Submodules for dependency pinning (Phase 1)
+# Intended tags:
+# - JUCE: 8.0.10
+# - projectM: 4.1.4
+
+[submodule "extern/JUCE"]
+	path = extern/JUCE
+	url = https://github.com/juce-framework/JUCE.git
+
+[submodule "extern/projectm"]
+	path = extern/projectm
+	url = https://github.com/projectM-visualizer/projectm.git
