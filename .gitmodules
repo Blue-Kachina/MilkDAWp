@@ -1,12 +1,7 @@
-# Submodules for dependency pinning (Phase 1)
-# Intended tags:
-# - JUCE: 8.0.10
-# - projectM: 4.1.4
-
-[submodule "extern/JUCE"]
-	path = extern/JUCE
-	url = https://github.com/juce-framework/JUCE.git
-
-[submodule "extern/projectm"]
-	path = extern/projectm
-	url = https://github.com/projectM-visualizer/projectm.git
+# NOTE: Dependencies are now managed via vcpkg (see vcpkg.json and vcpkg-configuration.json)
+# Git submodules have been removed in favor of vcpkg manifest mode for better
+# reproducibility, version locking, and simplified onboarding.
+#
+# Previous submodule locations (now deprecated):
+# - extern/JUCE (JUCE 7.0.12) - now from vcpkg
+# - extern/projectm (projectM v4.1.4) - now from vcpkg

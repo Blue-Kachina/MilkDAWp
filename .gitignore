@@ -1,6 +1,10 @@
 # Build artifacts
 /build/
+/build-*/
 /cmake-build-*/
+
+# vcpkg installed dependencies (managed via manifest mode)
+vcpkg_installed/
 
 # CLion
 /.idea/

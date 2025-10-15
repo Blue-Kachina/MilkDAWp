@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "milkdawp",
+  "version": "0.0.1",
+  "description": "JUCE-based VST3 effect with projectM visualization",
+  "homepage": "https://github.com/yourusername/milkdawp",
+  "license": "LGPL-2.1-only",
+  "dependencies": [
+    {
+      "name": "juce",
+      "version>=": "7.0.12"
+    },
+    {
+      "name": "projectm",
+      "version>=": "4.1.4",
+      "default-features": true,
+      "features": ["external-glm", "external-evallib"]
+    }
+  ],
+  "builtin-baseline": "a0f7f5379aa39d638efb1b89ac88a39c1011e4aa",
+  "overrides": [
+    {
+      "name": "juce",
+      "version": "7.0.12"
+    },
+    {
+      "name": "projectm",
+      "version": "4.1.4"
+    }
+  ]
+}

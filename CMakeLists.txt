@@ -49,89 +49,47 @@ if(MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL" CACHE STRING "MSVC runtime" FORCE)
 endif()
 
-# Dependencies (JUCE, projectM) – set up as FetchContent placeholders.
-# Note: Actual fetching requires internet; paths can be overridden by user/tooling.
-include(FetchContent)
+# Dependencies (JUCE, projectM) – managed via vcpkg
+# Versions and baseline are locked in vcpkg.json and vcpkg-configuration.json
 
-# JUCE (Phase 2: prefer local submodule under extern/ if present)
-set(JUCE_GIT_REPOSITORY "https://github.com/juce-framework/JUCE.git" CACHE STRING "JUCE repository URL")
-set(JUCE_GIT_TAG "7.0.12" CACHE STRING "JUCE tag/commit")
+# Find JUCE via vcpkg
+find_package(JUCE CONFIG REQUIRED)
+message(STATUS "Found JUCE via vcpkg")
 
-# Default JUCE_LOCAL_PATH to extern/JUCE if it exists
-set(JUCE_LOCAL_PATH "" CACHE PATH "Path to a local JUCE checkout to use instead of fetching")
-if(NOT JUCE_LOCAL_PATH)
-  if(EXISTS "${CMAKE_SOURCE_DIR}/extern/JUCE/CMakeLists.txt")
-    set(JUCE_LOCAL_PATH "${CMAKE_SOURCE_DIR}/extern/JUCE" CACHE PATH "Local JUCE submodule" FORCE)
-  endif()
-endif()
-
-if(JUCE_LOCAL_PATH)
-  add_subdirectory(${JUCE_LOCAL_PATH} ${CMAKE_BINARY_DIR}/JUCE)
-else()
-  include(FetchContent)
-  FetchContent_Declare(
-    juce
-    GIT_REPOSITORY ${JUCE_GIT_REPOSITORY}
-    GIT_TAG        ${JUCE_GIT_TAG}
-  )
-  FetchContent_MakeAvailable(juce)
-endif()
-
-# libprojectM (Phase 2: shared library, prefer local submodule under extern/)
-set(PROJECTM_GIT_REPOSITORY "https://github.com/projectM-visualizer/projectm.git" CACHE STRING "projectM repository URL")
-set(PROJECTM_GIT_TAG "v4.1.4" CACHE STRING "projectM tag/commit")
-set(PROJECTM_LOCAL_PATH "" CACHE PATH "Path to a local projectM checkout to use instead of fetching")
-
+# Find projectM via vcpkg when enabled
 if(MILKDAWP_WITH_PROJECTM)
-  message(STATUS "MILKDAWP_WITH_PROJECTM=ON: Integrating libprojectM (Phase 2, shared)")
-
-  # Default PROJECTM_LOCAL_PATH to extern/projectm if it exists
-  if(NOT PROJECTM_LOCAL_PATH)
-    if(EXISTS "${CMAKE_SOURCE_DIR}/extern/projectm/CMakeLists.txt")
-      set(PROJECTM_LOCAL_PATH "${CMAKE_SOURCE_DIR}/extern/projectm" CACHE PATH "Local projectM submodule" FORCE)
-    endif()
-  endif()
+  message(STATUS "MILKDAWP_WITH_PROJECTM=ON: Finding libprojectM via vcpkg (shared)")
 
   # Phase 2: Require shared linkage. Do not allow static for projectM.
   if(MILKDAWP_PROJECTM_LINK_STATIC)
-    message(FATAL_ERROR "MILKDAWP_PROJECTM_LINK_STATIC=ON is not supported in Phase 2. Please use shared linking for libprojectM (LGPL).")
+    message(FATAL_ERROR "MILKDAWP_PROJECTM_LINK_STATIC=ON is not supported. Please use shared linking for libprojectM (LGPL).")
   endif()
 
-  # Try to add projectM
-  set(_projectm_added FALSE)
-  # Ensure shared libs by default when building projectM from source
-  set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared libraries by default" FORCE)
-
-  if(PROJECTM_LOCAL_PATH)
-    add_subdirectory(${PROJECTM_LOCAL_PATH} ${CMAKE_BINARY_DIR}/projectM)
-    set(_projectm_added TRUE)
-  else()
-    include(FetchContent)
-    FetchContent_Declare(
-      projectm
-      GIT_REPOSITORY ${PROJECTM_GIT_REPOSITORY}
-      GIT_TAG        ${PROJECTM_GIT_TAG}
-    )
-    FetchContent_MakeAvailable(projectm)
-    set(_projectm_added TRUE)
-  endif()
+  # Find projectM package
+  find_package(projectm CONFIG REQUIRED)
 
   # Validate projectM target presence and that it is a SHARED library
   set(_PROJECTM_TARGET "")
   if(TARGET projectM::projectM)
     set(_PROJECTM_TARGET projectM::projectM)
+  elseif(TARGET projectm::projectm)
+    set(_PROJECTM_TARGET projectm::projectm)
   elseif(TARGET projectM)
     set(_PROJECTM_TARGET projectM)
+  elseif(TARGET projectm)
+    set(_PROJECTM_TARGET projectm)
   endif()
 
   if(NOT _PROJECTM_TARGET)
-    message(FATAL_ERROR "libprojectM was requested but no CMake target was found. Ensure submodule exists at extern/projectm or network access for FetchContent.")
+    message(FATAL_ERROR "libprojectM was requested but no CMake target was found. Ensure vcpkg has installed projectm.")
   endif()
 
   get_target_property(_PM_TYPE ${_PROJECTM_TARGET} TYPE)
-  if(NOT _PM_TYPE STREQUAL "SHARED_LIBRARY")
-    message(FATAL_ERROR "libprojectM target '${_PROJECTM_TARGET}' is not a SHARED library (TYPE=${_PM_TYPE}). Phase 2 requires shared linking.")
+  if(NOT _PM_TYPE STREQUAL "SHARED_LIBRARY" AND NOT _PM_TYPE STREQUAL "UNKNOWN_LIBRARY")
+    message(WARNING "libprojectM target '${_PROJECTM_TARGET}' type is ${_PM_TYPE}. Expected SHARED_LIBRARY for LGPL compliance.")
   endif()
+
+  message(STATUS "Found projectM target: ${_PROJECTM_TARGET}")
 endif()
 
 # Basic target

@@ -13,11 +13,14 @@
       "generator": "Ninja Multi-Config",
       "binaryDir": "${sourceDir}/build-win",
       "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-dynamic",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/build-win/vcpkg_installed",
         "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL",
         "MILKDAWP_BUILD_PLUGIN": "ON",
         "BUILD_TESTING": "OFF",
-        "MILKDAWP_WITH_PROJECTM": "ON",
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        "MILKDAWP_WITH_PROJECTM": "ON"
       }
     },
     {
@@ -27,6 +30,10 @@
       "generator": "Ninja Multi-Config",
       "binaryDir": "${sourceDir}/build-mac",
       "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-osx-dynamic",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/build-mac/vcpkg_installed",
         "CMAKE_OSX_ARCHITECTURES": "x86_64;arm64",
         "CMAKE_OSX_DEPLOYMENT_TARGET": "11.0",
         "MILKDAWP_BUILD_PLUGIN": "ON",
@@ -41,6 +48,10 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-ci",
       "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-linux-dynamic",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/build-ci/vcpkg_installed",
         "MILKDAWP_BUILD_PLUGIN": "OFF",
         "BUILD_TESTING": "ON"
       }
