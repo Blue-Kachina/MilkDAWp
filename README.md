@@ -62,10 +62,10 @@ while having the visualization displaying on another one (possibly in fullscreen
 
 ### Dependencies
 I'm not sure of what the best way to include these in our project is, however, I have identified that we will need the following dependencies.
-- https://github.com/projectM-visualizer/projectm,
-- https://github.com/juce-framework/JUCE
-I want to use the latest versions of these that we can successfully implement given our requirements
-We might need to take their licensing into consideration also
+- JUCE (pinned via vcpkg): 8.0.7 — https://github.com/juce-framework/JUCE
+- projectM/libprojectM (pinned via vcpkg): 4.1.4 — https://github.com/projectM-visualizer/projectm
+We aim to stay current where practical; versions are intentionally pinned in vcpkg.json for reproducibility and easy onboarding.
+Please review licenses and obligations (AGPL for JUCE; LGPL for projectM) before changing linkage modes.
 
 Note (Phase 1): Dependencies are being pinned via Git submodules under extern/.
 For setup and maintenance commands, see docs/submodules.md. During Phase 1, the build continues to use FetchContent by default; you may point to the submodules with:

@@ -65,12 +65,21 @@ if(MILKDAWP_WITH_PROJECTM)
     message(FATAL_ERROR "MILKDAWP_PROJECTM_LINK_STATIC=ON is not supported. Please use shared linking for libprojectM (LGPL).")
   endif()
 
-  # Find projectM package
-  find_package(projectm CONFIG REQUIRED)
+  # Find projectM package: vcpkg may expose it as projectM4 with target libprojectM::projectM
+  # or as projectm with target projectM::projectM / projectm::projectm depending on port version.
+  find_package(projectM4 CONFIG QUIET)
+  if(NOT projectM4_FOUND)
+    find_package(projectm CONFIG QUIET)
+  endif()
+  if(NOT projectM4_FOUND AND NOT projectm_FOUND)
+    message(FATAL_ERROR "libprojectM was requested but neither projectM4 nor projectm CMake packages were found. Ensure vcpkg installed projectm.")
+  endif()
 
   # Validate projectM target presence and that it is a SHARED library
   set(_PROJECTM_TARGET "")
-  if(TARGET projectM::projectM)
+  if(TARGET libprojectM::projectM)
+    set(_PROJECTM_TARGET libprojectM::projectM)
+  elseif(TARGET projectM::projectM)
     set(_PROJECTM_TARGET projectM::projectM)
   elseif(TARGET projectm::projectm)
     set(_PROJECTM_TARGET projectm::projectm)
@@ -81,7 +90,7 @@ if(MILKDAWP_WITH_PROJECTM)
   endif()
 
   if(NOT _PROJECTM_TARGET)
-    message(FATAL_ERROR "libprojectM was requested but no CMake target was found. Ensure vcpkg has installed projectm.")
+    message(FATAL_ERROR "libprojectM was requested but no known CMake target was found (tried libprojectM::projectM, projectM::projectM, projectm::projectm, projectM, projectm).")
   endif()
 
   get_target_property(_PM_TYPE ${_PROJECTM_TARGET} TYPE)
@@ -202,6 +211,18 @@ if(MILKDAWP_BUILD_PLUGIN)
           add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory ${_JUCE_VST3_COPY_DIR}
             COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${_PROJECTM_TARGET}> ${_JUCE_VST3_COPY_DIR}
+            VERBATIM)
+        endif()
+
+        # Also copy ALL runtime DLLs this plugin depends on (transitive), so hosts can resolve them during scan/load
+        add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}_VST3> $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>
+          COMMAND_EXPAND_LISTS
+          VERBATIM)
+        if(_JUCE_VST3_COPY_DIR)
+          add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}_VST3> ${_JUCE_VST3_COPY_DIR}
+            COMMAND_EXPAND_LISTS
             VERBATIM)
         endif()
 

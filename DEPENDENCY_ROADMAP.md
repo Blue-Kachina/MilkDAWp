@@ -6,7 +6,7 @@ This document outlines MilkDAWp's migration from git submodules to vcpkg for dep
 ## Current State (Post-Migration)
 
 ### Dependencies Managed by vcpkg
-- **JUCE**: Version 7.0.12 (audio plugin framework)
+- **JUCE**: Version 8.0.7 (audio plugin framework)
 - **projectM**: Version 4.1.4 (visualization library, LGPL-2.1)
 
 ### Key Files
@@ -176,7 +176,7 @@ set(VCPKG_CRT_LINKAGE dynamic)
 
 ### Updating to Specific Versions
 1. Edit `vcpkg.json` overrides section:
-   ```json
+   ```jsonc
    "overrides": [
      {
        "name": "juce",
@@ -216,7 +216,7 @@ export VCPKG_ROOT=~/vcpkg
 **Error**: `Expected SHARED_LIBRARY for LGPL compliance`
 
 **Solution**: Ensure custom triplet is specified in CMakePresets.json:
-```json
+```jsonc
 "VCPKG_TARGET_TRIPLET": "x64-windows-dynamic",
 "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets"
 ```

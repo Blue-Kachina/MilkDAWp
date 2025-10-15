@@ -8,20 +8,18 @@
   "dependencies": [
     {
       "name": "juce",
-      "version>=": "7.0.12"
+      "version>=": "8.0.7"
     },
     {
       "name": "projectm",
       "version>=": "4.1.4",
-      "default-features": true,
-      "features": ["external-glm", "external-evallib"]
+      "default-features": true
     }
   ],
-  "builtin-baseline": "a0f7f5379aa39d638efb1b89ac88a39c1011e4aa",
   "overrides": [
     {
       "name": "juce",
-      "version": "7.0.12"
+      "version": "8.0.7"
     },
     {
       "name": "projectm",
