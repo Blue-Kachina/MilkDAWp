@@ -129,11 +129,21 @@
 - [x] Style all controls per README spec
 
 ### 4.3 Embedded Visualization Display
-- [ ] Create embedded ProjectM/OpenGL/GPU canvas component
-- [ ] Render projectM output to embedded canvas
-- [ ] Ensure visualization respects allocated space
-- [ ] Handle resize events properly
-- [ ] Test visualization appears on plugin load
+This step replaces the current placeholder visualization with a real embedded projectM renderer. It must build on prior work already completed in this ROADMAP:
+- Use the existing threading model from Phase 1 (audio thread capture → thread-safe queue → dedicated visualization render thread) and the message-thread wiring from Phase 2.
+- Honor the parameter/control wiring from Phases 2–3 so that UI controls immediately affect projectM.
+
+- [ ] Replace placeholder with an embedded JUCE OpenGL/GPU canvas hosting projectM
+- [ ] Initialize/own the projectM instance on the visualization thread (reuse Visualization Thread from 1.2)
+- [ ] Render projectM frames into the embedded canvas (no external window)
+- [ ] Respect allocated bounds in the main window layout and maintain chosen aspect policy
+- [ ] Handle JUCE resize() by resizing/recreating the GL framebuffer and notifying projectM
+- [ ] Verify controls drive the visualization via existing wiring:
+  - [ ] Beat Sensitivity affects analysis/projectM inputs
+  - [ ] Transition Duration drives auto-transitions
+  - [ ] Lock/Shuffle, Prev/Next control playlist behavior
+  - [ ] File/Folder pickers update the active preset/playlist
+- [ ] On plugin load (with restored state), the visualization appears and animates within the embedded canvas
 
 ---
 
