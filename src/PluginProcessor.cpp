@@ -4,6 +4,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_gui_extra/juce_gui_extra.h>
+#include <juce_opengl/juce_opengl.h>
 #include "Version.h"
 #include "Logging.h"
 #include "AudioAnalysisQueue.h"
@@ -584,8 +585,8 @@ public:
         logoLabel.setFont(juce::Font(24.0f, juce::Font::bold));
         logoLabel.setJustificationType(juce::Justification::centredLeft);
 
-        // Visualization placeholder
-        addAndMakeVisible(vizPlaceholder);
+        // Visualization canvas (embedded OpenGL)
+        addAndMakeVisible(vizCanvas);
 
         // Knobs and toggles (Phase 4.2)
         addAndMakeVisible(beatLabel);
@@ -770,7 +771,7 @@ public:
         nextButton.setBounds(right.removeFromLeft(70));
 
         // Visualization area fills remaining
-        vizPlaceholder.setBounds(bounds.reduced(12));
+        vizCanvas.setBounds(bounds.reduced(12));
     }
 
 private:
@@ -808,21 +809,92 @@ private:
         return "(no preset)";
     }
 
-    struct VizPlaceholder : public juce::Component {
+    struct VizOpenGLCanvas : public juce::Component, public juce::OpenGLRenderer, private juce::Timer {
+        VizOpenGLCanvas()
+        {
+            // Configure GL context for an embedded canvas
+            context.setRenderer(this);
+            context.setContinuousRepainting(true);
+            context.setComponentPaintingEnabled(false); // don't draw CPU fallback over GL frames
+            context.attachTo(*this);
+            // Start CPU-side timer for fallback animation when GL is unavailable
+            startTimerHz(30);
+        }
+        ~VizOpenGLCanvas() override
+        {
+            stopTimer();
+            context.detach();
+        }
+        void newOpenGLContextCreated() override
+        {
+            // Initialise GL resources if needed later (textures, FBOs). For now just set a start time.
+            startTimeMs = juce::Time::getMillisecondCounterHiRes();
+            glContextCreated.store(true, std::memory_order_relaxed);
+            MDW_LOG_INFO("VizOpenGLCanvas: OpenGL context created");
+        }
+        void renderOpenGL() override
+        {
+            // Simple animated clear to prove GL path is alive in hosts
+            const double nowMs = juce::Time::getMillisecondCounterHiRes();
+            lastGLFrameMs.store((uint64_t) nowMs, std::memory_order_relaxed);
+            const double t = 0.001 * (nowMs - startTimeMs);
+            const float r = 0.5f + 0.5f * (float)std::sin((float)t * 1.2f);
+            const float g = 0.5f + 0.5f * (float)std::sin((float)t * 0.9f + 1.0f);
+            const float b = 0.5f + 0.5f * (float)std::sin((float)t * 1.7f + 2.0f);
+            juce::OpenGLHelpers::clear(juce::Colour::fromFloatRGBA(r, g, b, 1.0f));
+            // TODO: In future, blit projectM-rendered texture here.
+        }
+        void openGLContextClosing() override
+        {
+            // Free GL resources if any
+        }
+        void timerCallback() override
+        {
+            // Unconditionally repaint; ensures CPU fallback animates even if a host attaches a GL context but never renders.
+            repaint();
+        }
         void paint(juce::Graphics& g) override
         {
+            // CPU fallback animation: moving bars to show liveness when GL path is not active
+            auto bounds = getLocalBounds();
             g.fillAll(juce::Colour(0xFF111417));
             g.setColour(juce::Colour(0xFF2A2E33));
-            g.drawRect(getLocalBounds(), 1);
-            g.setColour(juce::Colours::white.withAlpha(0.6f));
-            g.setFont(18.0f);
-            g.drawFittedText("Visualization Area", getLocalBounds(), juce::Justification::centred, 1);
+            g.drawRect(bounds, 1);
+
+            const double t = 0.001 * (juce::Time::getMillisecondCounterHiRes() - startTimeMs);
+            const int barCount = 12;
+            const float w = (float)bounds.getWidth();
+            const float h = (float)bounds.getHeight();
+            const float barW = w / (float)barCount;
+            for (int i = 0; i < barCount; ++i)
+            {
+                float phase = (float)t * 2.0f + i * 0.5f;
+                float amp = 0.3f + 0.7f * (0.5f * (1.0f + std::sin(phase)));
+                float bh = amp * h;
+                float x = i * barW;
+                float y = (h - bh) * 0.5f;
+                juce::Colour c = juce::Colour::fromFloatRGBA(0.2f + 0.8f * (i / (float)barCount), 0.6f, 1.0f - 0.7f * (i / (float)barCount), 1.0f);
+                g.setColour(c.withMultipliedAlpha(0.9f));
+                g.fillRoundedRectangle(x + 2.0f, y, barW - 4.0f, bh, 4.0f);
+            }
+
+            g.setColour(juce::Colours::white.withAlpha(0.7f));
+            g.setFont(14.0f);
+            g.drawFittedText("CPU preview (OpenGL unavailable)", bounds.removeFromBottom(22), juce::Justification::centred, 1);
         }
+        void resized() override
+        {
+            // If using FBOs later, recreate to match new size.
+        }
+        juce::OpenGLContext context;
+        double startTimeMs { 0.0 };
+        std::atomic<bool> glContextCreated { false };
+        std::atomic<uint64_t> lastGLFrameMs { 0 };
     };
 
     HardwareLookAndFeel hardwareLAF;
     juce::Label logoLabel;
-    VizPlaceholder vizPlaceholder;
+    VizOpenGLCanvas vizCanvas;
 
     MilkDAWpAudioProcessor& processor;
 

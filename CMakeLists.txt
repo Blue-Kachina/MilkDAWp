@@ -167,6 +167,7 @@ if(MILKDAWP_BUILD_PLUGIN)
       juce::juce_gui_basics
       juce::juce_gui_extra
       juce::juce_dsp
+      juce::juce_opengl
   )
 
   # Optional libprojectM linkage and feature define (Phase 2 enforces presence/type when enabled)
@@ -288,6 +289,7 @@ if(BUILD_TESTING)
     juce::juce_audio_processors
     juce::juce_gui_basics
     juce::juce_gui_extra
-    juce::juce_dsp)
+    juce::juce_dsp
+    juce::juce_opengl)
   add_test(NAME ${PROJECT_NAME}_tests COMMAND ${PROJECT_NAME}_tests)
 endif()
