@@ -31,6 +31,14 @@ option(MILKDAWP_BUILD_STANDALONE "Also build Standalone build target" OFF)
 option(MILKDAWP_WITH_PROJECTM "Build and link with libprojectM visualization library" ON)
 # Control how libprojectM is linked when built from source (LGPL compliance recommends shared linking by default)
 option(MILKDAWP_PROJECTM_LINK_STATIC "Link libprojectM statically when building it (may have LGPL obligations)" OFF)
+# Control whether to also copy dependent DLLs next to the built VST3 artefact (in the build tree)
+# By default, if a JUCE VST3 copy dir/override is set, we avoid duplicating DLLs to the artefact to reduce confusion.
+set(MILKDAWP_COPY_DLLS_TO_ARTEFACTS_DEFAULT ON)
+get_property(_JUCE_VST3_COPY_DIR_PRE DIRECTORY PROPERTY JUCE_VST3_COPY_DIR)
+if(WIN32 AND _JUCE_VST3_COPY_DIR_PRE)
+  set(MILKDAWP_COPY_DLLS_TO_ARTEFACTS_DEFAULT OFF)
+endif()
+option(MILKDAWP_COPY_DLLS_TO_ARTEFACTS "Copy dependent DLLs next to the built VST3 in the build tree" ${MILKDAWP_COPY_DLLS_TO_ARTEFACTS_DEFAULT})
 
 # Multi-platform defaults to ensure builds on Windows, macOS, and Linux
 if(APPLE)
@@ -199,30 +207,87 @@ if(MILKDAWP_BUILD_PLUGIN)
   if(MILKDAWP_WITH_PROJECTM)
     if(WIN32)
       if(DEFINED _PROJECTM_TARGET AND TARGET ${_PROJECTM_TARGET})
-        # Copy projectM DLL next to the built VST3 file in the artefacts output directory
-        add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
-          COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${_PROJECTM_TARGET}> $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>
-          VERBATIM)
+        # Copy projectM DLL next to the built VST3 file in the artefacts output directory (optional to avoid duplication)
+        if(MILKDAWP_COPY_DLLS_TO_ARTEFACTS)
+          add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${_PROJECTM_TARGET}> $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>
+            VERBATIM)
+        endif()
 
         # Also copy to JUCE's post-build VST3 copy directory (if configured), so DAWs scanning that location can resolve the DLL
         get_property(_JUCE_VST3_COPY_DIR DIRECTORY PROPERTY JUCE_VST3_COPY_DIR)
         if(_JUCE_VST3_COPY_DIR)
           # Some JUCE generators may include stray quotes in JUCE_VST3_COPY_DIR; strip any trailing quotes to avoid path"" issues
           string(REGEX REPLACE "\"$" "" _JUCE_VST3_COPY_DIR "${_JUCE_VST3_COPY_DIR}")
+          # Copy the projectM DLL into the actual bundle's binary directory
           add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${_JUCE_VST3_COPY_DIR}
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${_PROJECTM_TARGET}> ${_JUCE_VST3_COPY_DIR}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${_PROJECTM_TARGET}> ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win
             VERBATIM)
         endif()
 
         # Also copy ALL runtime DLLs this plugin depends on (transitive), so hosts can resolve them during scan/load
+        if(MILKDAWP_COPY_DLLS_TO_ARTEFACTS)
+          # Pre-clean known dependency DLLs in the artefact bundle's binary directory to avoid stale copies
+          add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/projectM-4.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/projectM-4d.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/glew32.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/glew32d.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/freetype.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/freetyped.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/libpng16.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/libpng16d.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/zlib1.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/zlibd1.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/brotlicommon.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/brotlidec.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/brotlienc.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/bz2d.dll
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/bzip2.dll
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}_VST3> $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>
+            COMMAND_EXPAND_LISTS
+            VERBATIM)
+        endif()
+        if(_JUCE_VST3_COPY_DIR)
+          # Pre-clean known dependency DLLs in the installed bundle's binary directory to avoid stale copies
+          add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/projectM-4.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/projectM-4d.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/glew32.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/glew32d.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/freetype.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/freetyped.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/libpng16.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/libpng16d.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/zlib1.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/zlibd1.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/brotlicommon.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/brotlidec.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/brotlienc.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/bz2d.dll
+                    ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/bzip2.dll
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}_VST3> ${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win
+            COMMAND_EXPAND_LISTS
+            VERBATIM)
+        endif()
+
+        # Copy additional common projectM runtime dependencies from vcpkg bin into the bundle (if present)
+        set(_VCPKG_BIN_DIR "$<IF:$<CONFIG:Debug>,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/debug/bin,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/bin>")
+        set(_MDW_EXTRA_DLLS "freetyped.dll;freetype.dll;libpng16d.dll;libpng16.dll;zlib1d.dll;zlibd1.dll;zlib1.dll;brotlicommon.dll;brotlidec.dll;brotlienc.dll;bz2d.dll;bzip2.dll;glew32d.dll;glew32.dll")
         add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
-          COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}_VST3> $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>
+          COMMAND ${CMAKE_COMMAND} -D SRC_DIR=$<IF:$<CONFIG:Debug>,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/debug/bin,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/bin> -D DEST_DIR=$<TARGET_FILE_DIR:${PROJECT_NAME}_VST3> -D NAMES=${_MDW_EXTRA_DLLS} -D PATTERNS="libpng16*.dll;zlib*.dll;brotli*.dll;bzip2*.dll;bz2*.dll"
+                  -P ${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/copy_runtime_deps.cmake
           COMMAND_EXPAND_LISTS
           VERBATIM)
         if(_JUCE_VST3_COPY_DIR)
           add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}_VST3> ${_JUCE_VST3_COPY_DIR}
+            COMMAND ${CMAKE_COMMAND} -D SRC_DIR=$<IF:$<CONFIG:Debug>,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/debug/bin,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/bin> -D DEST_DIR=${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win -D NAMES=${_MDW_EXTRA_DLLS} -D PATTERNS="libpng16*.dll;zlib*.dll;brotli*.dll;bzip2*.dll;bz2*.dll"
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/copy_runtime_deps.cmake
             COMMAND_EXPAND_LISTS
             VERBATIM)
         endif()
@@ -253,6 +318,20 @@ if(MILKDAWP_BUILD_PLUGIN)
           VERBATIM)
       endif()
     endif()
+  endif()
+
+  # Windows-specific: delay-load projectM and GLEW so juce_vst3_helper can load the plugin before DLLs are copied
+  if(WIN32 AND MILKDAWP_WITH_PROJECTM)
+    # Link the MSVC delay-load helper library on both SharedCode and VST3 targets
+    target_link_libraries(${PROJECT_NAME} PRIVATE delayimp)
+    target_link_libraries(${PROJECT_NAME}_VST3 PRIVATE delayimp)
+    # Delay-load both Debug and Release DLL names on the VST3 module; the linker will only apply those that match the configuration
+    target_link_options(${PROJECT_NAME}_VST3 PRIVATE
+      "$<$<CONFIG:Debug>:/DELAYLOAD:projectM-4d.dll>"
+      "$<$<CONFIG:Debug>:/DELAYLOAD:glew32d.dll>"
+      "$<$<NOT:$<CONFIG:Debug>>:/DELAYLOAD:projectM-4.dll>"
+      "$<$<NOT:$<CONFIG:Debug>>:/DELAYLOAD:glew32.dll>"
+    )
   endif()
 endif()
 

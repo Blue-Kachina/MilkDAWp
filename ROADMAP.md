@@ -135,14 +135,14 @@ This step replaces the current placeholder visualization with a real embedded pr
 
 - [x] Replace placeholder with an embedded JUCE OpenGL/GPU canvas hosting projectM
 - [x] Initialize/own the projectM instance on the visualization thread (reuse Visualization Thread from 1.2)
-- [ ] Render projectM frames into the embedded canvas (no external window)
+- [x] Render projectM frames into the embedded canvas (no external window)
 - [x] Respect allocated bounds in the main window layout and maintain chosen aspect policy
-- [ ] Handle JUCE resize() by resizing/recreating the GL framebuffer and notifying projectM
-- [ ] Verify controls drive the visualization via existing wiring:
-  - [ ] Beat Sensitivity affects analysis/projectM inputs
-  - [ ] Transition Duration drives auto-transitions
-  - [ ] Lock/Shuffle, Prev/Next control playlist behavior
-  - [ ] File/Folder pickers update the active preset/playlist
+- [x] Handle JUCE resize() by resizing/recreating the GL framebuffer and notifying projectM
+- [x] Verify controls drive the visualization via existing wiring:
+  - [x] Beat Sensitivity affects analysis/projectM inputs
+  - [x] Transition Duration drives auto-transitions
+  - [x] Lock/Shuffle, Prev/Next control playlist behavior
+  - [x] File/Folder pickers update the active preset/playlist
 - [x] On plugin load (with restored state), the visualization appears and animates within the embedded canvas
 
 ---

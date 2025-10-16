@@ -9,8 +9,37 @@
 #include "Logging.h"
 #include "AudioAnalysisQueue.h"
 #include "VisualizationThread.h"
+#ifdef _WIN32
+  #define NOMINMAX
+  #include <windows.h>
+#endif
+
+#if MILKDAWP_HAS_PROJECTM
+// C API headers for projectM v4 (via vcpkg): convenience include
+#include <projectM-4/projectM.h>
+#endif
+
+// Local anchor to resolve this module's HMODULE at runtime (Windows)
+#ifdef _WIN32
+extern "C" void mdw_module_anchor() {}
+#endif
 
 class MilkDAWpAudioProcessor : public juce::AudioProcessor, public juce::AudioProcessorValueTreeState::Listener {
+public:
+    void ensureVizThreadStartedForUI() {
+    #if !defined(MILKDAWP_ENABLE_VIZ_THREAD)
+    #define MILKDAWP_ENABLE_VIZ_THREAD 1
+    #endif
+    #if MILKDAWP_ENABLE_VIZ_THREAD
+        if (!vizThread)
+            vizThread = std::make_unique<milkdawp::VisualizationThread>(analysisQueue);
+        vizThread->start();
+        // Make sure visualization thread has latest params and preset
+        sendAllParamsToViz();
+        if (currentPresetPath.isNotEmpty())
+            vizThread->postLoadPreset(currentPresetPath);
+    #endif
+    }
 public:
     struct AutoAdvanceTimer : juce::Timer {
         MilkDAWpAudioProcessor& proc;
@@ -20,6 +49,7 @@ public:
 public:
     using APVTS = juce::AudioProcessorValueTreeState;
     APVTS& getValueTreeState() noexcept { return apvts; }
+    milkdawp::VisualizationThread* getVizThread() noexcept { return vizThread.get(); }
     juce::String getCurrentPresetPath() const noexcept { return currentPresetPath; }
     void setCurrentPresetPathAndPostLoad(const juce::String& path)
     {
@@ -58,6 +88,49 @@ public:
     {
         milkdawp::Logging::init("MilkDAWp", MILKDAWP_VERSION_STRING);
         MDW_LOG_INFO("AudioProcessor constructed");
+       #if MILKDAWP_HAS_PROJECTM
+        MDW_LOG_INFO("projectM compiled: ON");
+       #else
+        MDW_LOG_INFO("projectM compiled: OFF");
+       #endif
+
+        // Log active build configuration
+       #if defined(_DEBUG)
+        MDW_LOG_INFO("Build config: Debug");
+       #else
+        MDW_LOG_INFO("Build config: Release");
+       #endif
+
+       #ifdef _WIN32
+        // Log absolute path of the loaded plugin module to disambiguate scanned copies
+        {
+            HMODULE hSelf = nullptr;
+            wchar_t modulePath[MAX_PATH] = {0};
+           #if MILKDAWP_HAS_PROJECTM
+            // Anchor symbol is defined near projectM include guard region for a stable address in this module
+           #else
+            // Even without projectM, the anchor is still available due to unconditional compilation unit inclusion
+           #endif
+            if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                    (LPCWSTR)&mdw_module_anchor, &hSelf))
+            {
+                DWORD len = GetModuleFileNameW(hSelf, modulePath, MAX_PATH);
+                if (len > 0 && len < MAX_PATH) {
+                    MDW_LOG_INFO(juce::String("Plugin module path: ") + juce::String((juce::CharPointer_UTF16)modulePath));
+                }
+            }
+
+           #if MILKDAWP_HAS_PROJECTM
+            // Check if a projectM DLL is already loaded (helps distinguish PATH vs local resolution)
+            HMODULE hPM = GetModuleHandleW(L"projectM-4d.dll");
+            if (!hPM) hPM = GetModuleHandleW(L"projectM-4.dll");
+            if (hPM)
+                MDW_LOG_INFO("projectM DLL presence: already loaded (GetModuleHandle succeeded)");
+            else
+                MDW_LOG_INFO("projectM DLL presence: not loaded yet (GetModuleHandle failed)");
+           #endif
+        }
+       #endif
         fftBuffer.malloc(milkdawp::AudioAnalysisSnapshot::fftSize * 2);
         monoAccum.resize(milkdawp::AudioAnalysisSnapshot::fftSize);
         energyHistory.fill(0.0f);
@@ -99,6 +172,10 @@ public:
         if (!vizThread)
             vizThread = std::make_unique<milkdawp::VisualizationThread>(analysisQueue);
         vizThread->start();
+        // If a preset path was already selected (e.g., user loaded before audio started or restored state),
+        // post it now so the viz thread applies it immediately.
+        if (currentPresetPath.isNotEmpty())
+            vizThread->postLoadPreset(currentPresetPath);
         // Send initial parameter values to visualization thread
         sendAllParamsToViz();
 #endif
@@ -587,6 +664,9 @@ public:
 
         // Visualization canvas (embedded OpenGL)
         addAndMakeVisible(vizCanvas);
+        vizCanvas.setOwner(&processor);
+        // Ensure visualization thread runs even when host hasn't prepared audio yet
+        processor.ensureVizThreadStartedForUI();
 
         // Knobs and toggles (Phase 4.2)
         addAndMakeVisible(beatLabel);
@@ -644,6 +724,8 @@ public:
                     return;
                 }
                 processor.setCurrentPresetPathAndPostLoad(f.getFullPathName());
+                // Ensure viz thread is running so the preset takes effect immediately
+                processor.ensureVizThreadStartedForUI();
                 // Switch to single-preset mode: clear any active playlist and stop transport
                 processor.clearPlaylistPublic();
                 presetNameLabel.setText(f.getFileNameWithoutExtension(), juce::dontSendNotification);
@@ -815,9 +897,9 @@ private:
             // Configure GL context for an embedded canvas
             context.setRenderer(this);
             context.setContinuousRepainting(true);
-            context.setComponentPaintingEnabled(false); // don't draw CPU fallback over GL frames
+            context.setComponentPaintingEnabled(true); // allow CPU painting to blit viz frames
             context.attachTo(*this);
-            // Start CPU-side timer for fallback animation when GL is unavailable
+            // Start CPU-side timer to drive repaints
             startTimerHz(30);
         }
         ~VizOpenGLCanvas() override
@@ -831,22 +913,161 @@ private:
             startTimeMs = juce::Time::getMillisecondCounterHiRes();
             glContextCreated.store(true, std::memory_order_relaxed);
             MDW_LOG_INFO("VizOpenGLCanvas: OpenGL context created");
+        #if MILKDAWP_HAS_PROJECTM
+            // On Windows, proactively probe dependent DLLs to avoid hard crashes on first call
+           #ifdef _WIN32
+            // Build a list of candidate DLL names for both Debug/Release vcpkg conventions
+            const wchar_t* pmCandidates[] = { L"projectM-4d.dll", L"projectM-4.dll" };
+            const wchar_t* glewCandidates[] = { L"glew32d.dll", L"glew32.dll" };
+
+            // Resolve the directory of our plugin module (not the host EXE)
+            HMODULE hSelf = nullptr;
+            wchar_t modulePath[MAX_PATH] = {0};
+            if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                    (LPCWSTR)&mdw_module_anchor, &hSelf))
+            {
+                DWORD len = GetModuleFileNameW(hSelf, modulePath, MAX_PATH);
+                if (len > 0 && len < MAX_PATH) {
+                    // Trim to directory
+                    wchar_t* lastSlash = wcsrchr(modulePath, L'\\');
+                    if (lastSlash) *lastSlash = 0; // now modulePath is the directory
+                } else {
+                    modulePath[0] = 0;
+                }
+            }
+
+            auto tryLoadFromDir = [&](const wchar_t* dir, const wchar_t* name) -> HMODULE {
+                if (dir && dir[0] != 0) {
+                    wchar_t full[MAX_PATH];
+                    swprintf(full, MAX_PATH, L"%s\\%s", dir, name);
+                    HMODULE h = LoadLibraryExW(full, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+                    if (h) {
+                        MDW_LOG_INFO(juce::String("Loaded DLL: ") + juce::String((juce::CharPointer_UTF16)full));
+                        return h;
+                    } else {
+                        DWORD err = GetLastError();
+                        LPWSTR msgBuf = nullptr;
+                        DWORD c = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                                 nullptr, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPWSTR)&msgBuf, 0, nullptr);
+                        juce::String msg = (c && msgBuf) ? juce::String((juce::CharPointer_UTF16)msgBuf).trim() : juce::String();
+                        if (msgBuf) LocalFree(msgBuf);
+                        MDW_LOG_INFO(juce::String("Failed to load ") + juce::String((juce::CharPointer_UTF16)full) +
+                                      juce::String(" (GetLastError=") + juce::String((int)err) + juce::String(") ") + msg);
+                    }
+                }
+                return (HMODULE)nullptr;
+            };
+
+            // First preload GLEW so projectM's imports can resolve
+            HMODULE hGlewProbe = nullptr;
+            for (auto* n : glewCandidates) {
+                if ((hGlewProbe = tryLoadFromDir(modulePath, n)) != nullptr) break;
+            }
+            if (!hGlewProbe) {
+                for (auto* n : glewCandidates) {
+                    hGlewProbe = LoadLibraryExW(n, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+                    if (hGlewProbe) {
+                        MDW_LOG_INFO(juce::String("Loaded DLL from system path: ") + juce::String((juce::CharPointer_UTF16)n));
+                        break;
+                    }
+                }
+            }
+            if (!hGlewProbe) {
+                MDW_LOG_ERROR("GLEW DLL not found. Searched next to plugin and in system paths for: glew32d.dll, glew32.dll");
+                return;
+            }
+
+            // Then load projectM from the plugin's directory
+            HMODULE hPMProbe = nullptr;
+            for (auto* n : pmCandidates) {
+                if ((hPMProbe = tryLoadFromDir(modulePath, n)) != nullptr) break;
+            }
+            // Fallback: system search path (developer machines with vcpkg installed to PATH)
+            if (!hPMProbe) {
+                for (auto* n : pmCandidates) {
+                    hPMProbe = LoadLibraryExW(n, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+                    if (hPMProbe) {
+                        MDW_LOG_INFO(juce::String("Loaded DLL from system path: ") + juce::String((juce::CharPointer_UTF16)n));
+                        break;
+                    }
+                }
+            }
+            if (!hPMProbe) {
+                MDW_LOG_ERROR("projectM DLL not found. Searched next to plugin and in system paths for: projectM-4d.dll, projectM-4.dll");
+                return; // leave pmReady=false; CPU fallback remains active
+            }
+            // Keep the libraries loaded for the process lifetime; no FreeLibrary on success to avoid refcount churn
+
+            // Initialise GLEW against the current context (required for core profile function pointers)
+            typedef int (WINAPI *PFNGLEWINIT)(void);
+            PFNGLEWINIT pGlewInit = (PFNGLEWINIT) GetProcAddress(hGlewProbe, "glewInit");
+            if (pGlewInit == nullptr) {
+                MDW_LOG_ERROR("GLEW: glewInit not found in DLL");
+                return;
+            }
+            // Set glewExperimental=GL_TRUE to ensure core profile entry points are exposed (samplers, etc.)
+            typedef unsigned char GLboolean;
+            GLboolean* pGlewExperimental = (GLboolean*) GetProcAddress(hGlewProbe, "glewExperimental");
+            if (pGlewExperimental) *pGlewExperimental = (GLboolean)1;
+            int glewRc = pGlewInit();
+            if (glewRc != 0) {
+                MDW_LOG_ERROR(juce::String("GLEW initialisation failed, code=") + juce::String(glewRc));
+                return;
+            } else {
+                MDW_LOG_INFO("GLEW initialised");
+            }
+           #endif
+            // Create a projectM instance bound to this GL context
+            pmHandle = projectm_create();
+            if (pmHandle == nullptr) {
+                MDW_LOG_ERROR("projectM: failed to create instance (is GL context current?)");
+            } else {
+                MDW_LOG_INFO("projectM: instance created");
+                pmReady = true;
+            }
+        #endif
         }
         void renderOpenGL() override
         {
-            // Simple animated clear to prove GL path is alive in hosts
             const double nowMs = juce::Time::getMillisecondCounterHiRes();
             lastGLFrameMs.store((uint64_t) nowMs, std::memory_order_relaxed);
-            const double t = 0.001 * (nowMs - startTimeMs);
-            const float r = 0.5f + 0.5f * (float)std::sin((float)t * 1.2f);
-            const float g = 0.5f + 0.5f * (float)std::sin((float)t * 0.9f + 1.0f);
-            const float b = 0.5f + 0.5f * (float)std::sin((float)t * 1.7f + 2.0f);
-            juce::OpenGLHelpers::clear(juce::Colour::fromFloatRGBA(r, g, b, 1.0f));
-            // TODO: In future, blit projectM-rendered texture here.
+            juce::OpenGLHelpers::clear(juce::Colours::black);
+        #if MILKDAWP_HAS_PROJECTM
+            if (pmHandle != nullptr)
+            {
+                // If user selected a new preset path, load it here on the GL thread
+                if (owner != nullptr) {
+                    auto path = owner->getCurrentPresetPath();
+                    if (path.isNotEmpty() && path != lastPMPath) {
+                        projectm_load_preset_file(pmHandle, path.toRawUTF8(), true);
+                        MDW_LOG_INFO(juce::String("Loaded preset (GL): ") + path);
+                        lastPMPath = path;
+                    }
+                }
+                // Render the projectM frame into the current framebuffer
+                projectm_opengl_render_frame(pmHandle);
+
+                // Periodic heartbeat log so we can confirm GL path is active without spamming logs
+                static double lastLogMs = 0.0;
+                if (nowMs - lastLogMs > 2000.0) {
+                    MDW_LOG_INFO("projectM GL: rendered frame");
+                    lastLogMs = nowMs;
+                }
+            }
+        #endif
+            // When projectM is not available, nothing is drawn here; CPU blit in paint() remains as fallback.
         }
         void openGLContextClosing() override
         {
             // Free GL resources if any
+        #if MILKDAWP_HAS_PROJECTM
+            if (pmHandle != nullptr) {
+                projectm_destroy(pmHandle);
+                pmHandle = nullptr;
+                pmReady = false;
+                lastPMPath.clear();
+            }
+        #endif
         }
         void timerCallback() override
         {
@@ -855,41 +1076,71 @@ private:
         }
         void paint(juce::Graphics& g) override
         {
-            // CPU fallback animation: moving bars to show liveness when GL path is not active
             auto bounds = getLocalBounds();
-            g.fillAll(juce::Colour(0xFF111417));
-            g.setColour(juce::Colour(0xFF2A2E33));
-            g.drawRect(bounds, 1);
-
-            const double t = 0.001 * (juce::Time::getMillisecondCounterHiRes() - startTimeMs);
-            const int barCount = 12;
-            const float w = (float)bounds.getWidth();
-            const float h = (float)bounds.getHeight();
-            const float barW = w / (float)barCount;
-            for (int i = 0; i < barCount; ++i)
-            {
-                float phase = (float)t * 2.0f + i * 0.5f;
-                float amp = 0.3f + 0.7f * (0.5f * (1.0f + std::sin(phase)));
-                float bh = amp * h;
-                float x = i * barW;
-                float y = (h - bh) * 0.5f;
-                juce::Colour c = juce::Colour::fromFloatRGBA(0.2f + 0.8f * (i / (float)barCount), 0.6f, 1.0f - 0.7f * (i / (float)barCount), 1.0f);
-                g.setColour(c.withMultipliedAlpha(0.9f));
-                g.fillRoundedRectangle(x + 2.0f, y, barW - 4.0f, bh, 4.0f);
+            bool drewFrame = false;
+            bool glProjectMActive = false;
+           #if MILKDAWP_HAS_PROJECTM
+            glProjectMActive = pmReady;
+           #endif
+            if (!glProjectMActive) {
+                if (owner != nullptr) {
+                    if (auto* vt = owner->getVizThread()) {
+                        milkdawp::VisualizationThread::FrameSnapshot snap;
+                        if (vt->getFrameSnapshot(snap) && snap.image.isValid()) {
+                            g.drawImage(snap.image, bounds.toFloat());
+                            drewFrame = true;
+                        }
+                    }
+                }
             }
+            if (!drewFrame && !glProjectMActive) {
+                // CPU fallback animation: moving bars to show liveness when no frame available
+                g.fillAll(juce::Colour(0xFF111417));
+                g.setColour(juce::Colour(0xFF2A2E33));
+                g.drawRect(bounds, 1);
 
-            g.setColour(juce::Colours::white.withAlpha(0.7f));
-            g.setFont(14.0f);
-            g.drawFittedText("CPU preview (OpenGL unavailable)", bounds.removeFromBottom(22), juce::Justification::centred, 1);
+                const double t = 0.001 * (juce::Time::getMillisecondCounterHiRes() - startTimeMs);
+                const int barCount = 12;
+                const float w = (float)bounds.getWidth();
+                const float h = (float)bounds.getHeight();
+                const float barW = w / (float)barCount;
+                for (int i = 0; i < barCount; ++i)
+                {
+                    float phase = (float)t * 2.0f + i * 0.5f;
+                    float amp = 0.3f + 0.7f * (0.5f * (1.0f + std::sin(phase)));
+                    float bh = amp * h;
+                    float x = i * barW;
+                    float y = (h - bh) * 0.5f;
+                    juce::Colour c = juce::Colour::fromFloatRGBA(0.2f + 0.8f * (i / (float)barCount), 0.6f, 1.0f - 0.7f * (i / (float)barCount), 1.0f);
+                    g.setColour(c.withMultipliedAlpha(0.9f));
+                    g.fillRoundedRectangle(x + 2.0f, y, barW - 4.0f, bh, 4.0f);
+                }
+
+                g.setColour(juce::Colours::white.withAlpha(0.7f));
+                g.setFont(14.0f);
+                g.drawFittedText("CPU preview (no viz frame)", bounds.removeFromBottom(22), juce::Justification::centred, 1);
+            }
         }
         void resized() override
         {
-            // If using FBOs later, recreate to match new size.
+            if (owner != nullptr) {
+                if (auto* vt = owner->getVizThread()) {
+                    vt->setSurfaceSize(getWidth(), getHeight());
+                }
+            }
         }
+        void setOwner(MilkDAWpAudioProcessor* p) { owner = p; }
         juce::OpenGLContext context;
         double startTimeMs { 0.0 };
         std::atomic<bool> glContextCreated { false };
         std::atomic<uint64_t> lastGLFrameMs { 0 };
+        MilkDAWpAudioProcessor* owner { nullptr };
+
+       #if MILKDAWP_HAS_PROJECTM
+        projectm_handle pmHandle { nullptr };
+        juce::String lastPMPath;
+        bool pmReady { false };
+       #endif
     };
 
     HardwareLookAndFeel hardwareLAF;

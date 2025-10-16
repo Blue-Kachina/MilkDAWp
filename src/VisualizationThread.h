@@ -6,6 +6,7 @@
 #include <thread>
 #include <cmath>
 #include <juce_core/juce_core.h>
+#include <juce_graphics/juce_graphics.h>
 #include "AudioAnalysisQueue.h"
 #include "MessageThreadBridge.h"
 #include "Logging.h"
@@ -25,6 +26,7 @@ struct ProjectMContext {
     std::atomic<int> transitionStyle{0}; // 0=Cut, 1=Crossfade, 2=Blend
 
     juce::String currentPresetName; // for UI display
+    int paletteIndex = 0; // derived visual palette for stub renderer
 
     bool init()
     {
@@ -60,6 +62,12 @@ struct ProjectMContext {
             return false;
         }
         currentPresetName = f.getFileNameWithoutExtension();
+        // Derive a palette index from the preset name to make visual changes obvious in the stub renderer.
+        {
+            const int hash = currentPresetName.hashCode();
+            const int palettes = 5; // small set of distinct palettes
+            paletteIndex = (hash == juce::String().hashCode()) ? 0 : (std::abs(hash) % palettes);
+        }
         // In a future phase, we will call real libprojectM API here and handle errors.
         return true;
     }
@@ -80,6 +88,11 @@ struct RenderSurface {
 
 // Visualization thread that renders at a target FPS, independent of the audio thread.
 class VisualizationThread {
+public:
+    // CPU frame buffer interface for embedded canvas
+    struct FrameSnapshot {
+        juce::Image image; // ARGB
+    };
 public:
     explicit VisualizationThread(IAudioAnalysisQueue& q)
         : queue(q)
@@ -118,6 +131,33 @@ public:
 
     double getTargetFps() const { return targetFps.load(std::memory_order_relaxed); }
     uint64_t getFramesRendered() const { return framesRendered.load(std::memory_order_acquire); }
+
+    // Surface/resize API (message thread calls via editor)
+    void setSurfaceSize(int w, int h)
+    {
+        if (w < 2) w = 2; if (h < 2) h = 2;
+        juce::ScopedLock sl(backBufferLock);
+        surface.resize(w, h);
+        backBuffer = juce::Image(juce::Image::ARGB, w, h, true);
+    }
+
+    // Snapshot API for UI to copy most recent frame
+    bool getFrameSnapshot(FrameSnapshot& out)
+    {
+        juce::ScopedLock sl(backBufferLock);
+        if (! backBuffer.isValid()) return false;
+        out.image = backBuffer.createCopy();
+        return true;
+    }
+
+    // Snapshot API for GL thread to fetch latest analysis (non-blocking)
+    bool getLatestAnalysisSnapshot(AudioAnalysisSnapshot& out)
+    {
+        juce::ScopedLock sl(latestLock);
+        if (! latestHave) return false;
+        out = latestSnapshot;
+        return true;
+    }
 
     // Thread-safe parameter posting API (can be called from audio or message thread)
     bool postParameterChange(const juce::String& id, float value)
@@ -190,6 +230,11 @@ private:
                 any = true;
                 latest = s;
                 haveLatest = true;
+                {
+                    juce::ScopedLock sl(latestLock);
+                    latestSnapshot = latest;
+                    latestHave = true;
+                }
                 framesConsumed.fetch_add(1, std::memory_order_relaxed);
             }
 
@@ -208,6 +253,65 @@ private:
                 if (pm.initialised)
                 {
                     pm.renderFrame(latest);
+                    // CPU render into backBuffer for embedded canvas
+                    {
+                        juce::ScopedLock sl(backBufferLock);
+                        if (! backBuffer.isValid() || backBuffer.getWidth() != surface.width || backBuffer.getHeight() != surface.height)
+                            backBuffer = juce::Image(juce::Image::ARGB, surface.width, surface.height, true);
+                        juce::Graphics g(backBuffer);
+                        // Background gradient animated by time and parameters
+                        const float bs = pm.beatSensitivity.load(std::memory_order_relaxed);
+                        const float t = (float)(0.001 * juce::Time::getMillisecondCounterHiRes());
+                        // Choose palette based on preset-derived paletteIndex
+                        juce::Colour c1, c2;
+                        const int pal = pm.paletteIndex;
+                        switch (pal) {
+                            case 1:
+                                c1 = juce::Colour::fromFloatRGBA(0.05f + 0.10f * std::sin(t*0.6f), 0.08f, 0.18f, 1.0f);
+                                c2 = juce::Colour::fromFloatRGBA(0.12f, 0.14f + 0.10f * std::sin(t*0.5f + 1.1f), 0.30f, 1.0f);
+                                break;
+                            case 2:
+                                c1 = juce::Colour::fromFloatRGBA(0.10f, 0.06f + 0.10f * std::sin(t*0.8f), 0.12f, 1.0f);
+                                c2 = juce::Colour::fromFloatRGBA(0.22f, 0.10f, 0.16f + 0.12f * std::sin(t*0.9f + 0.7f), 1.0f);
+                                break;
+                            case 3:
+                                c1 = juce::Colour::fromFloatRGBA(0.06f, 0.12f, 0.08f + 0.10f * std::sin(t*0.7f), 1.0f);
+                                c2 = juce::Colour::fromFloatRGBA(0.10f, 0.24f, 0.14f + 0.10f * std::sin(t*0.4f + 0.9f), 1.0f);
+                                break;
+                            case 4:
+                                c1 = juce::Colour::fromFloatRGBA(0.12f + 0.10f * std::sin(t*0.3f), 0.10f, 0.06f, 1.0f);
+                                c2 = juce::Colour::fromFloatRGBA(0.26f, 0.22f, 0.10f + 0.08f * std::sin(t*0.6f + 1.5f), 1.0f);
+                                break;
+                            default:
+                                c1 = juce::Colour::fromFloatRGBA(0.08f + 0.06f * std::sin(t*0.5f), 0.10f, 0.12f, 1.0f);
+                                c2 = juce::Colour::fromFloatRGBA(0.12f, 0.16f + 0.08f * std::sin(t*0.7f + 1.3f), 0.20f, 1.0f);
+                                break;
+                        }
+                        g.setGradientFill(juce::ColourGradient(c1, 0.0f, 0.0f, c2, (float)surface.width, (float)surface.height, false));
+                        g.fillAll();
+
+                        // Optional subtle vignette and preset name overlay (no bar-chart here)
+                        const float w = (float)surface.width;
+                        const float h = (float)surface.height;
+                        // Soft vignette based on energy to show audio reactivity without bars
+                        const float energy = latest.shortTimeEnergy;
+                        const float amp = juce::jlimit(0.0f, 1.0f, std::sqrt(energy) * (0.4f + 0.6f * bs));
+                        juce::Colour vignette = juce::Colours::black.withAlpha(0.15f + 0.25f * amp);
+                        g.setGradientFill(juce::ColourGradient(vignette, w*0.5f, h*0.5f, juce::Colours::transparentBlack, 0.0f, 0.0f, true));
+                        g.fillAll();
+
+                        // Draw current preset name for user confirmation
+                        if (pm.currentPresetName.isNotEmpty()) {
+                            auto textBounds = juce::Rectangle<int>(8, (int)h - 32, (int)w - 16, 24);
+                            // Backdrop for readability
+                            g.setColour(juce::Colours::black.withAlpha(0.35f));
+                            g.fillRoundedRectangle(textBounds.reduced(2).toFloat(), 4.0f);
+                            // Text
+                            g.setColour(juce::Colours::white.withAlpha(0.92f));
+                            g.setFont(juce::Font(18.0f, juce::Font::bold));
+                            g.drawFittedText(pm.currentPresetName, textBounds, juce::Justification::centredRight, 1);
+                        }
+                    }
                 }
                 framesRendered.fetch_add(1, std::memory_order_relaxed);
 
@@ -234,6 +338,14 @@ private:
     std::thread worker;
     ProjectMContext pm;
     RenderSurface surface;
+    juce::Image backBuffer;
+    juce::CriticalSection backBufferLock;
+
+    // Latest analysis snapshot for GL thread consumption
+    juce::CriticalSection latestLock;
+    AudioAnalysisSnapshot latestSnapshot{};
+    bool latestHave { false };
+
     ThreadSafeSPSCQueue<ParameterChange, 64> paramChanges;
     ThreadSafeSPSCQueue<juce::String, 8> presetLoadRequests;
 };
