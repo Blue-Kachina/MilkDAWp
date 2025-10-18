@@ -208,14 +208,14 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 - [x] Update combobox when preset changes externally
 
 ### 6.3 Compact Playlist Picker
-- [ ] Create icon-only button for playlist/preset selection
-- [ ] Position button to right of preset combobox
-- [ ] Use appropriate file/folder icon
-- [ ] Implement preset file picker dialog
-- [ ] Auto-detect parent folder as playlist
-- [ ] Set selected preset as active and update index
-- [ ] Handle preset blacklist/filtering
-- [ ] Remove old "Load Preset..." and "Load Playlist Folder..." buttons
+- [x] Create icon-only button for playlist/preset selection
+- [x] Position button to right of preset combobox
+- [x] Use appropriate file/folder icon
+- [x] Implement preset file picker dialog
+- [x] Auto-detect parent folder as playlist
+- [x] Set selected preset as active and update index
+- [x] Handle preset blacklist/filtering
+- [x] Remove old "Load Preset..." and "Load Playlist Folder..." buttons
 
 ### 6.4 Icon-Based Toggle Controls
 - [ ] Replace Lock checkbox with dual-state icon button

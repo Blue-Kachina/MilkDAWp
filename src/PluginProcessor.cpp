@@ -523,6 +523,46 @@ private:
             juce::DirectoryIterator it(dir, false, "*.milk", juce::File::findFiles);
             while (it.next())
                 found.add(it.getFile());
+
+            // Phase 6.3: Handle preset blacklist/filtering via optional ignore file in folder
+            // Supported filenames: ".milkignore" or ".milkdrop-ignore.txt" with one pattern or filename per line
+            juce::StringArray ignoreEntries;
+            auto ignoreA = dir.getChildFile(".milkignore");
+            auto ignoreB = dir.getChildFile(".milkdrop-ignore.txt");
+            auto readIgnore = [&](const juce::File& f){
+                if (f.existsAsFile()) {
+                    juce::String text = f.loadFileAsString();
+                    juce::StringArray lines;
+                    lines.addLines(text);
+                    for (auto& ln : lines) {
+                        auto t = ln.trim();
+                        if (t.isEmpty()) continue;
+                        if (t.startsWithIgnoreCase("#")) continue;
+                        ignoreEntries.addIfNotAlreadyThere(t.toLowerCase());
+                    }
+                }
+            };
+            readIgnore(ignoreA);
+            readIgnore(ignoreB);
+
+            // Apply filtering: entries can be exact filename matches or wildcard substrings
+            if (!ignoreEntries.isEmpty()) {
+                juce::Array<juce::File> filtered;
+                for (auto& f : found) {
+                    const auto name = f.getFileName().toLowerCase();
+                    bool skip = false;
+                    for (auto& pat : ignoreEntries) {
+                        if (pat.containsChar('*') || pat.containsChar('?')) {
+                            if (juce::String(name).matchesWildcard(pat, true)) { skip = true; break; }
+                        } else if (name == pat || name.contains(pat)) { // allow substring match
+                            skip = true; break;
+                        }
+                    }
+                    if (!skip) filtered.add(f);
+                }
+                found.swapWith(filtered);
+            }
+
             struct FileNameComparator { int compareElements(juce::File a, juce::File b) const { return a.getFileName().compareIgnoreCase(b.getFileName()); } } comp;
             found.sort(comp);
             playlistFiles = found;
@@ -1132,6 +1172,7 @@ public:
 
         addAndMakeVisible(loadFolderButton);
         loadFolderButton.setButtonText("Load Playlist Folder...");
+        loadFolderButton.setVisible(false); // Phase 6.3: replaced by compact picker button
         loadFolderButton.onClick = [this]
         {
             fileChooser = std::make_unique<juce::FileChooser>("Select a folder with .milk presets", juce::File(), juce::String());
@@ -1170,6 +1211,75 @@ public:
         };
         // Hide old button per Phase 6.2
         loadButton.setVisible(false);
+        // Phase 6.3: Compact playlist/preset picker icon button
+        {
+            addAndMakeVisible(playlistPickerButton);
+            playlistPickerButton.setTooltip("Pick a preset file (parent folder becomes playlist)");
+            // Build a simple folder drawable icon
+            auto makeFolder = [](juce::Colour c){
+                auto dp = std::make_unique<juce::DrawablePath>();
+                juce::Path p;
+                p.startNewSubPath(2, 8);
+                p.lineTo(10, 8);
+                p.lineTo(12, 4);
+                p.lineTo(22, 4);
+                p.lineTo(22, 20);
+                p.lineTo(2, 20);
+                p.closeSubPath();
+                dp->setPath(p);
+                dp->setFill(c);
+                return dp;
+            };
+            auto normal = makeFolder(juce::Colour(0xFF6A8CAF));
+            auto over = makeFolder(juce::Colour(0xFF8FB3D1));
+            auto down = makeFolder(juce::Colour(0xFF4E6E8C));
+            playlistPickerButton.setImages(normal.get(), over.get(), down.get(), nullptr, nullptr, nullptr, nullptr);
+            // Keep ownership of drawables via unique_ptrs stored in the button
+            playlistPickerButton.setClickingTogglesState(false);
+            playlistPickerButton.onClick = [this]
+            {
+                fileChooser = std::make_unique<juce::FileChooser>("Select a MilkDrop preset", juce::File(), "*.milk");
+                auto flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
+                fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc)
+                {
+                    auto f = fc.getResult();
+                    fileChooser.reset();
+                    if (! f.existsAsFile()) return;
+                    if (f.getFileExtension().toLowerCase() != ".milk") {
+                        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Preset Picker", "Please select a .milk preset file.");
+                        return;
+                    }
+                    auto parent = f.getParentDirectory();
+                    if (!parent.isDirectory()) return;
+                    // Set playlist from parent folder
+                    processor.setPlaylistFolderAndScanPublic(parent.getFullPathName());
+                    // Ensure viz thread is running so the preset takes effect immediately
+                    processor.ensureVizThreadStartedForUI();
+                    // Find ordered index of the selected preset by name and set parameter
+                    const auto targetName = f.getFileNameWithoutExtension();
+                    const int N = processor.getPlaylistSizePublic();
+                    int foundIdx = -1;
+                    for (int i = 0; i < N; ++i) {
+                        if (processor.getPlaylistItemNameAtOrderedPublic(i).equalsIgnoreCase(targetName)) { foundIdx = i; break; }
+                    }
+                    if (foundIdx >= 0) {
+                        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*>(processor.getValueTreeState().getParameter("presetIndex"))) {
+                            const float norm = rp->convertTo0to1((float) foundIdx);
+                            rp->beginChangeGesture();
+                            rp->setValueNotifyingHost(norm);
+                            rp->endChangeGesture();
+                        }
+                    } else {
+                        // If not found (filtered out?), just load directly and clear playlist
+                        processor.setCurrentPresetPathAndPostLoad(f.getFullPathName());
+                        processor.clearPlaylistPublic();
+                    }
+                    // Update UI bits
+                    presetNameLabel.setText(currentDisplayName(), juce::dontSendNotification);
+                    refreshTransportVisibility();
+                });
+            };
+        }
         // Initial population
         {
             const bool havePL = processor.hasActivePlaylistPublic();
@@ -1284,7 +1394,12 @@ public:
         // File/picker controls
         presetCombo.setBounds(innerTop.removeFromLeft(250));
         innerTop.removeFromLeft(8);
-        loadFolderButton.setBounds(innerTop.removeFromLeft(220));
+        {
+            auto b = innerTop.removeFromLeft(28);
+            const int sz = juce::jmin(b.getHeight(), 24);
+            // vertically center square button
+            playlistPickerButton.setBounds(b.getX(), b.getCentreY() - sz/2, sz, sz);
+        }
         innerTop.removeFromLeft(12);
 
         // Knobs area
@@ -1992,6 +2107,7 @@ private:
     juce::TextButton loadButton;
     juce::TextButton loadFolderButton;
     juce::ComboBox presetCombo; // Phase 6.2
+    juce::DrawableButton playlistPickerButton { "playlistPicker", juce::DrawableButton::ImageFitted };
     juce::TextButton prevButton;
     juce::TextButton nextButton;
     juce::Label presetNameLabel;
