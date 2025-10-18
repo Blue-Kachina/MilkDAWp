@@ -53,6 +53,8 @@ public:
     juce::String getCurrentPresetPath() const noexcept { return currentPresetPath; }
     void setCurrentPresetPathAndPostLoad(const juce::String& path)
     {
+        if (path == currentPresetPath)
+            return; // no change
         currentPresetPath = path;
     #if MILKDAWP_ENABLE_VIZ_THREAD
         if (vizThread)
@@ -895,12 +897,17 @@ private:
         VizOpenGLCanvas()
         {
             // Configure GL context for an embedded canvas
+            // Do not force a core-profile context. Let JUCE create a default/compatibility context on Windows,
+            // since projectM’s renderer may rely on fixed-function pipeline features not available in core profiles.
+            // (Previously requested openGL3_2.)
             context.setRenderer(this);
             context.setContinuousRepainting(true);
-            context.setComponentPaintingEnabled(true); // allow CPU painting to blit viz frames
+            // Re-enable JUCE component painting so we can show a CPU fallback when projectM/GL is unavailable.
+            // The paint() implementation will avoid overdrawing when GL is active.
+            context.setComponentPaintingEnabled(true);
             context.attachTo(*this);
-            // Start CPU-side timer to drive repaints
-            startTimerHz(30);
+            // Drive CPU fallback repaints at ~60 FPS
+            startTimerHz(60);
         }
         ~VizOpenGLCanvas() override
         {
@@ -913,12 +920,42 @@ private:
             startTimeMs = juce::Time::getMillisecondCounterHiRes();
             glContextCreated.store(true, std::memory_order_relaxed);
             MDW_LOG_INFO("VizOpenGLCanvas: OpenGL context created");
+            // Log GL strings for diagnosis
+            const GLubyte* ver = juce::gl::glGetString(juce::gl::GL_VERSION);
+            const GLubyte* ven = juce::gl::glGetString(juce::gl::GL_VENDOR);
+            const GLubyte* ren = juce::gl::glGetString(juce::gl::GL_RENDERER);
+            if (ver) MDW_LOG_INFO(juce::String("OpenGL Version: ") + juce::String((const char*)ver));
+            if (ven) MDW_LOG_INFO(juce::String("OpenGL Vendor: ") + juce::String((const char*)ven));
+            if (ren) MDW_LOG_INFO(juce::String("OpenGL Renderer: ") + juce::String((const char*)ren));
+           #if defined(_DEBUG)
+            // In Debug builds, projectM is disabled by default to avoid upstream asserts.
+            // Developers can opt-in either by defining MDW_ENABLE_PROJECTM_DEBUG at compile time
+            // or by setting the environment variable MDW_FORCE_PM_DEBUG=1 at runtime.
+            const bool forcePM = juce::SystemStats::getEnvironmentVariable("MDW_FORCE_PM_DEBUG", "0") == "1";
+           #ifndef MDW_ENABLE_PROJECTM_DEBUG
+            if (!forcePM) {
+                MDW_LOG_INFO("projectM (Debug): disabled by default; set MDW_FORCE_PM_DEBUG=1 or define MDW_ENABLE_PROJECTM_DEBUG to enable");
+                return;
+            }
+           #else
+            if (!forcePM) {
+                MDW_LOG_INFO("projectM (Debug): enabled via MDW_ENABLE_PROJECTM_DEBUG");
+            } else {
+                MDW_LOG_INFO("projectM (Debug): enabled via MDW_FORCE_PM_DEBUG=1");
+            }
+           #endif
+           #endif
         #if MILKDAWP_HAS_PROJECTM
             // On Windows, proactively probe dependent DLLs to avoid hard crashes on first call
            #ifdef _WIN32
             // Build a list of candidate DLL names for both Debug/Release vcpkg conventions
+           #if defined(_DEBUG)
             const wchar_t* pmCandidates[] = { L"projectM-4d.dll", L"projectM-4.dll" };
             const wchar_t* glewCandidates[] = { L"glew32d.dll", L"glew32.dll" };
+           #else
+            const wchar_t* pmCandidates[] = { L"projectM-4.dll" };
+            const wchar_t* glewCandidates[] = { L"glew32.dll" };
+           #endif
 
             // Resolve the directory of our plugin module (not the host EXE)
             HMODULE hSelf = nullptr;
@@ -997,7 +1034,6 @@ private:
                 return; // leave pmReady=false; CPU fallback remains active
             }
             // Keep the libraries loaded for the process lifetime; no FreeLibrary on success to avoid refcount churn
-
             // Initialise GLEW against the current context (required for core profile function pointers)
             typedef int (WINAPI *PFNGLEWINIT)(void);
             PFNGLEWINIT pGlewInit = (PFNGLEWINIT) GetProcAddress(hGlewProbe, "glewInit");
@@ -1018,13 +1054,8 @@ private:
             }
            #endif
             // Create a projectM instance bound to this GL context
-            pmHandle = projectm_create();
-            if (pmHandle == nullptr) {
-                MDW_LOG_ERROR("projectM: failed to create instance (is GL context current?)");
-            } else {
-                MDW_LOG_INFO("projectM: instance created");
-                pmReady = true;
-            }
+            // Defer creating projectM until we have a preset path to load (avoids upstream Debug asserts on idle preset)
+            MDW_LOG_INFO("projectM: deferring instance creation until a preset is selected");
         #endif
         }
         void renderOpenGL() override
@@ -1032,27 +1063,97 @@ private:
             const double nowMs = juce::Time::getMillisecondCounterHiRes();
             lastGLFrameMs.store((uint64_t) nowMs, std::memory_order_relaxed);
             juce::OpenGLHelpers::clear(juce::Colours::black);
+            // Ensure viewport matches the component size each frame
+            {
+                const int w = juce::jmax(1, getWidth());
+                const int h = juce::jmax(1, getHeight());
+                // Use JUCE's OpenGL function table
+                juce::gl::glViewport(0, 0, w, h);
+                
+                // Keep projectM informed of the current drawable size (prevents asserts and wrong aspect)
+               #if MILKDAWP_HAS_PROJECTM
+                if (pmHandle != nullptr) {
+                    projectm_set_window_size(pmHandle, (size_t) w, (size_t) h);
+                }
+               #endif
+            }
         #if MILKDAWP_HAS_PROJECTM
+            // Create projectM lazily once a preset path is available to avoid idle preset asserts in Debug builds
+            if (pmHandle == nullptr && owner != nullptr) {
+                auto initialPath = owner->getCurrentPresetPath();
+                if (initialPath.isNotEmpty()) {
+                    pmHandle = projectm_create();
+                    if (pmHandle == nullptr) {
+                        MDW_LOG_ERROR("projectM: failed to create instance (is GL context current?)");
+                    } else {
+                        MDW_LOG_INFO("projectM: instance created (lazy)");
+                        // Optional: set preset search directory to the preset's parent folder to keep internal lookups happy
+                        // Note: projectM v4 C API may not expose set_preset_directory; we proceed to explicit file load below.
+                        projectm_set_fps(pmHandle, 60);
+                        projectm_set_aspect_correction(pmHandle, true);
+                        const int w0 = juce::jmax(2, getWidth());
+                        const int h0 = juce::jmax(2, getHeight());
+                        projectm_set_window_size(pmHandle, (size_t) w0, (size_t) h0);
+                        pmReady = true;
+                        pmCanRender = false;
+                        lastPMPath.clear();
+                    }
+                }
+            }
             if (pmHandle != nullptr)
             {
                 // If user selected a new preset path, load it here on the GL thread
                 if (owner != nullptr) {
                     auto path = owner->getCurrentPresetPath();
                     if (path.isNotEmpty() && path != lastPMPath) {
+                        isLoadingPreset = true;
+                        pmCanRender = false;
+                        // Ensure window size is valid before swap
+                        const int pw = juce::jmax(2, getWidth());
+                        const int ph = juce::jmax(2, getHeight());
+                        projectm_set_window_size(pmHandle, (size_t) pw, (size_t) ph);
                         projectm_load_preset_file(pmHandle, path.toRawUTF8(), true);
                         MDW_LOG_INFO(juce::String("Loaded preset (GL): ") + path);
                         lastPMPath = path;
+                        // After preset swap, re-affirm window size and allow rendering
+                        projectm_set_window_size(pmHandle, (size_t) pw, (size_t) ph);
+                        isLoadingPreset = false;
+                        pmCanRender = true;
                     }
                 }
-                // Render the projectM frame into the current framebuffer
-                projectm_opengl_render_frame(pmHandle);
+                // Render the projectM frame into the current framebuffer (guarded)
+                {
+                    const int cw = juce::jmax(2, getWidth());
+                    const int ch = juce::jmax(2, getHeight());
+                    if (pmCanRender && !isLoadingPreset && cw >= 2 && ch >= 2) {
+                        // Reset critical GL state to ensure projectM draws to the default framebuffer
+                        juce::gl::glBindFramebuffer(juce::gl::GL_FRAMEBUFFER, 0);
+                        juce::gl::glDisable(juce::gl::GL_SCISSOR_TEST);
+                        juce::gl::glDisable(juce::gl::GL_DEPTH_TEST);
+                        juce::gl::glDisable(juce::gl::GL_STENCIL_TEST);
+                        juce::gl::glColorMask(juce::gl::GL_TRUE, juce::gl::GL_TRUE, juce::gl::GL_TRUE, juce::gl::GL_TRUE);
+                        // Enable standard alpha blending (projectM composites layers and trails)
+                        juce::gl::glDisable(juce::gl::GL_BLEND);
+                        juce::gl::glDisable(juce::gl::GL_CULL_FACE);
+                        juce::gl::glDisable(juce::gl::GL_DITHER);
+                        projectm_opengl_render_frame(pmHandle);
+                    } else {
+                        static double lastSkipLogMs = 0.0;
+                        if (nowMs - lastSkipLogMs > 3000.0) {
+                            MDW_LOG_INFO("projectM GL: skipping render (initialising/preset swap or small surface)");
+                            lastSkipLogMs = nowMs;
+                        }
+                    }
+                }
 
                 // Periodic heartbeat log so we can confirm GL path is active without spamming logs
+               #if defined(_DEBUG)
                 static double lastLogMs = 0.0;
                 if (nowMs - lastLogMs > 2000.0) {
                     MDW_LOG_INFO("projectM GL: rendered frame");
                     lastLogMs = nowMs;
                 }
+               #endif
             }
         #endif
             // When projectM is not available, nothing is drawn here; CPU blit in paint() remains as fallback.
@@ -1076,50 +1177,24 @@ private:
         }
         void paint(juce::Graphics& g) override
         {
-            auto bounds = getLocalBounds();
-            bool drewFrame = false;
-            bool glProjectMActive = false;
            #if MILKDAWP_HAS_PROJECTM
-            glProjectMActive = pmReady;
+            // If projectM is ready and can render into GL, avoid drawing over it
+            if (pmHandle != nullptr && pmCanRender) {
+                return; // GL renderOpenGL will draw the frame
+            }
            #endif
-            if (!glProjectMActive) {
-                if (owner != nullptr) {
-                    if (auto* vt = owner->getVizThread()) {
-                        milkdawp::VisualizationThread::FrameSnapshot snap;
-                        if (vt->getFrameSnapshot(snap) && snap.image.isValid()) {
-                            g.drawImage(snap.image, bounds.toFloat());
-                            drewFrame = true;
-                        }
+            // CPU fallback: blit the latest frame produced by the VisualizationThread
+            if (owner != nullptr) {
+                if (auto* vt = owner->getVizThread()) {
+                    milkdawp::VisualizationThread::FrameSnapshot snap;
+                    if (vt->getFrameSnapshot(snap) && snap.image.isValid()) {
+                        g.drawImageWithin(snap.image, 0, 0, getWidth(), getHeight(), juce::RectanglePlacement::stretchToFit);
+                        return;
                     }
                 }
             }
-            if (!drewFrame && !glProjectMActive) {
-                // CPU fallback animation: moving bars to show liveness when no frame available
-                g.fillAll(juce::Colour(0xFF111417));
-                g.setColour(juce::Colour(0xFF2A2E33));
-                g.drawRect(bounds, 1);
-
-                const double t = 0.001 * (juce::Time::getMillisecondCounterHiRes() - startTimeMs);
-                const int barCount = 12;
-                const float w = (float)bounds.getWidth();
-                const float h = (float)bounds.getHeight();
-                const float barW = w / (float)barCount;
-                for (int i = 0; i < barCount; ++i)
-                {
-                    float phase = (float)t * 2.0f + i * 0.5f;
-                    float amp = 0.3f + 0.7f * (0.5f * (1.0f + std::sin(phase)));
-                    float bh = amp * h;
-                    float x = i * barW;
-                    float y = (h - bh) * 0.5f;
-                    juce::Colour c = juce::Colour::fromFloatRGBA(0.2f + 0.8f * (i / (float)barCount), 0.6f, 1.0f - 0.7f * (i / (float)barCount), 1.0f);
-                    g.setColour(c.withMultipliedAlpha(0.9f));
-                    g.fillRoundedRectangle(x + 2.0f, y, barW - 4.0f, bh, 4.0f);
-                }
-
-                g.setColour(juce::Colours::white.withAlpha(0.7f));
-                g.setFont(14.0f);
-                g.drawFittedText("CPU preview (no viz frame)", bounds.removeFromBottom(22), juce::Justification::centred, 1);
-            }
+            // If no snapshot yet, clear to a neutral colour
+            g.fillAll(juce::Colours::black);
         }
         void resized() override
         {
@@ -1140,6 +1215,11 @@ private:
         projectm_handle pmHandle { nullptr };
         juce::String lastPMPath;
         bool pmReady { false };
+        bool pmCanRender { false };
+        bool isLoadingPreset { false };
+       #ifdef _WIN32
+        /* Removed experimental PCM injection hooks after instability reports */
+       #endif
        #endif
     };
 

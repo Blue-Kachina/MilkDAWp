@@ -3,6 +3,11 @@ cmake_minimum_required(VERSION 3.22)
 # MilkDAWp - JUCE-based VST3 effect (scaffolding)
 project(MilkDAWp VERSION 0.0.1 LANGUAGES C CXX)
 
+# Prevent in-source builds which can corrupt the source tree and conflict with CLion's out-of-source profiles
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+  message(FATAL_ERROR "In-source builds are not supported. Please delete CMakeCache.txt and the CMakeFiles directory from the source tree, then configure an out-of-source build (e.g., cmake-build-debug).")
+endif()
+
 # Copy built plugin to a VST3 folder after build (helps DAWs like Cubase discover it)
 # Default: copy to the per-user VST3 directory to avoid requiring admin rights.
 # You can:
@@ -55,6 +60,12 @@ endif()
 if(MSVC)
   # Use modern CMake variable to control runtime library
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL" CACHE STRING "MSVC runtime" FORCE)
+endif()
+
+# Toggle to allow enabling projectM in Debug builds (defaults OFF for safety)
+option(MDW_ENABLE_PROJECTM_DEBUG "Enable projectM path in Debug builds (use with care)" OFF)
+if(MDW_ENABLE_PROJECTM_DEBUG)
+  add_compile_definitions(MDW_ENABLE_PROJECTM_DEBUG)
 endif()
 
 # Dependencies (JUCE, projectM) – managed via vcpkg

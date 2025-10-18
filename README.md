@@ -93,6 +93,11 @@ For setup and maintenance commands, see docs/submodules.md. During Phase 1, the 
 - Diagnostics and First-Run Benchmark operational.
 - Bundled presets and assets included.
 
+### Current Status (Oct 2025)
+- Embedded visualization is present and renders inside the plugin window.
+- Visualization is audio‑reactive via a CPU fallback path that uses audio energy from the audio thread (no dependency on projectM input for this).
+- projectM rendering is integrated and displays presets when available; direct audio feeding into projectM is planned as the next step.
+
 ## Building
 Options are configured in CMake to support multi-platform builds and optional components.
 Key CMake options:

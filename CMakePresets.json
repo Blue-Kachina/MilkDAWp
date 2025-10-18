@@ -20,7 +20,8 @@
         "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL",
         "MILKDAWP_BUILD_PLUGIN": "ON",
         "BUILD_TESTING": "OFF",
-        "MILKDAWP_WITH_PROJECTM": "ON"
+        "MILKDAWP_WITH_PROJECTM": "ON",
+        "MILKDAWP_VST3_OVERRIDE_COPY_DIR": "$env{LOCALAPPDATA}/Programs/Common/VST3"
       }
     },
     {

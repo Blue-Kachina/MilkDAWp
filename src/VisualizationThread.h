@@ -197,15 +197,20 @@ private:
 
     void applyPendingPresetLoads()
     {
-        juce::String path;
-        while (presetLoadRequests.tryPop(path))
-        {
-            juce::String err;
-            if (!pm.loadPreset(path, err)) {
-                MDW_LOG_ERROR(juce::String("Failed to load preset: ") + path + ": " + err);
-            } else {
-                MDW_LOG_INFO(juce::String("Loaded preset: ") + path);
-            }
+        // Drain queue and keep only the most recent unique path
+        juce::String pendingPath;
+        juce::String tmp;
+        while (presetLoadRequests.tryPop(tmp)) {
+            if (tmp.isNotEmpty()) pendingPath = tmp;
+        }
+        if (pendingPath.isEmpty()) return;
+        if (pendingPath == lastAppliedPreset) return; // de-dup same preset
+        juce::String err;
+        if (!pm.loadPreset(pendingPath, err)) {
+            MDW_LOG_ERROR(juce::String("Failed to load preset: ") + pendingPath + ": " + err);
+        } else {
+            MDW_LOG_INFO(juce::String("Loaded preset: ") + pendingPath);
+            lastAppliedPreset = pendingPath;
         }
     }
 
@@ -348,6 +353,7 @@ private:
 
     ThreadSafeSPSCQueue<ParameterChange, 64> paramChanges;
     ThreadSafeSPSCQueue<juce::String, 8> presetLoadRequests;
+    juce::String lastAppliedPreset;
 };
 
 } // namespace milkdawp

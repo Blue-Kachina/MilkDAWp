@@ -145,6 +145,14 @@ This step replaces the current placeholder visualization with a real embedded pr
   - [x] File/Folder pickers update the active preset/playlist
 - [x] On plugin load (with restored state), the visualization appears and animates within the embedded canvas
 
+### 4.4 Audio Feed Into projectM (new)
+To make projectM respond directly to the plugin’s audio input (beyond the CPU fallback), feed PCM into projectM on the GL thread and map parameters appropriately.
+- [ ] Feed stereo PCM frames from the audio thread to the GL thread (lock-free queue) in a format expected by libprojectM (e.g., float/16-bit)
+- [ ] Call projectM’s audio input API each frame with the latest PCM window
+- [ ] Map Beat Sensitivity to input scaling/thresholds
+- [ ] Verify responsiveness with various buffer sizes and sample rates
+- [ ] Gracefully handle missing audio (silence) and plugin bypass
+
 ---
 
 ## Phase 5: Window Management (Detached & Fullscreen)
