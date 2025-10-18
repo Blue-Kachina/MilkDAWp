@@ -7,6 +7,7 @@
 #include <juce_opengl/juce_opengl.h>
 #include "Version.h"
 #include "Logging.h"
+#include "BinaryData.h"
 #include "AudioAnalysisQueue.h"
 #include "VisualizationThread.h"
 #include <cstdint>
@@ -838,11 +839,78 @@ public:
         setLookAndFeel(&hardwareLAF);
         setSize(1200, 650); // per README default window size
 
-        // Logo
+        // Logo: prefer image from resources/images/MilkDAWp_Logo.png; fallback to text label
         addAndMakeVisible(logoLabel);
         logoLabel.setText("MilkDAWp", juce::dontSendNotification);
         logoLabel.setFont(juce::Font(24.0f, juce::Font::bold));
         logoLabel.setJustificationType(juce::Justification::centredLeft);
+        
+        // Try embedded asset first (preferred to avoid filesystem dependencies)
+        if (!logoLoaded) {
+            if (BinaryData::MilkDAWp_Logo_pngSize > 0) {
+                juce::MemoryInputStream mis(BinaryData::MilkDAWp_Logo_png, BinaryData::MilkDAWp_Logo_pngSize, false);
+                auto img = juce::ImageFileFormat::loadFrom(mis);
+                if (img.isValid()) {
+                    logoImageData = img;
+                    logoImage.setImage(logoImageData);
+                    logoImage.setImagePlacement(juce::RectanglePlacement::centred | juce::RectanglePlacement::stretchToFit);
+                    logoImage.setInterceptsMouseClicks(false, false);
+                    addAndMakeVisible(logoImage);
+                    logoImage.setVisible(true);
+                    logoLoaded = true;
+                    logoLabel.setVisible(false);
+                    MDW_LOG_INFO(juce::String("Logo loaded (embedded): ") + juce::String(logoImageData.getWidth()) + "x" + juce::String(logoImageData.getHeight()));
+                    // Ensure layout updates now that the logo is available
+                    resized();
+                    logoImage.toFront(false);
+                    repaint();
+                }
+            }
+        }
+
+        // Try to locate the logo image near the plugin binary first (preferred),
+        // then fall back to legacy resources/images for backward compatibility.
+        {
+            auto appFile = juce::File::getSpecialLocation(juce::File::currentApplicationFile);
+            auto dir = appFile.getParentDirectory();
+            bool found = false;
+            for (int i = 0; i < 7 && dir.exists() && !found; ++i)
+            {
+                juce::Array<juce::File> candidates;
+                candidates.add(dir.getChildFile("MilkDAWp_Logo.png")); // preferred new location
+                candidates.add(dir.getChildFile("resources").getChildFile("images").getChildFile("MilkDAWp_Logo.png")); // legacy path
+                for (auto& candidate : candidates)
+                {
+                    if (!candidate.existsAsFile()) continue;
+                    std::unique_ptr<juce::FileInputStream> stream(candidate.createInputStream());
+                    if (stream == nullptr) continue;
+                    auto img = juce::ImageFileFormat::loadFrom(*stream);
+                    if (!img.isValid()) continue;
+                    logoImageData = img;
+                    logoImage.setImage(logoImageData);
+                    // Ensure the image scales to our bounds, avoiding centre-crop invisibility
+                    logoImage.setImagePlacement(juce::RectanglePlacement::centred | juce::RectanglePlacement::stretchToFit);
+                    logoImage.setInterceptsMouseClicks(false, false);
+                    addAndMakeVisible(logoImage);
+                    logoImage.setVisible(true);
+                    logoLoaded = true;
+                    logoLabel.setVisible(false);
+                    MDW_LOG_INFO(juce::String("Logo loaded: ") + candidate.getFullPathName() + 
+                                 juce::String(" (") + juce::String(logoImageData.getWidth()) + "x" + juce::String(logoImageData.getHeight()) + ")");
+                    // Ensure layout updates now that the logo is available
+                    resized();
+                    logoImage.toFront(false);
+                    repaint();
+                    found = true;
+                    break;
+                }
+                dir = dir.getParentDirectory();
+            }
+            if (!found)
+            {
+                MDW_LOG_INFO("Logo not found near plugin binary; using text label fallback");
+            }
+        }
 
         // Pop-out support
         addAndMakeVisible(popOutButton);
@@ -998,6 +1066,8 @@ public:
         refreshTransportVisibility();
         lastDisplayedName = currentDisplayName();
         startTimerHz(10);
+        if (logoLoaded)
+            logoImage.toFront(false);
     }
 
     ~MilkDAWpAudioProcessorEditor() override {
@@ -1025,14 +1095,39 @@ public:
         g.drawRoundedRectangle(top.reduced(8).toFloat(), 8.0f, 1.0f);
     }
 
+    void paintOverChildren(juce::Graphics& g) override {
+        // As a safety net, draw the logo on top of all children too
+        if (logoLoaded && logoImageData.isValid() && logoTargetBounds.getWidth() > 0 && logoTargetBounds.getHeight() > 0) {
+            g.drawImage(logoImageData, logoTargetBounds.toFloat());
+        }
+    }
+
     void resized() override {
         auto bounds = getLocalBounds();
         auto top = bounds.removeFromTop(topHeight);
         auto innerTop = top.reduced(16);
 
         // Left logo
-        logoLabel.setBounds(innerTop.removeFromLeft(220));
-        innerTop.removeFromLeft(12);
+        if (logoLoaded && logoImageData.isValid())
+        {
+            // Scale to ~50% of original while preserving aspect ratio, and vertically center in the top strip
+            const int maxH = innerTop.getHeight();
+            const int desiredH = juce::jmin(maxH, (int) juce::roundToInt(logoImageData.getHeight() * 0.5f));
+            const double scale = desiredH > 0 ? (desiredH / (double) logoImageData.getHeight()) : 0.5;
+            const int desiredW = (int) juce::roundToInt(logoImageData.getWidth() * scale);
+            auto logoArea = innerTop.removeFromLeft(desiredW);
+            // add a small right padding after the logo
+            innerTop.removeFromLeft(12);
+            // vertically center the image inside the allocated height
+            int y = logoArea.getY() + (logoArea.getHeight() - desiredH) / 2;
+            logoImage.setBounds(logoArea.getX(), y, desiredW, desiredH);
+            logoTargetBounds = juce::Rectangle<int>(logoArea.getX(), y, desiredW, desiredH);
+        }
+        else
+        {
+            logoLabel.setBounds(innerTop.removeFromLeft(220));
+            innerTop.removeFromLeft(12);
+        }
 
         // File/picker controls
         loadButton.setBounds(innerTop.removeFromLeft(150));
@@ -1673,6 +1768,10 @@ private:
 
     HardwareLookAndFeel hardwareLAF;
     juce::Label logoLabel;
+    juce::ImageComponent logoImage;
+    juce::Image logoImageData;
+    bool logoLoaded { false };
+    juce::Rectangle<int> logoTargetBounds;
     VizOpenGLCanvas vizCanvas;
 
     // Detached window support (Phase 5.1)

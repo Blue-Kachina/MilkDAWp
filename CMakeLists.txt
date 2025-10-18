@@ -167,6 +167,12 @@ if(MILKDAWP_BUILD_PLUGIN)
       src/MessageThreadBridge.h
   )
 
+  # Embed UI assets (logo) into the binary to remove runtime file dependency
+  juce_add_binary_data(${PROJECT_NAME}Assets
+    SOURCES
+      resources/images/MilkDAWp_Logo.png
+  )
+
   # Public compile definitions and config toggles
   target_compile_definitions(${PROJECT_NAME}
     PRIVATE
@@ -187,6 +193,7 @@ if(MILKDAWP_BUILD_PLUGIN)
       juce::juce_gui_extra
       juce::juce_dsp
       juce::juce_opengl
+      ${PROJECT_NAME}Assets
   )
 
   # Optional libprojectM linkage and feature define (Phase 2 enforces presence/type when enabled)
@@ -307,6 +314,25 @@ if(MILKDAWP_BUILD_PLUGIN)
         # The dependent DLL name is embedded at link time; renaming would break binding unless we switch to manual LoadLibrary.
         # TODO (future): consider delay-loading and manual resolution to support private, uniquely named copies.
       endif()
+
+      # Phase 6.1 — Copy UI logo asset next to the plugin binary for runtime loading (Windows)
+      # New canonical location: MilkDAWp.vst3/Contents/x86_64-win/MilkDAWp_Logo.png
+      add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/resources/images/MilkDAWp_Logo.png $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>
+        # Clean up legacy location in the build artefact dir so install step doesn't mirror it anymore
+        COMMAND ${CMAKE_COMMAND} -E remove_directory $<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/resources
+        VERBATIM)
+
+      # Also deploy the logo to the JUCE VST3 copy destination (if configured), in the binary folder.
+      get_property(_JUCE_VST3_COPY_DIR_LOGO DIRECTORY PROPERTY JUCE_VST3_COPY_DIR)
+      if(_JUCE_VST3_COPY_DIR_LOGO)
+        string(REGEX REPLACE "\"$" "" _JUCE_VST3_COPY_DIR_LOGO "${_JUCE_VST3_COPY_DIR_LOGO}")
+        add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/resources/images/MilkDAWp_Logo.png ${_JUCE_VST3_COPY_DIR_LOGO}/${PRODUCT_NAME}.vst3/Contents/x86_64-win
+          # Clean up legacy location in the installed bundle too (JUCE's copy step doesn't delete old files)
+          COMMAND ${CMAKE_COMMAND} -E remove_directory ${_JUCE_VST3_COPY_DIR_LOGO}/${PRODUCT_NAME}.vst3/Contents/x86_64-win/resources
+          VERBATIM)
+      endif()
     elseif(APPLE)
       # macOS: copy libprojectM.dylib into the bundle Frameworks dir and set rpath accordingly
       # Bundle layout: MilkDAWp.vst3/Contents/MacOS/<binary>; frameworks at MilkDAWp.vst3/Contents/Frameworks
@@ -380,6 +406,7 @@ if(BUILD_TESTING)
     juce::juce_gui_basics
     juce::juce_gui_extra
     juce::juce_dsp
-    juce::juce_opengl)
+    juce::juce_opengl
+    ${PROJECT_NAME}Assets)
   add_test(NAME ${PROJECT_NAME}_tests COMMAND ${PROJECT_NAME}_tests)
 endif()

@@ -192,11 +192,11 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 **Goal:** Modernize UI with logo, compact controls, and improved UX
 
 ### 6.1 Logo Integration
-- [ ] Add logo image asset to project resources
-- [ ] Create image component to display logo
-- [ ] Replace "MilkDAWp" text with logo image
-- [ ] Scale logo to appropriate size (~50% of original)
-- [ ] Position logo in main window layout
+- [x] Add logo image asset to project resources
+- [x] Create image component to display logo
+- [x] Replace "MilkDAWp" text with logo image
+- [x] Scale logo to appropriate size (~50% of original)
+- [x] Position logo in main window layout
 
 ### 6.2 Preset Selection Combobox
 - [ ] Replace "Load Preset..." button with JUCE ComboBox
