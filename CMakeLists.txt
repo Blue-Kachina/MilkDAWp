@@ -173,6 +173,10 @@ if(MILKDAWP_BUILD_PLUGIN)
       resources/images/MilkDAWp_Logo.png
       resources/icons/lock-simple.svg
       resources/icons/shuffle.svg
+      resources/icons/arrows-out-simple.svg
+      resources/icons/corners-out.svg
+      resources/icons/skip-back.svg
+      resources/icons/skip-forward.svg
   )
 
   # Public compile definitions and config toggles

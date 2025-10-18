@@ -26,6 +26,27 @@ namespace {
         return std::unique_ptr<juce::Drawable>(juce::Drawable::createFromSVG(*svg));
     }
 
+    // Robust loader using BinaryData::getNamedResource with multiple name variants
+    std::unique_ptr<juce::Drawable> loadSvgByPhosphorName(const juce::String& baseName)
+    {
+        // BaseName examples: "arrows-out-simple", "corners-out", "skip-back", "skip-forward"
+        const juce::String ext = "_svg";
+        juce::String candidates[3] = {
+            baseName.retainCharacters("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_") + ext, // remove dashes
+            baseName.replaceCharacter('-', '_') + ext, // dashes -> underscores
+            baseName + ext // literal with dashes
+        };
+        for (const auto& cand : candidates)
+        {
+            int dataSize = 0;
+            auto* data = BinaryData::getNamedResource(cand.toRawUTF8(), dataSize);
+            if (data != nullptr && dataSize > 0)
+                if (auto d = loadSvgFromBinary(data, dataSize))
+                    return d;
+        }
+        return nullptr;
+    }
+
     void tintDrawable(juce::Drawable& d, juce::Colour colour)
     {
         // Replace common base colours with the desired tint; this affects both fills and strokes in SVGs
@@ -731,10 +752,10 @@ private:
     public:
         struct Content : public juce::Component {
             std::unique_ptr<juce::TooltipWindow> tooltipWindow;
-            juce::TextButton dockButton { "Dock" };
-            juce::TextButton hoverFsButton { "FS" }; // Hover fullscreen toggle
-            juce::TextButton prevButton { "Prev" };
-            juce::TextButton nextButton { "Next" };
+            juce::DrawableButton dockButton { "dockButton", juce::DrawableButton::ImageFitted };
+            juce::DrawableButton hoverFsButton { "hoverFsButton", juce::DrawableButton::ImageFitted }; // Hover fullscreen toggle
+            juce::DrawableButton prevButton { "extPrevButton", juce::DrawableButton::ImageFitted };
+            juce::DrawableButton nextButton { "extNextButton", juce::DrawableButton::ImageFitted };
             juce::Label presetLabel;
             juce::Component* attachedCanvas { nullptr };
             std::function<void()> onToggleFullscreen;
@@ -746,6 +767,7 @@ private:
                 // Create a TooltipWindow for this top-level window so tooltips appear over its children
                 tooltipWindow = std::make_unique<juce::TooltipWindow>(this, 700);
                 addAndMakeVisible(dockButton);
+                dockButton.setTooltip("Dock to main window");
                 // Transport + preset name
                 addAndMakeVisible(prevButton);
                 addAndMakeVisible(nextButton);
@@ -755,6 +777,110 @@ private:
                 presetLabel.setColour(juce::Label::textColourId, juce::Colours::white);
                 prevButton.setWantsKeyboardFocus(false);
                 nextButton.setWantsKeyboardFocus(false);
+                prevButton.setTooltip("Previous Preset");
+                nextButton.setTooltip("Next Preset");
+                // Icons (white single-action style)
+                auto makeLeftArrow = [](juce::Colour c)
+                {
+                    auto dp = std::make_unique<juce::DrawablePath>();
+                    juce::Path p;
+                    p.startNewSubPath(18.0f, 6.0f);
+                    p.lineTo(10.0f, 12.0f);
+                    p.lineTo(18.0f, 18.0f);
+                    p.lineTo(16.0f, 18.0f);
+                    p.lineTo(8.0f, 12.0f);
+                    p.lineTo(16.0f, 6.0f);
+                    p.closeSubPath();
+                    dp->setPath(p);
+                    dp->setFill(c);
+                    return dp;
+                };
+                auto makeRightArrow = [](juce::Colour c)
+                {
+                    auto dp = std::make_unique<juce::DrawablePath>();
+                    juce::Path p;
+                    p.startNewSubPath(10.0f, 6.0f);
+                    p.lineTo(18.0f, 12.0f);
+                    p.lineTo(10.0f, 18.0f);
+                    p.lineTo(12.0f, 18.0f);
+                    p.lineTo(20.0f, 12.0f);
+                    p.lineTo(12.0f, 6.0f);
+                    p.closeSubPath();
+                    dp->setPath(p);
+                    dp->setFill(c);
+                    return dp;
+                };
+                auto makeDockIcon = [](juce::Colour c)
+                {
+                    auto dp = std::make_unique<juce::DrawablePath>();
+                    juce::Path p;
+                    // base window
+                    p.addRoundedRectangle(3.0f, 7.0f, 18.0f, 14.0f, 2.0f);
+                    // arrow pointing inward (from top-right to center)
+                    juce::Path a;
+                    a.startNewSubPath(22.0f, 2.0f);
+                    a.lineTo(12.0f, 10.0f);
+                    a.lineTo(14.0f, 10.0f);
+                    a.lineTo(14.0f, 12.0f);
+                    a.lineTo(10.0f, 12.0f);
+                    a.lineTo(10.0f, 8.0f);
+                    a.lineTo(12.0f, 8.0f);
+                    a.lineTo(12.0f, 6.0f);
+                    a.closeSubPath();
+                    p.addPath(a);
+                    dp->setPath(p);
+                    dp->setFill(c);
+                    return dp;
+                };
+                auto makeFsIcon = [](juce::Colour c)
+                {
+                    auto dp = std::make_unique<juce::DrawablePath>();
+                    juce::Path p;
+                    p.addRectangle(2.0f, 2.0f, 4.0f, 1.5f);
+                    p.addRectangle(2.0f, 2.0f, 1.5f, 4.0f);
+                    p.addRectangle(21.0f, 2.0f, 1.5f, 4.0f);
+                    p.addRectangle(17.0f, 2.0f, 4.0f, 1.5f);
+                    p.addRectangle(2.0f, 18.5f, 4.0f, 1.5f);
+                    p.addRectangle(2.0f, 16.0f, 1.5f, 4.0f);
+                    p.addRectangle(17.0f, 18.5f, 4.0f, 1.5f);
+                    p.addRectangle(21.0f, 16.0f, 1.5f, 4.0f);
+                    dp->setPath(p);
+                    dp->setFill(c);
+                    return dp;
+                };
+                // Set images
+                {
+                    auto n = makeDockIcon(juce::Colours::white), o = makeDockIcon(juce::Colours::white), d = makeDockIcon(juce::Colours::white);
+                    dockButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+                }
+                {
+                    if (auto svg = loadSvgByPhosphorName("skip-back"))
+                    {
+                        auto n = makeTintedClone(*svg, juce::Colours::white);
+                        auto o = makeTintedClone(*svg, juce::Colours::white);
+                        auto d = makeTintedClone(*svg, juce::Colours::white);
+                        prevButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+                    }
+                    else
+                    {
+                        auto n = makeLeftArrow(juce::Colours::white), o = makeLeftArrow(juce::Colours::white), d = makeLeftArrow(juce::Colours::white);
+                        prevButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+                    }
+                }
+                {
+                    if (auto svg = loadSvgByPhosphorName("skip-forward"))
+                    {
+                        auto n = makeTintedClone(*svg, juce::Colours::white);
+                        auto o = makeTintedClone(*svg, juce::Colours::white);
+                        auto d = makeTintedClone(*svg, juce::Colours::white);
+                        nextButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+                    }
+                    else
+                    {
+                        auto n = makeRightArrow(juce::Colours::white), o = makeRightArrow(juce::Colours::white), d = makeRightArrow(juce::Colours::white);
+                        nextButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+                    }
+                }
                 prevButton.onClick = [this]{ if (onPrev) onPrev(); };
                 nextButton.onClick = [this]{ if (onNext) onNext(); };
                 // Hover Fullscreen button (hidden until mouse over)
@@ -763,6 +889,20 @@ private:
                 hoverFsButton.setAlpha(0.75f);
                 hoverFsButton.setVisible(false);
                 hoverFsButton.setWantsKeyboardFocus(false);
+                {
+                    if (auto svg = loadSvgByPhosphorName("corners-out"))
+                    {
+                        auto n = makeTintedClone(*svg, juce::Colours::white);
+                        auto o = makeTintedClone(*svg, juce::Colours::white);
+                        auto d = makeTintedClone(*svg, juce::Colours::white);
+                        hoverFsButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+                    }
+                    else
+                    {
+                        auto n = makeFsIcon(juce::Colours::white), o = makeFsIcon(juce::Colours::white), d = makeFsIcon(juce::Colours::white);
+                        hoverFsButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+                    }
+                }
                 hoverFsButton.onClick = [this]{ if (onToggleFullscreen) onToggleFullscreen(); };
             }
             void attachCanvas(juce::Component* c)
@@ -1102,6 +1242,44 @@ public:
         // Pop-out support
         addAndMakeVisible(popOutButton);
         popOutButton.setTooltip("Detach visualization to an external window");
+        {
+            if (auto svg = loadSvgByPhosphorName("arrows-out-simple"))
+            {
+                auto n = makeTintedClone(*svg, juce::Colours::white);
+                auto o = makeTintedClone(*svg, juce::Colours::white);
+                auto d = makeTintedClone(*svg, juce::Colours::white);
+                popOutButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+            }
+            else
+            {
+                auto makePopIcon = [](juce::Colour c)
+                {
+                    auto dp = std::make_unique<juce::DrawablePath>();
+                    juce::Path p;
+                    // base window
+                    p.addRoundedRectangle(3.0f, 7.0f, 18.0f, 14.0f, 2.0f);
+                    // arrow pointing to top-right (indicating pop-out)
+                    juce::Path a;
+                    a.startNewSubPath(10.0f, 12.0f);
+                    a.lineTo(20.0f, 4.0f);
+                    a.lineTo(18.0f, 4.0f);
+                    a.lineTo(18.0f, 2.0f);
+                    a.lineTo(22.0f, 2.0f);
+                    a.lineTo(22.0f, 6.0f);
+                    a.lineTo(20.0f, 6.0f);
+                    a.lineTo(20.0f, 8.0f);
+                    a.closeSubPath();
+                    p.addPath(a);
+                    dp->setPath(p);
+                    dp->setFill(c);
+                    return dp;
+                };
+                auto wN = makePopIcon(juce::Colours::white);
+                auto wO = makePopIcon(juce::Colours::white);
+                auto wD = makePopIcon(juce::Colours::white);
+                popOutButton.setImages(wN.get(), wO.get(), wD.get(), nullptr, nullptr, nullptr, nullptr);
+            }
+        }
         popOutButton.onClick = [this]
         {
             if (!isDetached)
@@ -1132,6 +1310,39 @@ public:
         // Fullscreen support
         addAndMakeVisible(fullscreenButton);
         fullscreenButton.setTooltip("Toggle fullscreen visualization (F11)");
+        {
+            if (auto svg = loadSvgByPhosphorName("corners-out"))
+            {
+                auto n = makeTintedClone(*svg, juce::Colours::white);
+                auto o = makeTintedClone(*svg, juce::Colours::white);
+                auto d = makeTintedClone(*svg, juce::Colours::white);
+                fullscreenButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+            }
+            else
+            {
+                auto makeFsIcon = [](juce::Colour c)
+                {
+                    auto dp = std::make_unique<juce::DrawablePath>();
+                    juce::Path p;
+                    // four corner brackets
+                    p.addRectangle(2.0f, 2.0f, 4.0f, 1.5f); // top-left horizontal
+                    p.addRectangle(2.0f, 2.0f, 1.5f, 4.0f); // top-left vertical
+                    p.addRectangle(21.0f, 2.0f, 1.5f, 4.0f); // top-right vertical
+                    p.addRectangle(17.0f, 2.0f, 4.0f, 1.5f); // top-right horizontal
+                    p.addRectangle(2.0f, 18.5f, 4.0f, 1.5f); // bottom-left horizontal
+                    p.addRectangle(2.0f, 16.0f, 1.5f, 4.0f); // bottom-left vertical
+                    p.addRectangle(17.0f, 18.5f, 4.0f, 1.5f); // bottom-right horizontal
+                    p.addRectangle(21.0f, 16.0f, 1.5f, 4.0f); // bottom-right vertical
+                    dp->setPath(p);
+                    dp->setFill(c);
+                    return dp;
+                };
+                auto wN = makeFsIcon(juce::Colours::white);
+                auto wO = makeFsIcon(juce::Colours::white);
+                auto wD = makeFsIcon(juce::Colours::white);
+                fullscreenButton.setImages(wN.get(), wO.get(), wD.get(), nullptr, nullptr, nullptr, nullptr);
+            }
+        }
         fullscreenButton.onClick = [this]{ this->toggleFullscreen(); };
  
          // Visualization canvas (embedded OpenGL)
@@ -1492,11 +1703,76 @@ public:
         }
 
         addAndMakeVisible(prevButton);
-        prevButton.setButtonText("Prev");
+        prevButton.setTooltip("Previous Preset");
+        {
+            if (auto svg = loadSvgByPhosphorName("skip-back"))
+            {
+                auto n = makeTintedClone(*svg, juce::Colours::white);
+                auto o = makeTintedClone(*svg, juce::Colours::white);
+                auto d = makeTintedClone(*svg, juce::Colours::white);
+                prevButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+            }
+            else
+            {
+                auto makeLeftArrow = [](juce::Colour c)
+                {
+                    auto dp = std::make_unique<juce::DrawablePath>();
+                    juce::Path p;
+                    p.startNewSubPath(18.0f, 6.0f);
+                    p.lineTo(10.0f, 12.0f);
+                    p.lineTo(18.0f, 18.0f);
+                    p.lineTo(16.0f, 18.0f);
+                    p.lineTo(8.0f, 12.0f);
+                    p.lineTo(16.0f, 6.0f);
+                    p.closeSubPath();
+                    dp->setPath(p);
+                    dp->setFill(c);
+                    return dp;
+                };
+                auto wN = makeLeftArrow(juce::Colours::white);
+                auto wO = makeLeftArrow(juce::Colours::white);
+                auto wD = makeLeftArrow(juce::Colours::white);
+                prevButton.setImages(wN.get(), wO.get(), wD.get(), nullptr, nullptr, nullptr, nullptr);
+            }
+        }
         prevButton.onClick = [this]{ processor.prevPresetInPlaylist(); presetNameLabel.setText(currentDisplayName(), juce::dontSendNotification); };
         addAndMakeVisible(nextButton);
-        nextButton.setButtonText("Next");
+        nextButton.setTooltip("Next Preset");
+        {
+            if (auto svg = loadSvgByPhosphorName("skip-forward"))
+            {
+                auto n = makeTintedClone(*svg, juce::Colours::white);
+                auto o = makeTintedClone(*svg, juce::Colours::white);
+                auto d = makeTintedClone(*svg, juce::Colours::white);
+                nextButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+            }
+            else
+            {
+                auto makeRightArrow = [](juce::Colour c)
+                {
+                    auto dp = std::make_unique<juce::DrawablePath>();
+                    juce::Path p;
+                    p.startNewSubPath(10.0f, 6.0f);
+                    p.lineTo(18.0f, 12.0f);
+                    p.lineTo(10.0f, 18.0f);
+                    p.lineTo(12.0f, 18.0f);
+                    p.lineTo(20.0f, 12.0f);
+                    p.lineTo(12.0f, 6.0f);
+                    p.closeSubPath();
+                    dp->setPath(p);
+                    dp->setFill(c);
+                    return dp;
+                };
+                auto wN = makeRightArrow(juce::Colours::white);
+                auto wO = makeRightArrow(juce::Colours::white);
+                auto wD = makeRightArrow(juce::Colours::white);
+                nextButton.setImages(wN.get(), wO.get(), wD.get(), nullptr, nullptr, nullptr, nullptr);
+            }
+        }
         nextButton.onClick = [this]{ processor.nextPresetInPlaylist(); presetNameLabel.setText(currentDisplayName(), juce::dontSendNotification); };
+        // Phase 6.6: Hide transport buttons in compact layout
+        prevButton.setVisible(false);
+        nextButton.setVisible(false);
 
         // Transition Style UI
         addAndMakeVisible(transitionStyleLabel);
@@ -1508,12 +1784,17 @@ public:
         transitionStyleCombo.addItem("Blend", 3);
         transitionStyleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
             processor.getValueTreeState(), "transitionStyle", transitionStyleCombo);
+        // Phase 6.6: Hide legacy transition label/combobox in compact layout
+        transitionStyleLabel.setVisible(false);
+        transitionStyleCombo.setVisible(false);
 
         addAndMakeVisible(presetNameLabel);
         presetNameLabel.setText(initialPresetName(), juce::dontSendNotification);
         presetNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
         presetNameLabel.setJustificationType(juce::Justification::centredLeft);
         presetNameLabel.setMinimumHorizontalScale(0.5f);
+        // Phase 6.6: Hide presetNameLabel in compact layout
+        presetNameLabel.setVisible(false);
 
         refreshTransportVisibility();
         lastDisplayedName = currentDisplayName();
@@ -1616,25 +1897,22 @@ public:
         {
             auto area = innerTop.removeFromLeft(knobW);
             auto lab = area.removeFromTop(14);
-            beatLabel.setBounds(lab);
-            beatSlider.setBounds(area);
+            durationLabel.setBounds(lab);
+            durationSlider.setBounds(area);
         }
         innerTop.removeFromLeft(8);
         {
             auto area = innerTop.removeFromLeft(knobW);
             auto lab = area.removeFromTop(14);
-            durationLabel.setBounds(lab);
-            durationSlider.setBounds(area);
+            beatLabel.setBounds(lab);
+            beatSlider.setBounds(area);
         }
         innerTop.removeFromLeft(12);
 
         // (Phase 6.4) Toggle buttons moved next to playlist picker
 
-        // Transition Style controls
-        transitionStyleLabel.setBounds(innerTop.removeFromLeft(100));
-        innerTop.removeFromLeft(6);
-        transitionStyleCombo.setBounds(innerTop.removeFromLeft(140));
-        innerTop.removeFromLeft(12);
+        // Transition Style controls (hidden in Phase 6.6 Compact Layout)
+        // reserved spacing minimal; controls are hidden so no layout here
 
         // Prioritize Fullscreen and Pop-out visibility: allocate them first from the right
         const int transportWidth = 160;
@@ -2292,8 +2570,8 @@ private:
     VizOpenGLCanvas vizCanvas;
 
     // Detached window support (Phase 5.1)
-    juce::TextButton popOutButton { "Pop-out" };
-    juce::TextButton fullscreenButton { "Fullscreen" };
+    juce::DrawableButton popOutButton { "popOutButton", juce::DrawableButton::ImageFitted };
+    juce::DrawableButton fullscreenButton { "fullscreenButton", juce::DrawableButton::ImageFitted };
     juce::Label detachedNotice;
     std::unique_ptr<ExternalVisualizationWindow> externalWindow;
     bool isDetached { false };
@@ -2314,8 +2592,8 @@ private:
     juce::TextButton loadFolderButton;
     juce::ComboBox presetCombo; // Phase 6.2
     juce::DrawableButton playlistPickerButton { "playlistPicker", juce::DrawableButton::ImageFitted };
-    juce::TextButton prevButton;
-    juce::TextButton nextButton;
+    juce::DrawableButton prevButton { "prevButton", juce::DrawableButton::ImageFitted };
+    juce::DrawableButton nextButton { "nextButton", juce::DrawableButton::ImageFitted };
     juce::Label presetNameLabel;
     juce::String lastDisplayedName;
     juce::Label transitionStyleLabel;

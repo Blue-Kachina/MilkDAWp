@@ -235,11 +235,11 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 - [x] Show current selection in popover
 
 ### 6.6 Compact Control Layout
-- [ ] Arrange controls in horizontal row: [Logo][Combobox][Playlist Picker][Lock][Shuffle][Transition Popover][Duration Knob][Beat Sensitivity Knob][Pop-out][Fullscreen]
-- [ ] Ensure all controls use consistent sizing/spacing
-- [ ] Verify responsive behavior on window resize
-- [ ] Test all control interactions
-- [ ] Remove any obsolete UI elements
+- [x] Arrange controls in horizontal row: [Logo][Combobox][Playlist Picker][Lock][Shuffle][Transition Popover][Duration Knob][Beat Sensitivity Knob][Pop-out][Fullscreen]
+- [x] Ensure all controls use consistent sizing/spacing
+- [x] Verify responsive behavior on window resize
+- [x] Test all control interactions
+- [x] Remove any obsolete UI elements
 
 ### 6.7 Detached Window Overlay Controls
 - [ ] Convert detached window button row to overlay
