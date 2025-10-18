@@ -408,6 +408,17 @@ public:
             return playlistFiles[(int)idx].getFileNameWithoutExtension();
         return {};
     }
+    // Phase 6.2: expose playlist for UI combobox
+    int getPlaylistSizePublic() const noexcept { return playlistOrder.size(); }
+    juce::String getPlaylistItemNameAtOrderedPublic(int orderedIndex) const {
+        if ((unsigned)orderedIndex < (unsigned)playlistOrder.size()) {
+            const int idx = playlistOrder[(int)orderedIndex];
+            if ((unsigned)idx < (unsigned)playlistFiles.size())
+                return playlistFiles[(int)idx].getFileNameWithoutExtension();
+        }
+        return {};
+    }
+    int getPlaylistPosPublic() const noexcept { return hasActivePlaylist() ? playlistPos : -1; }
 
 private:
     APVTS apvts;
@@ -830,6 +841,107 @@ private:
             g.setColour(findColour(juce::Slider::thumbColourId));
             g.fillEllipse(thumbPoint.x - lineW, thumbPoint.y - lineW, lineW * 2.0f, lineW * 2.0f);
         }
+        // Reduce font size in dropdown lists (PopupMenu used by ComboBox)
+        juce::Font getPopupMenuFont() override { return juce::Font(12.0f); }
+        // Also reduce the font used in the closed ComboBox text for consistency
+        juce::Font getComboBoxFont(juce::ComboBox&) override { return juce::Font(12.0f); }
+        
+        // Make popup menu items more compact by reducing ideal height
+        void getIdealPopupMenuItemSize(const juce::String& text, bool isSeparator, int standardMenuItemHeight,
+                                       int& idealWidth, int& idealHeight) override
+        {
+            auto font = getPopupMenuFont();
+            if (isSeparator)
+            {
+                idealHeight = juce::roundToInt(font.getHeight() * 0.6f);
+                idealWidth = 50;
+                return;
+            }
+            idealHeight = juce::jmax(juce::roundToInt(font.getHeight() + 4.0f), 14);
+            idealWidth = juce::roundToInt(font.getStringWidthFloat(text) + idealHeight + 16.0f);
+            juce::ignoreUnused(standardMenuItemHeight);
+        }
+
+        // Custom, smaller checkmark and tighter item rendering
+        void drawPopupMenuItem(juce::Graphics& g, const juce::Rectangle<int>& area, bool isSeparator, bool isActive,
+                               bool isHighlighted, bool isTicked, bool hasSubMenu, const juce::String& text,
+                               const juce::String& shortcutKeyText, const juce::Drawable* icon, const juce::Colour* textColour) override
+        {
+            auto r = area;
+            auto bg = findColour(juce::ResizableWindow::backgroundColourId);
+            auto hi = juce::Colour(0xFF2A2E33);
+            if (isSeparator)
+            {
+                g.setColour(bg.brighter(0.1f));
+                auto y = r.getCentreY();
+                g.drawLine((float)r.getX() + 4.0f, (float)y, (float)r.getRight() - 4.0f, (float)y);
+                return;
+            }
+            if (isHighlighted)
+            {
+                g.setColour(hi);
+                g.fillRect(r);
+            }
+
+            auto font = getPopupMenuFont();
+            g.setFont(font);
+            auto col = textColour != nullptr ? *textColour : findColour(juce::ComboBox::textColourId);
+            g.setColour(isActive ? col : col.withAlpha(0.4f));
+
+            // Left gutter for tick/icon
+            const int gutter = juce::roundToInt(font.getHeight() * 1.0f);
+            auto textArea = r.reduced(6, juce::jmax(0, (r.getHeight() - juce::roundToInt(font.getHeight())) / 2));
+            textArea.removeFromLeft(gutter);
+
+            // Draw small tick if selected
+            if (isTicked)
+            {
+                const int t = juce::roundToInt(font.getHeight() * 0.75f);
+                const int tx = r.getX() + 6;
+                const int ty = r.getCentreY() - t / 2;
+                juce::Path check;
+                // simple tick
+                check.startNewSubPath((float)tx, (float)(ty + t * 0.55f));
+                check.lineTo((float)(tx + t * 0.35f), (float)(ty + t));
+                check.lineTo((float)(tx + t), (float)(ty));
+                g.setColour(juce::Colours::white);
+                g.strokePath(check, juce::PathStrokeType(2.0f));
+            }
+
+            // Icon if provided (scaled small)
+            if (icon != nullptr)
+            {
+                const int sz = juce::roundToInt(font.getHeight());
+                auto iconBounds = juce::Rectangle<int>(r.getX() + 4, r.getCentreY() - sz / 2, sz, sz);
+                icon->draw(g, isActive ? 1.0f : 0.4f, juce::AffineTransform::fromTargetPoints(0,0,(float)iconBounds.getX(),(float)iconBounds.getY(), 1,0,(float)iconBounds.getRight(),(float)iconBounds.getY(), 0,1,(float)iconBounds.getX(),(float)iconBounds.getBottom()));
+            }
+
+            // Text and optional shortcut key
+            auto right = textArea;
+            if (shortcutKeyText.isNotEmpty())
+            {
+                auto w = g.getCurrentFont().getStringWidth(shortcutKeyText);
+                auto scArea = right.removeFromRight(w + 10);
+                g.setColour(isActive ? col.withAlpha(0.8f) : col.withAlpha(0.3f));
+                g.drawText(shortcutKeyText, scArea, juce::Justification::centredRight, false);
+            }
+            g.setColour(isActive ? col : col.withAlpha(0.4f));
+            g.drawFittedText(text, right, juce::Justification::centredLeft, 1);
+
+            // Submenu arrow
+            if (hasSubMenu)
+            {
+                const int sz = juce::roundToInt(font.getHeight() * 0.6f);
+                juce::Path arrow;
+                const int x = r.getRight() - sz - 6;
+                const int y = r.getCentreY() - sz / 2;
+                arrow.startNewSubPath((float)x, (float)y);
+                arrow.lineTo((float)(x + sz), (float)(y + sz / 2));
+                arrow.lineTo((float)x, (float)(y + sz));
+                g.setColour(col);
+                g.strokePath(arrow, juce::PathStrokeType(2.0f));
+            }
+        }
     };
 public:
     static constexpr int topHeight = 80;
@@ -1039,6 +1151,46 @@ public:
             });
         };
 
+        // Phase 6.2: Preset selection ComboBox replacing "Load Preset..." button
+        addAndMakeVisible(presetCombo);
+        presetCombo.setTextWhenNoChoicesAvailable("No playlist");
+        presetCombo.setTextWhenNothingSelected("Select preset");
+        presetCombo.onChange = [this]
+        {
+            if (updatingPresetCombo) return; // avoid feedback
+            if (!processor.hasActivePlaylistPublic()) return;
+            const int sel = presetCombo.getSelectedItemIndex(); // 0-based
+            if (sel < 0) return;
+            if (auto* rp = dynamic_cast<juce::RangedAudioParameter*>(processor.getValueTreeState().getParameter("presetIndex"))) {
+                const float norm = rp->convertTo0to1((float) sel);
+                rp->beginChangeGesture();
+                rp->setValueNotifyingHost(norm);
+                rp->endChangeGesture();
+            }
+        };
+        // Hide old button per Phase 6.2
+        loadButton.setVisible(false);
+        // Initial population
+        {
+            const bool havePL = processor.hasActivePlaylistPublic();
+            presetCombo.setEnabled(havePL);
+            presetCombo.clear(juce::dontSendNotification);
+            if (havePL) {
+                const int N = processor.getPlaylistSizePublic();
+                for (int i = 0; i < N; ++i) {
+                    auto name = processor.getPlaylistItemNameAtOrderedPublic(i);
+                    presetCombo.addItem(juce::String(i + 1) + ". " + name, i + 1);
+                }
+                const int pos = processor.getPlaylistPosPublic();
+                updatingPresetCombo = true;
+                presetCombo.setSelectedItemIndex(pos >= 0 ? pos : 0, juce::dontSendNotification);
+                updatingPresetCombo = false;
+                lastKnownPlaylistSize = N;
+            } else {
+                lastKnownPlaylistSize = 0;
+            }
+        }
+
         addAndMakeVisible(prevButton);
         prevButton.setButtonText("Prev");
         prevButton.onClick = [this]{ processor.prevPresetInPlaylist(); presetNameLabel.setText(currentDisplayName(), juce::dontSendNotification); };
@@ -1130,7 +1282,7 @@ public:
         }
 
         // File/picker controls
-        loadButton.setBounds(innerTop.removeFromLeft(150));
+        presetCombo.setBounds(innerTop.removeFromLeft(250));
         innerTop.removeFromLeft(8);
         loadFolderButton.setBounds(innerTop.removeFromLeft(220));
         innerTop.removeFromLeft(12);
@@ -1299,6 +1451,51 @@ private:
         {
             lastDisplayedName = name;
             presetNameLabel.setText(name, juce::dontSendNotification);
+        }
+        // Keep preset combobox in sync with playlist state
+        const bool havePL = processor.hasActivePlaylistPublic();
+        presetCombo.setEnabled(havePL);
+        if (havePL)
+        {
+            const int N = processor.getPlaylistSizePublic();
+            bool needRebuild = (N != lastKnownPlaylistSize);
+            if (!needRebuild && N > 0)
+            {
+                // Detect order changes by comparing first item's text
+                auto expected0 = juce::String("1. ") + processor.getPlaylistItemNameAtOrderedPublic(0);
+                if (presetCombo.getNumItems() < 1 || presetCombo.getItemText(0) != expected0)
+                    needRebuild = true;
+            }
+            if (needRebuild)
+            {
+                // Rebuild items
+                updatingPresetCombo = true;
+                presetCombo.clear(juce::dontSendNotification);
+                for (int i = 0; i < N; ++i) {
+                    auto nm = processor.getPlaylistItemNameAtOrderedPublic(i);
+                    presetCombo.addItem(juce::String(i + 1) + ". " + nm, i + 1);
+                }
+                lastKnownPlaylistSize = N;
+                updatingPresetCombo = false;
+            }
+            // Update selection to current position
+            int pos = processor.getPlaylistPosPublic();
+            if (pos >= 0 && pos != presetCombo.getSelectedItemIndex())
+            {
+                updatingPresetCombo = true;
+                presetCombo.setSelectedItemIndex(pos, juce::dontSendNotification);
+                updatingPresetCombo = false;
+            }
+        }
+        else
+        {
+            if (lastKnownPlaylistSize != 0)
+            {
+                updatingPresetCombo = true;
+                presetCombo.clear(juce::dontSendNotification);
+                updatingPresetCombo = false;
+                lastKnownPlaylistSize = 0;
+            }
         }
         // Push updates to external window UI when detached
         if (isDetached && externalWindow)
@@ -1794,12 +1991,15 @@ private:
 
     juce::TextButton loadButton;
     juce::TextButton loadFolderButton;
+    juce::ComboBox presetCombo; // Phase 6.2
     juce::TextButton prevButton;
     juce::TextButton nextButton;
     juce::Label presetNameLabel;
     juce::String lastDisplayedName;
     juce::Label transitionStyleLabel;
     juce::ComboBox transitionStyleCombo;
+    int lastKnownPlaylistSize { 0 }; // Phase 6.2 tracking
+    bool updatingPresetCombo { false }; // guard to avoid feedback
 
     // Attachments
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> beatAttachment;

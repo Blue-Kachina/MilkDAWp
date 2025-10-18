@@ -199,13 +199,13 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 - [x] Position logo in main window layout
 
 ### 6.2 Preset Selection Combobox
-- [ ] Replace "Load Preset..." button with JUCE ComboBox
-- [ ] Populate combobox with current playlist presets (indexed)
-- [ ] Display empty state when no active preset
-- [ ] Display active preset name when preset loaded
-- [ ] Disable combobox when no active playlist
-- [ ] Wire combobox selection to preset index parameter
-- [ ] Update combobox when preset changes externally
+- [x] Replace "Load Preset..." button with JUCE ComboBox
+- [x] Populate combobox with current playlist presets (indexed)
+- [x] Display empty state when no active preset
+- [x] Display active preset name when preset loaded
+- [x] Disable combobox when no active playlist
+- [x] Wire combobox selection to preset index parameter
+- [x] Update combobox when preset changes externally
 
 ### 6.3 Compact Playlist Picker
 - [ ] Create icon-only button for playlist/preset selection
