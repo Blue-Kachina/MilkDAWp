@@ -166,38 +166,110 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 - [ ] Destroy external window when main window closes
 
 ### 5.2 Fullscreen Support
-- [ ] Implement fullscreen toggle button
-- [ ] Detect which monitor contains visualization window
-- [ ] Enter fullscreen on correct monitor
-- [ ] Auto-detach when entering fullscreen
-- [ ] Auto-exit fullscreen when docking
-- [ ] Implement F11 keyboard shortcut
+- [x] Implement fullscreen toggle button
+- [x] Detect which monitor contains visualization window
+- [x] Enter fullscreen on correct monitor
+- [x] Auto-detach when entering fullscreen
+- [x] Auto-exit fullscreen when docking
+- [x] Implement F11 keyboard shortcut
 
 ### 5.3 Visualization Window Features
-- [ ] Add transparent hover button (bottom-right corner)
-- [ ] Make hover button toggle fullscreen
-- [ ] Support window transparency (for OBS)
-- [ ] Set window title/class for easy OBS identification
+- [x] Add transparent hover button (bottom-right corner)
+- [x] Make hover button toggle fullscreen
+- [x] Support window transparency (for OBS)
+- [x] Set window title/class for easy OBS identification
 - [ ] Test all window state transitions
 
 ### 5.4 Window Communication
-- [ ] Implement real-time parameter updates: Main→External
-- [ ] Implement real-time parameter updates: External→Main
+- [x] Implement real-time parameter updates: Main→External
+- [x] Implement real-time parameter updates: External→Main
 - [ ] Test parameter changes propagate instantly
-- [ ] Handle edge cases (window closed during update, etc.)
+- [x] Handle edge cases (window closed during update, etc.)
 
 ---
 
-## Phase 6: Multi-Instance & Resource Optimization
+## Phase 6: UI Refinement & Professional Polish
+**Goal:** Modernize UI with logo, compact controls, and improved UX
+
+### 6.1 Logo Integration
+- [ ] Add logo image asset to project resources
+- [ ] Create image component to display logo
+- [ ] Replace "MilkDAWp" text with logo image
+- [ ] Scale logo to appropriate size (~50% of original)
+- [ ] Position logo in main window layout
+
+### 6.2 Preset Selection Combobox
+- [ ] Replace "Load Preset..." button with JUCE ComboBox
+- [ ] Populate combobox with current playlist presets (indexed)
+- [ ] Display empty state when no active preset
+- [ ] Display active preset name when preset loaded
+- [ ] Disable combobox when no active playlist
+- [ ] Wire combobox selection to preset index parameter
+- [ ] Update combobox when preset changes externally
+
+### 6.3 Compact Playlist Picker
+- [ ] Create icon-only button for playlist/preset selection
+- [ ] Position button to right of preset combobox
+- [ ] Use appropriate file/folder icon
+- [ ] Implement preset file picker dialog
+- [ ] Auto-detect parent folder as playlist
+- [ ] Set selected preset as active and update index
+- [ ] Handle preset blacklist/filtering
+- [ ] Remove old "Load Preset..." and "Load Playlist Folder..." buttons
+
+### 6.4 Icon-Based Toggle Controls
+- [ ] Replace Lock checkbox with dual-state icon button
+- [ ] Replace Shuffle checkbox with dual-state icon button
+- [ ] Select appropriate icons for each toggle state
+- [ ] Position Lock button next to playlist picker
+- [ ] Position Shuffle button next to Lock button
+- [ ] Maintain parameter binding for all toggles
+- [ ] Update button state when parameters change
+
+### 6.5 Transition Style Popover
+- [ ] Create icon-only transition button
+- [ ] Implement popover menu for transition styles
+- [ ] Populate popover with text-based style options
+- [ ] Position button next to Shuffle button
+- [ ] Wire popover selection to transition parameter
+- [ ] Show current selection in popover
+
+### 6.6 Compact Control Layout
+- [ ] Arrange controls in horizontal row: [Logo][Combobox][Playlist Picker][Lock][Shuffle][Transition Popover][Duration Knob][Beat Sensitivity Knob][Pop-out][Fullscreen]
+- [ ] Ensure all controls use consistent sizing/spacing
+- [ ] Verify responsive behavior on window resize
+- [ ] Test all control interactions
+- [ ] Remove any obsolete UI elements
+
+### 6.7 Detached Window Overlay Controls
+- [ ] Convert detached window button row to overlay
+- [ ] Position overlay at bottom of visualization (not top)
+- [ ] Implement hover detection for overlay visibility
+- [ ] Show overlay only on mouse hover
+- [ ] Hide overlay when mouse leaves area
+- [ ] Ensure overlay doesn't block visualization when hidden
+- [ ] Test overlay behavior in both windowed and fullscreen modes
+
+### 6.8 True Fullscreen & Resizable Window
+- [ ] Implement true fullscreen mode (not windowed fullscreen)
+- [ ] Ensure fullscreen occupies entire screen with no borders
+- [ ] Make non-fullscreen detached window properly resizable
+- [ ] Maintain aspect ratio or fill strategy on resize
+- [ ] Test fullscreen on multi-monitor setups
+- [ ] Verify smooth transitions between window states
+
+---
+
+## Phase 7: Multi-Instance & Resource Optimization
 **Goal:** Efficient resource sharing between plugin instances
 
-### 6.1 Asset Caching
+### 7.1 Asset Caching
 - [ ] Implement shared preset cache across instances
 - [ ] Implement shared texture/resource pool
 - [ ] Add reference counting for shared resources
 - [ ] Test load time improvements with multiple instances
 
-### 6.2 Memory Management
+### 7.2 Memory Management
 - [ ] Profile memory usage per instance
 - [ ] Optimize projectM memory footprint
 - [ ] Implement lazy loading where appropriate
@@ -205,16 +277,16 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 
 ---
 
-## Phase 7: Performance & Adaptive Quality
+## Phase 8: Performance & Adaptive Quality
 **Goal:** Maintain performance under heavy CPU/GPU load
 
-### 7.1 Performance Monitoring
+### 8.1 Performance Monitoring
 - [ ] Implement FPS counter
 - [ ] Monitor CPU usage per thread
 - [ ] Monitor GPU usage/frame time
 - [ ] Add performance metrics logging
 
-### 7.2 Adaptive Quality System
+### 8.2 Adaptive Quality System
 - [ ] Define quality levels (resolution, particle count, etc.)
 - [ ] Implement automatic quality reduction under load
 - [ ] Implement automatic quality increase when headroom available
@@ -223,16 +295,16 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 
 ---
 
-## Phase 8: Diagnostics & First-Run Experience
+## Phase 9: Diagnostics & First-Run Experience
 **Goal:** Help users troubleshoot and optimize on first launch
 
-### 8.1 Diagnostic System
+### 9.1 Diagnostic System
 - [ ] Implement GPU capability detection
 - [ ] Implement system resource detection
 - [ ] Create diagnostic report generator
 - [ ] Add troubleshooting hints in UI
 
-### 8.2 First-Run Benchmark
+### 9.2 First-Run Benchmark
 - [ ] Create automated benchmark on first launch
 - [ ] Test various quality settings
 - [ ] Auto-select optimal default quality
@@ -241,23 +313,23 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 
 ---
 
-## Phase 9: Bundled Content & Packaging
+## Phase 10: Bundled Content & Packaging
 **Goal:** Ship with presets and create installers
 
-### 9.1 Bundled Presets
+### 10.1 Bundled Presets
 - [ ] Curate/license preset collection
 - [ ] Bundle presets with plugin
 - [ ] Set default preset for first launch
 - [ ] Test preset loading from bundle location
 
-### 9.2 Installer Creation
+### 10.2 Installer Creation
 - [ ] Create Windows installer (self-contained)
 - [ ] Create macOS installer (self-contained)
 - [ ] Create Linux installer (self-contained)
 - [ ] Include all required DLLs/dylibs per README spec
 - [ ] Test installation on clean systems
 
-### 9.3 Documentation
+### 10.3 Documentation
 - [ ] Create user manual
 - [ ] Create quick-start guide
 - [ ] Document MIDI assignment workflow
@@ -265,10 +337,10 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 
 ---
 
-## Phase 10: Testing & MVP Release
+## Phase 11: Testing & MVP Release
 **Goal:** Meet all acceptance criteria and release MVP
 
-### 10.1 Acceptance Criteria Verification
+### 11.1 Acceptance Criteria Verification
 - [ ] Verify builds on Windows, macOS, Linux
 - [ ] Verify VST3 + standalone formats
 - [ ] Verify zero audio latency (measure in DAW)
@@ -280,14 +352,14 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 - [ ] Verify diagnostics/benchmark operational
 - [ ] Verify bundled presets load correctly
 
-### 10.2 Integration Testing
+### 11.2 Integration Testing
 - [ ] Test in multiple DAWs (Ableton, FL Studio, Reaper, Logic)
 - [ ] Test with various audio interfaces
 - [ ] Test multi-monitor setups
 - [ ] Test OBS capture workflow
 - [ ] Test MIDI controller assignment
 
-### 10.3 Edge Case Testing
+### 11.3 Edge Case Testing
 - [ ] Test plugin reload/state persistence
 - [ ] Test rapid parameter changes
 - [ ] Test window close/reopen scenarios
@@ -296,13 +368,13 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 - [ ] Test system sleep/wake
 - [ ] Test multiple instances simultaneously
 
-### 10.4 Performance Testing
+### 11.4 Performance Testing
 - [ ] Benchmark CPU usage vs visualization quality
 - [ ] Test long-duration sessions (4+ hours)
 - [ ] Profile memory leaks
 - [ ] Test under high system load
 
-### 10.5 Release Preparation
+### 11.5 Release Preparation
 - [ ] Final code review
 - [ ] Update version numbers
 - [ ] Prepare release notes

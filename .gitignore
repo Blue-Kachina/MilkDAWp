@@ -22,3 +22,6 @@ Thumbs.db
 __pycache__/
 
 /logs
+
+# Resources
+resources/presets
