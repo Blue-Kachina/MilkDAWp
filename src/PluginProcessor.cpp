@@ -11,10 +11,40 @@
 #include "AudioAnalysisQueue.h"
 #include "VisualizationThread.h"
 #include <cstdint>
+#include <optional>
 #ifdef _WIN32
   #define NOMINMAX
   #include <windows.h>
 #endif
+
+namespace {
+    std::unique_ptr<juce::Drawable> loadSvgFromBinary(const void* data, int size)
+    {
+        if (data == nullptr || size <= 0) return nullptr;
+        auto svg = juce::parseXML(juce::String::fromUTF8(static_cast<const char*>(data), size));
+        if (!svg) return nullptr;
+        return std::unique_ptr<juce::Drawable>(juce::Drawable::createFromSVG(*svg));
+    }
+
+    void tintDrawable(juce::Drawable& d, juce::Colour colour)
+    {
+        // Replace common base colours with the desired tint; this affects both fills and strokes in SVGs
+        d.replaceColour(juce::Colours::black, colour);
+        d.replaceColour(juce::Colours::white, colour);
+        d.replaceColour(juce::Colours::darkgrey, colour);
+        d.replaceColour(juce::Colours::grey, colour);
+    }
+
+    std::unique_ptr<juce::Drawable> makeTintedClone(const juce::Drawable& src, juce::Colour colour)
+    {
+        auto clone = src.createCopy();
+        if (clone)
+        {
+            tintDrawable(*clone, colour);
+        }
+        return clone;
+    }
+}
 
 #if MILKDAWP_HAS_PROJECTM
 // C API headers for projectM v4 (via vcpkg): convenience include
@@ -697,9 +727,10 @@ private:
 class MilkDAWpAudioProcessorEditor : public juce::AudioProcessorEditor, private juce::Timer {
 private:
     // A top-level window to host the visualization when detached.
-    class ExternalVisualizationWindow : public juce::DocumentWindow {
+    class ExternalVisualizationWindow : public juce::DocumentWindow { 
     public:
         struct Content : public juce::Component {
+            std::unique_ptr<juce::TooltipWindow> tooltipWindow;
             juce::TextButton dockButton { "Dock" };
             juce::TextButton hoverFsButton { "FS" }; // Hover fullscreen toggle
             juce::TextButton prevButton { "Prev" };
@@ -712,6 +743,8 @@ private:
             Content()
             {
                 setOpaque(false);
+                // Create a TooltipWindow for this top-level window so tooltips appear over its children
+                tooltipWindow = std::make_unique<juce::TooltipWindow>(this, 700);
                 addAndMakeVisible(dockButton);
                 // Transport + preset name
                 addAndMakeVisible(prevButton);
@@ -990,6 +1023,8 @@ public:
     {
         setLookAndFeel(&hardwareLAF);
         setSize(1200, 650); // per README default window size
+        // Ensure tooltips are enabled for this editor by creating a TooltipWindow attached to it
+        tooltipWindow = std::make_unique<juce::TooltipWindow>(this, 700);
 
         // Logo: prefer image from resources/images/MilkDAWp_Logo.png; fallback to text label
         addAndMakeVisible(logoLabel);
@@ -1128,17 +1163,99 @@ public:
         durationAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
             processor.getValueTreeState(), "transitionDurationSeconds", durationSlider);
 
-        addAndMakeVisible(lockToggle);
-        lockToggle.setButtonText("Lock");
-        lockToggle.setTooltip("Lock current preset (disable auto transitions)");
-        lockAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-            processor.getValueTreeState(), "lockCurrentPreset", lockToggle);
+        // Phase 6.4: Icon-based toggle buttons for Lock and Shuffle (Phosphor)
+        // Lock button
+        addAndMakeVisible(lockButton);
+        lockButton.setTooltip("Lock");
+        lockButton.setClickingTogglesState(true);
+        {
+            auto lockSvg = loadSvgFromBinary(BinaryData::locksimple_svg, BinaryData::locksimple_svgSize);
+            const auto GreyN = juce::Colour(0xFF7F7F7F);
+            const auto GreyO = juce::Colour(0xFF9F9F9F);
+            const auto GreyD = juce::Colour(0xFF5F5F5F);
+            const auto BlueN = juce::Colour(0xFF6A8CAF);
+            const auto BlueO = juce::Colour(0xFF8FB3D1);
+            const auto BlueD = juce::Colour(0xFF4E6E8C);
 
-        addAndMakeVisible(shuffleToggle);
-        shuffleToggle.setButtonText("Shuffle");
-        shuffleToggle.setTooltip("Shuffle playlist order");
+            if (lockSvg == nullptr)
+            {
+                // Fallback simple path if asset missing
+                auto makeFallback = [](juce::Colour c)
+                {
+                    auto dp = std::make_unique<juce::DrawablePath>();
+                    juce::Path p;
+                    p.addRoundedRectangle(4.0f, 9.0f, 18.0f, 12.0f, 3.0f);
+                    juce::Path sh; sh.addArc(6.0f, 3.0f, 14.0f, 12.0f, juce::MathConstants<float>::pi, 0.0f);
+                    p.addPath(sh); dp->setPath(p); dp->setFill(c); return dp;
+                };
+                auto off  = makeFallback(GreyN);
+                auto over = makeFallback(GreyO);
+                auto down = makeFallback(GreyD);
+                auto onN  = makeFallback(BlueN);
+                auto onO  = makeFallback(BlueO);
+                auto onD  = makeFallback(BlueD);
+                lockButton.setImages(off.get(), over.get(), down.get(), onN.get(), onO.get(), onD.get(), nullptr);
+            }
+            else
+            {
+                auto off  = makeTintedClone(*lockSvg, GreyN);
+                auto over = makeTintedClone(*lockSvg, GreyO);
+                auto down = makeTintedClone(*lockSvg, GreyD);
+                auto onN  = makeTintedClone(*lockSvg, BlueN);
+                auto onO  = makeTintedClone(*lockSvg, BlueO);
+                auto onD  = makeTintedClone(*lockSvg, BlueD);
+                lockButton.setImages(off.get(), over.get(), down.get(), onN.get(), onO.get(), onD.get(), nullptr);
+            }
+        }
+        lockAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+            processor.getValueTreeState(), "lockCurrentPreset", lockButton);
+
+        // Shuffle button
+        addAndMakeVisible(shuffleButton);
+        shuffleButton.setTooltip("Shuffle");
+        shuffleButton.setClickingTogglesState(true);
+        {
+            auto shuffleSvg = loadSvgFromBinary(BinaryData::shuffle_svg, BinaryData::shuffle_svgSize);
+            const auto GreyN = juce::Colour(0xFF7F7F7F);
+            const auto GreyO = juce::Colour(0xFF9F9F9F);
+            const auto GreyD = juce::Colour(0xFF5F5F5F);
+            const auto BlueN = juce::Colour(0xFF6A8CAF);
+            const auto BlueO = juce::Colour(0xFF8FB3D1);
+            const auto BlueD = juce::Colour(0xFF4E6E8C);
+
+            if (shuffleSvg == nullptr)
+            {
+                auto makeFallback = [](juce::Colour c)
+                {
+                    auto dp = std::make_unique<juce::DrawablePath>();
+                    juce::Path p;
+                    p.startNewSubPath(4.0f, 8.0f); p.cubicTo(10.0f, 8.0f, 12.0f, 14.0f, 18.0f, 14.0f);
+                    p.lineTo(16.0f, 12.0f); p.lineTo(20.0f, 14.0f); p.lineTo(16.0f, 16.0f);
+                    p.startNewSubPath(4.0f, 16.0f); p.cubicTo(10.0f, 16.0f, 12.0f, 10.0f, 18.0f, 10.0f);
+                    p.lineTo(16.0f, 8.0f); p.lineTo(20.0f, 10.0f); p.lineTo(16.0f, 12.0f);
+                    dp->setPath(p); dp->setFill(c); return dp;
+                };
+                auto off  = makeFallback(GreyN);
+                auto over = makeFallback(GreyO);
+                auto down = makeFallback(GreyD);
+                auto onN  = makeFallback(BlueN);
+                auto onO  = makeFallback(BlueO);
+                auto onD  = makeFallback(BlueD);
+                shuffleButton.setImages(off.get(), over.get(), down.get(), onN.get(), onO.get(), onD.get(), nullptr);
+            }
+            else
+            {
+                auto off  = makeTintedClone(*shuffleSvg, GreyN);
+                auto over = makeTintedClone(*shuffleSvg, GreyO);
+                auto down = makeTintedClone(*shuffleSvg, GreyD);
+                auto onN  = makeTintedClone(*shuffleSvg, BlueN);
+                auto onO  = makeTintedClone(*shuffleSvg, BlueO);
+                auto onD  = makeTintedClone(*shuffleSvg, BlueD);
+                shuffleButton.setImages(off.get(), over.get(), down.get(), onN.get(), onO.get(), onD.get(), nullptr);
+            }
+        }
         shuffleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-            processor.getValueTreeState(), "shuffle", shuffleToggle);
+            processor.getValueTreeState(), "shuffle", shuffleButton);
 
         addAndMakeVisible(loadButton);
         loadButton.setButtonText("Load Preset...");
@@ -1214,7 +1331,7 @@ public:
         // Phase 6.3: Compact playlist/preset picker icon button
         {
             addAndMakeVisible(playlistPickerButton);
-            playlistPickerButton.setTooltip("Pick a preset file (parent folder becomes playlist)");
+            playlistPickerButton.setTooltip("Load Preset");
             // Build a simple folder drawable icon
             auto makeFolder = [](juce::Colour c){
                 auto dp = std::make_unique<juce::DrawablePath>();
@@ -1230,9 +1347,9 @@ public:
                 dp->setFill(c);
                 return dp;
             };
-            auto normal = makeFolder(juce::Colour(0xFF6A8CAF));
-            auto over = makeFolder(juce::Colour(0xFF8FB3D1));
-            auto down = makeFolder(juce::Colour(0xFF4E6E8C));
+            auto normal = makeFolder(juce::Colours::white);
+            auto over = makeFolder(juce::Colours::white);
+            auto down = makeFolder(juce::Colours::white);
             playlistPickerButton.setImages(normal.get(), over.get(), down.get(), nullptr, nullptr, nullptr, nullptr);
             // Keep ownership of drawables via unique_ptrs stored in the button
             playlistPickerButton.setClickingTogglesState(false);
@@ -1400,6 +1517,19 @@ public:
             // vertically center square button
             playlistPickerButton.setBounds(b.getX(), b.getCentreY() - sz/2, sz, sz);
         }
+        innerTop.removeFromLeft(8);
+        // Phase 6.4: place Lock and Shuffle icon buttons next to picker
+        {
+            auto b1 = innerTop.removeFromLeft(28);
+            const int sz = juce::jmin(b1.getHeight(), 24);
+            lockButton.setBounds(b1.getX(), b1.getCentreY() - sz/2, sz, sz);
+        }
+        innerTop.removeFromLeft(4);
+        {
+            auto b2 = innerTop.removeFromLeft(28);
+            const int sz = juce::jmin(b2.getHeight(), 24);
+            shuffleButton.setBounds(b2.getX(), b2.getCentreY() - sz/2, sz, sz);
+        }
         innerTop.removeFromLeft(12);
 
         // Knobs area
@@ -1419,11 +1549,7 @@ public:
         }
         innerTop.removeFromLeft(12);
 
-        // Toggle buttons
-        lockToggle.setBounds(innerTop.removeFromLeft(70));
-        innerTop.removeFromLeft(6);
-        shuffleToggle.setBounds(innerTop.removeFromLeft(80));
-        innerTop.removeFromLeft(12);
+        // (Phase 6.4) Toggle buttons moved next to playlist picker
 
         // Transition Style controls
         transitionStyleLabel.setBounds(innerTop.removeFromLeft(100));
@@ -2101,8 +2227,8 @@ private:
     juce::Slider beatSlider;
     juce::Label durationLabel;
     juce::Slider durationSlider;
-    juce::ToggleButton lockToggle;
-    juce::ToggleButton shuffleToggle;
+    juce::DrawableButton lockButton { "lockButton", juce::DrawableButton::ImageFitted };
+    juce::DrawableButton shuffleButton { "shuffleButton", juce::DrawableButton::ImageFitted };
 
     juce::TextButton loadButton;
     juce::TextButton loadFolderButton;
@@ -2125,6 +2251,9 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> transitionStyleAttachment;
 
     std::unique_ptr<juce::FileChooser> fileChooser;
+
+    // Tooltip window for this editor (required by JUCE to display tooltips)
+    std::unique_ptr<juce::TooltipWindow> tooltipWindow;
 };
 
 juce::AudioProcessorEditor* MilkDAWpAudioProcessor::createEditor() {

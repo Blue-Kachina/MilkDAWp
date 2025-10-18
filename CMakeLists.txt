@@ -171,6 +171,8 @@ if(MILKDAWP_BUILD_PLUGIN)
   juce_add_binary_data(${PROJECT_NAME}Assets
     SOURCES
       resources/images/MilkDAWp_Logo.png
+      resources/icons/lock-simple.svg
+      resources/icons/shuffle.svg
   )
 
   # Public compile definitions and config toggles

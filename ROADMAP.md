@@ -218,13 +218,13 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 - [x] Remove old "Load Preset..." and "Load Playlist Folder..." buttons
 
 ### 6.4 Icon-Based Toggle Controls
-- [ ] Replace Lock checkbox with dual-state icon button
-- [ ] Replace Shuffle checkbox with dual-state icon button
-- [ ] Select appropriate icons for each toggle state
-- [ ] Position Lock button next to playlist picker
-- [ ] Position Shuffle button next to Lock button
-- [ ] Maintain parameter binding for all toggles
-- [ ] Update button state when parameters change
+- [x] Replace Lock checkbox with dual-state icon button
+- [x] Replace Shuffle checkbox with dual-state icon button
+- [x] Select appropriate icons for each toggle state
+- [x] Position Lock button next to playlist picker
+- [x] Position Shuffle button next to Lock button
+- [x] Maintain parameter binding for all toggles
+- [x] Update button state when parameters change
 
 ### 6.5 Transition Style Popover
 - [ ] Create icon-only transition button
