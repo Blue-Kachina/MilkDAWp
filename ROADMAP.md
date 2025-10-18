@@ -227,12 +227,12 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 - [x] Update button state when parameters change
 
 ### 6.5 Transition Style Popover
-- [ ] Create icon-only transition button
-- [ ] Implement popover menu for transition styles
-- [ ] Populate popover with text-based style options
-- [ ] Position button next to Shuffle button
-- [ ] Wire popover selection to transition parameter
-- [ ] Show current selection in popover
+- [x] Create icon-only transition button
+- [x] Implement popover menu for transition styles
+- [x] Populate popover with text-based style options
+- [x] Position button next to Shuffle button
+- [x] Wire popover selection to transition parameter
+- [x] Show current selection in popover
 
 ### 6.6 Compact Control Layout
 - [ ] Arrange controls in horizontal row: [Logo][Combobox][Playlist Picker][Lock][Shuffle][Transition Popover][Duration Knob][Beat Sensitivity Knob][Pop-out][Fullscreen]

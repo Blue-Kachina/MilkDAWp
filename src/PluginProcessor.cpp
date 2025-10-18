@@ -1257,6 +1257,79 @@ public:
         shuffleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
             processor.getValueTreeState(), "shuffle", shuffleButton);
 
+        // Phase 6.5: Transition style popover button
+        addAndMakeVisible(transitionButton);
+        transitionButton.setTooltip("Transition Style");
+        transitionButton.setClickingTogglesState(false);
+        {
+            // Create a simple overlapping-squares icon to represent a transition
+            auto makeIcon = [](juce::Colour c)
+            {
+                auto dp = std::make_unique<juce::DrawablePath>();
+                juce::Path p;
+                // Back square
+                p.addRoundedRectangle(5.0f, 5.0f, 12.0f, 12.0f, 2.5f);
+                // Front square offset
+                p.addRoundedRectangle(9.0f, 9.0f, 12.0f, 12.0f, 2.5f);
+                dp->setPath(p);
+                dp->setFill(c);
+                return dp;
+            };
+            // Non-toggle button: make icon white in all states (match style of Load Preset button)
+            auto whiteNormal  = makeIcon(juce::Colours::white);
+            auto whiteOver    = makeIcon(juce::Colours::white);
+            auto whiteDown    = makeIcon(juce::Colours::white);
+            // Provide the same white icons for the toggled-on variants as well (button is not a toggle)
+            auto whiteOnNorm  = makeIcon(juce::Colours::white);
+            auto whiteOnOver  = makeIcon(juce::Colours::white);
+            auto whiteOnDown  = makeIcon(juce::Colours::white);
+            transitionButton.setImages(whiteNormal.get(), whiteOver.get(), whiteDown.get(), whiteOnNorm.get(), whiteOnOver.get(), whiteOnDown.get(), nullptr);
+        }
+        // Clicking opens a popover menu listing transition styles. Selection updates the APVTS choice parameter.
+        transitionButton.onClick = [this]
+        {
+            juce::PopupMenu m;
+            auto* p = processor.getValueTreeState().getParameter("transitionStyle");
+            int currentIndex = 0;
+            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*>(p))
+            {
+                currentIndex = choice->getIndex();
+            }
+            auto addItem = [&m, currentIndex](int idx, const juce::String& text)
+            {
+                m.addItem(idx + 1, text, true, idx == currentIndex);
+            };
+            addItem(0, "Cut");
+            addItem(1, "Crossfade");
+            addItem(2, "Blend");
+
+            m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&transitionButton),
+                [this](int result)
+                {
+                    if (result <= 0) return; // cancelled
+                    const int idx = result - 1; // our ids are 1-based
+                    if (auto* p = processor.getValueTreeState().getParameter("transitionStyle"))
+                    {
+                        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*>(p))
+                        {
+                            auto norm = choice->getNormalisableRange().convertTo0to1((float)idx);
+                            choice->beginChangeGesture();
+                            choice->setValueNotifyingHost(norm);
+                            choice->endChangeGesture();
+                        }
+                        else
+                        {
+                            // Fallback: direct normalized mapping (3 choices)
+                            auto norm = juce::jlimit(0.0f, 1.0f, (float)idx / 2.0f);
+                            p->beginChangeGesture();
+                            p->setValueNotifyingHost(norm);
+                            p->endChangeGesture();
+                        }
+                    }
+                }
+            );
+        };
+
         addAndMakeVisible(loadButton);
         loadButton.setButtonText("Load Preset...");
         loadButton.onClick = [this]
@@ -1529,6 +1602,12 @@ public:
             auto b2 = innerTop.removeFromLeft(28);
             const int sz = juce::jmin(b2.getHeight(), 24);
             shuffleButton.setBounds(b2.getX(), b2.getCentreY() - sz/2, sz, sz);
+        }
+        innerTop.removeFromLeft(4);
+        {
+            auto b3 = innerTop.removeFromLeft(28);
+            const int sz = juce::jmin(b3.getHeight(), 24);
+            transitionButton.setBounds(b3.getX(), b3.getCentreY() - sz/2, sz, sz);
         }
         innerTop.removeFromLeft(12);
 
@@ -2229,6 +2308,7 @@ private:
     juce::Slider durationSlider;
     juce::DrawableButton lockButton { "lockButton", juce::DrawableButton::ImageFitted };
     juce::DrawableButton shuffleButton { "shuffleButton", juce::DrawableButton::ImageFitted };
+    juce::DrawableButton transitionButton { "transitionButton", juce::DrawableButton::ImageFitted }; // Phase 6.5
 
     juce::TextButton loadButton;
     juce::TextButton loadFolderButton;
