@@ -147,11 +147,11 @@ This step replaces the current placeholder visualization with a real embedded pr
 
 ### 4.4 Audio Feed Into projectM (new)
 To make projectM respond directly to the plugin’s audio input (beyond the CPU fallback), feed PCM into projectM on the GL thread and map parameters appropriately.
-- [ ] Feed stereo PCM frames from the audio thread to the GL thread (lock-free queue) in a format expected by libprojectM (e.g., float/16-bit)
-- [ ] Call projectM’s audio input API each frame with the latest PCM window
-- [ ] Map Beat Sensitivity to input scaling/thresholds
-- [ ] Verify responsiveness with various buffer sizes and sample rates
-- [ ] Gracefully handle missing audio (silence) and plugin bypass
+- [x] Feed stereo PCM frames from the audio thread to the GL thread (lock-free queue) in a format expected by libprojectM (e.g., float/16-bit)
+- [x] Call projectM’s audio input API each frame with the latest PCM window
+- [x] Map Beat Sensitivity to input scaling/thresholds
+- [x] Verify responsiveness with various buffer sizes and sample rates
+- [x] Gracefully handle missing audio (silence) and plugin bypass
 
 ---
 

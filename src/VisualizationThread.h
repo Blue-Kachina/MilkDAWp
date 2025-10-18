@@ -7,6 +7,7 @@
 #include <cmath>
 #include <juce_core/juce_core.h>
 #include <juce_graphics/juce_graphics.h>
+#include <vector>
 #include "AudioAnalysisQueue.h"
 #include "MessageThreadBridge.h"
 #include "Logging.h"
@@ -97,6 +98,8 @@ public:
     explicit VisualizationThread(IAudioAnalysisQueue& q)
         : queue(q)
     {
+        // Allocate ~1 second of stereo PCM at 48k for inter-thread transport (float, interleaved)
+        pcmRing.init(48000);
     }
 
     ~VisualizationThread() { stop(); }
@@ -157,6 +160,34 @@ public:
         if (! latestHave) return false;
         out = latestSnapshot;
         return true;
+    }
+
+    // Audio PCM posting API (audio thread → viz/GL thread)
+    bool postAudioBlockInterleaved(const float* interleavedStereo, int numFrames, double sampleRate)
+    {
+        if (interleavedStereo == nullptr || numFrames <= 0)
+            return false;
+        pcmSampleRate.store(sampleRate, std::memory_order_relaxed);
+        pcmRing.pushInterleaved(interleavedStereo, numFrames);
+        lastPcmWriteMs.store(juce::Time::getMillisecondCounterHiRes(), std::memory_order_relaxed);
+        return true;
+    }
+
+    // Fetch latest PCM window for GL thread consumption (interleaved stereo float)
+    bool getLatestPcmWindow(std::vector<float>& outInterleaved, int desiredFrames, double& outSampleRate) const
+    {
+        outSampleRate = pcmSampleRate.load(std::memory_order_relaxed);
+        if (desiredFrames <= 0) desiredFrames = defaultPcmWindowFrames;
+        pcmRing.copyLatest(desiredFrames, outInterleaved);
+        return !outInterleaved.empty();
+    }
+
+    // Whether PCM was posted recently within the provided age threshold (ms)
+    bool hasRecentPcm(double maxAgeMs) const
+    {
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        const double last = lastPcmWriteMs.load(std::memory_order_relaxed);
+        return (now - last) <= maxAgeMs;
     }
 
     // Thread-safe parameter posting API (can be called from audio or message thread)
@@ -334,6 +365,53 @@ private:
 
         pm.shutdown();
     }
+
+    // Lock-free PCM ring buffer for stereo float (interleaved) samples
+    struct PcmRing {
+        std::vector<float> data; // length = capacityFrames * 2
+        size_t capacityFrames = 0;
+        std::atomic<size_t> writePosFrames{ 0 };
+        void init(size_t framesCapacity)
+        {
+            capacityFrames = framesCapacity > 0 ? framesCapacity : 1;
+            data.assign(capacityFrames * 2, 0.0f);
+            writePosFrames.store(0, std::memory_order_relaxed);
+        }
+        void pushInterleaved(const float* interleavedStereo, int frames)
+        {
+            if (!interleavedStereo || frames <= 0 || capacityFrames == 0) return;
+            size_t w = writePosFrames.load(std::memory_order_relaxed);
+            const size_t cap = capacityFrames;
+            for (int i = 0; i < frames; ++i)
+            {
+                const size_t pos = (w % cap) * 2;
+                data[pos + 0] = interleavedStereo[(size_t)i * 2 + 0];
+                data[pos + 1] = interleavedStereo[(size_t)i * 2 + 1];
+                w = (w + 1) % cap;
+            }
+            writePosFrames.store(w, std::memory_order_release);
+        }
+        void copyLatest(int desiredFrames, std::vector<float>& out) const
+        {
+            out.resize((size_t)juce::jmax(0, desiredFrames) * 2);
+            if (capacityFrames == 0 || desiredFrames <= 0) { std::fill(out.begin(), out.end(), 0.0f); return; }
+            int framesToCopy = juce::jmin((int)capacityFrames, desiredFrames);
+            const size_t cap = capacityFrames;
+            const size_t w = writePosFrames.load(std::memory_order_acquire);
+            for (int i = 0; i < framesToCopy; ++i)
+            {
+                const size_t pos = (w + cap - (size_t)framesToCopy + (size_t)i) % cap;
+                const size_t idx = pos * 2;
+                out[(size_t)i * 2 + 0] = data[idx + 0];
+                out[(size_t)i * 2 + 1] = data[idx + 1];
+            }
+        }
+    };
+
+    PcmRing pcmRing;
+    std::atomic<double> pcmSampleRate{ 44100.0 };
+    std::atomic<double> lastPcmWriteMs{ 0.0 };
+    static constexpr int defaultPcmWindowFrames = 2048;
 
     IAudioAnalysisQueue& queue;
     std::atomic<bool> running{ false };

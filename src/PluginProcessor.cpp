@@ -9,6 +9,7 @@
 #include "Logging.h"
 #include "AudioAnalysisQueue.h"
 #include "VisualizationThread.h"
+#include <cstdint>
 #ifdef _WIN32
   #define NOMINMAX
   #include <windows.h>
@@ -17,6 +18,28 @@
 #if MILKDAWP_HAS_PROJECTM
 // C API headers for projectM v4 (via vcpkg): convenience include
 #include <projectM-4/projectM.h>
+#endif
+
+#if MILKDAWP_HAS_PROJECTM && defined(_WIN32)
+namespace {
+    // Runtime-resolved projectM API set to avoid linker delay-load crashes and allow both debug/release DLL names.
+    typedef projectm_handle (__cdecl *PFN_PM_CREATE)();
+    typedef void (__cdecl *PFN_PM_DESTROY)(projectm_handle);
+    typedef void (__cdecl *PFN_PM_SET_WINDOW_SIZE)(projectm_handle, size_t, size_t);
+    typedef void (__cdecl *PFN_PM_SET_FPS)(projectm_handle, int);
+    typedef void (__cdecl *PFN_PM_SET_ASPECT)(projectm_handle, bool);
+    typedef void (__cdecl *PFN_PM_LOAD_PRESET_FILE)(projectm_handle, const char*, bool);
+    typedef void (__cdecl *PFN_PM_OPENGL_RENDER_FRAME)(projectm_handle);
+
+    static HMODULE g_pmModule = nullptr;
+    static PFN_PM_CREATE                g_pm_create = nullptr;
+    static PFN_PM_DESTROY               g_pm_destroy = nullptr;
+    static PFN_PM_SET_WINDOW_SIZE       g_pm_set_window_size = nullptr;
+    static PFN_PM_SET_FPS               g_pm_set_fps = nullptr;
+    static PFN_PM_SET_ASPECT            g_pm_set_aspect = nullptr;
+    static PFN_PM_LOAD_PRESET_FILE      g_pm_load_preset_file = nullptr;
+    static PFN_PM_OPENGL_RENDER_FRAME   g_pm_opengl_render_frame = nullptr;
+}
 #endif
 
 // Local anchor to resolve this module's HMODULE at runtime (Windows)
@@ -232,6 +255,31 @@ public:
                 fftWritePos = 0;
             }
         }
+
+        // Feed raw PCM to visualization path (for GL thread/projectM)
+       #if MILKDAWP_ENABLE_VIZ_THREAD
+        if (vizThread)
+        {
+            std::vector<float> interleaved;
+            interleaved.resize((size_t)N * 2);
+            if (numInCh == 0) {
+                std::fill(interleaved.begin(), interleaved.end(), 0.0f);
+            } else if (numInCh == 1) {
+                for (int n = 0; n < N; ++n) {
+                    const float s = in0[n];
+                    interleaved[(size_t)n * 2 + 0] = s;
+                    interleaved[(size_t)n * 2 + 1] = s;
+                }
+            } else {
+                for (int n = 0; n < N; ++n) {
+                    interleaved[(size_t)n * 2 + 0] = in0[n];
+                    interleaved[(size_t)n * 2 + 1] = in1[n];
+                }
+            }
+            const double sr = getSampleRate();
+            vizThread->postAudioBlockInterleaved(interleaved.data(), N, sr > 0.0 ? sr : 44100.0);
+        }
+       #endif
 
         runningSamplePos += static_cast<uint64_t>(N);
     }
@@ -1052,6 +1100,23 @@ private:
             } else {
                 MDW_LOG_INFO("GLEW initialised");
             }
+            // Resolve projectM C API entry points dynamically to avoid link-time delay-load
+           #if MILKDAWP_HAS_PROJECTM && defined(_WIN32)
+            g_pmModule = hPMProbe;
+            auto gp = [&](const char* name){ FARPROC p = GetProcAddress(g_pmModule, name); if (!p) MDW_LOG_INFO(juce::String("projectM symbol not found: ") + name); return p; };
+            g_pm_create              = (PFN_PM_CREATE) gp("projectm_create");
+            g_pm_destroy             = (PFN_PM_DESTROY) gp("projectm_destroy");
+            g_pm_set_window_size     = (PFN_PM_SET_WINDOW_SIZE) gp("projectm_set_window_size");
+            g_pm_set_fps             = (PFN_PM_SET_FPS) gp("projectm_set_fps");
+            g_pm_set_aspect          = (PFN_PM_SET_ASPECT) gp("projectm_set_aspect_correction");
+            g_pm_load_preset_file    = (PFN_PM_LOAD_PRESET_FILE) gp("projectm_load_preset_file");
+            g_pm_opengl_render_frame = (PFN_PM_OPENGL_RENDER_FRAME) gp("projectm_opengl_render_frame");
+            if (!g_pm_create || !g_pm_destroy || !g_pm_set_window_size || !g_pm_set_fps || !g_pm_set_aspect || !g_pm_load_preset_file || !g_pm_opengl_render_frame) {
+                MDW_LOG_ERROR("projectM: one or more required API symbols missing; will use CPU fallback");
+            } else {
+                MDW_LOG_INFO("projectM: C API resolved successfully (runtime)");
+            }
+           #endif
            #endif
             // Create a projectM instance bound to this GL context
             // Defer creating projectM until we have a preset path to load (avoids upstream Debug asserts on idle preset)
@@ -1073,7 +1138,7 @@ private:
                 // Keep projectM informed of the current drawable size (prevents asserts and wrong aspect)
                #if MILKDAWP_HAS_PROJECTM
                 if (pmHandle != nullptr) {
-                    projectm_set_window_size(pmHandle, (size_t) w, (size_t) h);
+                    if (g_pm_set_window_size) g_pm_set_window_size(pmHandle, (size_t) w, (size_t) h);
                 }
                #endif
             }
@@ -1082,18 +1147,18 @@ private:
             if (pmHandle == nullptr && owner != nullptr) {
                 auto initialPath = owner->getCurrentPresetPath();
                 if (initialPath.isNotEmpty()) {
-                    pmHandle = projectm_create();
+                    pmHandle = (g_pm_create ? g_pm_create() : nullptr);
                     if (pmHandle == nullptr) {
                         MDW_LOG_ERROR("projectM: failed to create instance (is GL context current?)");
                     } else {
                         MDW_LOG_INFO("projectM: instance created (lazy)");
                         // Optional: set preset search directory to the preset's parent folder to keep internal lookups happy
                         // Note: projectM v4 C API may not expose set_preset_directory; we proceed to explicit file load below.
-                        projectm_set_fps(pmHandle, 60);
-                        projectm_set_aspect_correction(pmHandle, true);
+                        if (g_pm_set_fps) g_pm_set_fps(pmHandle, 60);
+                        if (g_pm_set_aspect) g_pm_set_aspect(pmHandle, true);
                         const int w0 = juce::jmax(2, getWidth());
                         const int h0 = juce::jmax(2, getHeight());
-                        projectm_set_window_size(pmHandle, (size_t) w0, (size_t) h0);
+                        if (g_pm_set_window_size) g_pm_set_window_size(pmHandle, (size_t) w0, (size_t) h0);
                         pmReady = true;
                         pmCanRender = false;
                         lastPMPath.clear();
@@ -1111,12 +1176,12 @@ private:
                         // Ensure window size is valid before swap
                         const int pw = juce::jmax(2, getWidth());
                         const int ph = juce::jmax(2, getHeight());
-                        projectm_set_window_size(pmHandle, (size_t) pw, (size_t) ph);
-                        projectm_load_preset_file(pmHandle, path.toRawUTF8(), true);
+                        if (g_pm_set_window_size) g_pm_set_window_size(pmHandle, (size_t) pw, (size_t) ph);
+                        if (g_pm_load_preset_file) g_pm_load_preset_file(pmHandle, path.toRawUTF8(), true);
                         MDW_LOG_INFO(juce::String("Loaded preset (GL): ") + path);
                         lastPMPath = path;
                         // After preset swap, re-affirm window size and allow rendering
-                        projectm_set_window_size(pmHandle, (size_t) pw, (size_t) ph);
+                        if (g_pm_set_window_size) g_pm_set_window_size(pmHandle, (size_t) pw, (size_t) ph);
                         isLoadingPreset = false;
                         pmCanRender = true;
                     }
@@ -1136,7 +1201,85 @@ private:
                         juce::gl::glDisable(juce::gl::GL_BLEND);
                         juce::gl::glDisable(juce::gl::GL_CULL_FACE);
                         juce::gl::glDisable(juce::gl::GL_DITHER);
-                        projectm_opengl_render_frame(pmHandle);
+                        // Feed latest PCM to projectM (if audio available)
+                        if (owner != nullptr) {
+                            if (auto* vt = owner->getVizThread()) {
+                                std::vector<float> pcm;
+                                double sr = 0.0;
+                                // Request around 1024 frames for responsiveness; VisualizationThread will clamp to available
+                                vt->getLatestPcmWindow(pcm, 1024, sr);
+                                // Apply Beat Sensitivity scaling to input amplitude before feeding
+                                float scale = 1.0f;
+                                if (auto* pBeat = owner->getValueTreeState().getRawParameterValue("beatSensitivity"))
+                                    scale = pBeat->load();
+                                if (scale != 1.0f) {
+                                    for (auto& s : pcm) s *= scale;
+                                }
+                                // Determine bypass and recent-audio status
+                                bool bypassed = false;
+                                if (auto* bp = owner->getBypassParameter())
+                                    bypassed = (bp->getValue() >= 0.5f);
+                                const bool haveRecent = vt->hasRecentPcm(200.0);
+                                // If bypassed or no recent audio, feed a small silence block
+                                if (bypassed || !haveRecent || pcm.empty()) {
+                                    pcm.assign((size_t)512 * 2, 0.0f);
+                                    if (sr <= 0.0) sr = 44100.0;
+                                }
+                               #ifdef _WIN32
+                                // Runtime resolve projectM audio input APIs to avoid hard coupling to headers/symbol variants
+                                typedef void (__cdecl *PFN_PM_PCM_ADD_FLOAT)(projectm_handle, const float*, size_t, int);
+                                typedef void (__cdecl *PFN_PM_PCM_ADD_INT16)(projectm_handle, const int16_t*, size_t, int);
+                                static PFN_PM_PCM_ADD_FLOAT s_pmAddFloat = nullptr;
+                                static PFN_PM_PCM_ADD_INT16 s_pmAddI16 = nullptr;
+                                static bool s_triedResolve = false;
+                                if (!s_triedResolve) {
+                                    s_triedResolve = true;
+                                    HMODULE hPM = GetModuleHandleW(L"projectM-4d.dll");
+                                    if (!hPM) hPM = GetModuleHandleW(L"projectM-4.dll");
+                                    if (hPM) {
+                                        s_pmAddFloat = (PFN_PM_PCM_ADD_FLOAT) GetProcAddress(hPM, "projectm_pcm_add_float");
+                                        if (!s_pmAddFloat) s_pmAddFloat = (PFN_PM_PCM_ADD_FLOAT) GetProcAddress(hPM, "projectm_pcm_add_f32");
+                                        s_pmAddI16 = (PFN_PM_PCM_ADD_INT16) GetProcAddress(hPM, "projectm_pcm_add_int16");
+                                        if (!s_pmAddI16) s_pmAddI16 = (PFN_PM_PCM_ADD_INT16) GetProcAddress(hPM, "projectm_pcm_add_s16");
+                                        if (!s_pmAddFloat && !s_pmAddI16) {
+                                            MDW_LOG_ERROR("projectM: no compatible PCM feed API found (float/int16)");
+                                        } else {
+                                            MDW_LOG_INFO("projectM: PCM feed API resolved");
+                                        }
+                                    } else {
+                                        MDW_LOG_ERROR("projectM: module handle not found for dynamic PCM API resolve");
+                                    }
+                                }
+                                const size_t frames = pcm.size() / 2;
+                                if (frames > 0) {
+                                    if (s_pmAddFloat) {
+                                        s_pmAddFloat(pmHandle, pcm.data(), frames, 2);
+                                    } else if (s_pmAddI16) {
+                                        // Convert to int16 with clipping
+                                        std::vector<int16_t> tmpI16;
+                                        tmpI16.resize(pcm.size());
+                                        for (size_t i = 0; i < pcm.size(); ++i) {
+                                            float v = juce::jlimit(-1.0f, 1.0f, pcm[i]);
+                                            int iv = (int) std::lround(v * 32767.0f);
+                                            tmpI16[i] = (int16_t) juce::jlimit(-32768, 32767, iv);
+                                        }
+                                        s_pmAddI16(pmHandle, tmpI16.data(), frames, 2);
+                                    }
+                                }
+                                // Throttled responsiveness log
+                               #if defined(_DEBUG)
+                                static double lastPcmLogMs = 0.0;
+                                const double nowDbg = juce::Time::getMillisecondCounterHiRes();
+                                if (nowDbg - lastPcmLogMs > 3000.0) {
+                                    MDW_LOG_INFO(juce::String("projectM PCM feed: ") + juce::String((int)frames) + " frames @ " + juce::String(sr, 1) + " Hz"
+                                                 + (bypassed ? " (bypassed→silence)" : haveRecent ? "" : " (stale→silence)"));
+                                    lastPcmLogMs = nowDbg;
+                                }
+                               #endif
+                               #endif // _WIN32
+                            }
+                        }
+                        if (g_pm_opengl_render_frame) g_pm_opengl_render_frame(pmHandle);
                     } else {
                         static double lastSkipLogMs = 0.0;
                         if (nowMs - lastSkipLogMs > 3000.0) {
@@ -1163,7 +1306,7 @@ private:
             // Free GL resources if any
         #if MILKDAWP_HAS_PROJECTM
             if (pmHandle != nullptr) {
-                projectm_destroy(pmHandle);
+                if (g_pm_destroy) g_pm_destroy(pmHandle);
                 pmHandle = nullptr;
                 pmReady = false;
                 lastPMPath.clear();
