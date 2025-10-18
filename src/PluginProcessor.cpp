@@ -1915,40 +1915,50 @@ public:
         // reserved spacing minimal; controls are hidden so no layout here
 
         // Prioritize Fullscreen and Pop-out visibility: allocate them first from the right
-        const int transportWidth = 160;
-        const int btnWidth = 96;
+        const int iconSlotW = 28;  // matches Lock/Shuffle slots
         const int gapPx = 8;
 
-        // Fullscreen at far right
+        // Fullscreen at far right (icon-only, same size as Lock/Shuffle)
         if (innerTop.getWidth() > 0) {
-            auto fsArea = innerTop.removeFromRight(juce::jmin(btnWidth, innerTop.getWidth()));
-            fullscreenButton.setBounds(fsArea);
+            auto fsSlot = innerTop.removeFromRight(juce::jmin(iconSlotW, innerTop.getWidth()));
+            const int sz = juce::jmin(fsSlot.getHeight(), 24);
+            fullscreenButton.setBounds(fsSlot.getX() + (fsSlot.getWidth() - sz) / 2,
+                                       fsSlot.getCentreY() - sz / 2,
+                                       sz, sz);
         }
         // Gap
         if (innerTop.getWidth() > 0)
             innerTop.removeFromRight(juce::jmin(gapPx, innerTop.getWidth()));
-        // Pop-out next
+        // Pop-out next (icon-only, same size as Lock/Shuffle)
         if (innerTop.getWidth() > 0) {
-            auto popArea = innerTop.removeFromRight(juce::jmin(btnWidth, innerTop.getWidth()));
-            popOutButton.setBounds(popArea);
+            auto popSlot = innerTop.removeFromRight(juce::jmin(iconSlotW, innerTop.getWidth()));
+            const int sz = juce::jmin(popSlot.getHeight(), 24);
+            popOutButton.setBounds(popSlot.getX() + (popSlot.getWidth() - sz) / 2,
+                                   popSlot.getCentreY() - sz / 2,
+                                   sz, sz);
         }
         // Gap
         if (innerTop.getWidth() > 0)
             innerTop.removeFromRight(juce::jmin(gapPx, innerTop.getWidth()));
 
-        // Reserve space for transport controls if any width remains
-        int avail = innerTop.getWidth();
-        juce::Rectangle<int> transportArea;
-        if (avail > 0)
-            transportArea = innerTop.removeFromRight(juce::jmin(transportWidth, avail));
-        auto t = transportArea;
-        // Layout Prev/Next compactly within whatever space we have
-        int prevW = juce::jmin(70, t.getWidth());
-        prevButton.setBounds(t.removeFromLeft(prevW));
-        int sepW = juce::jmin(10, t.getWidth());
-        if (sepW > 0) t.removeFromLeft(sepW);
-        int nextW = juce::jmin(70, t.getWidth());
-        nextButton.setBounds(t.removeFromLeft(nextW));
+        // Transport controls (Prev/Next) — icon-only, same size as Lock/Shuffle
+        if (innerTop.getWidth() > 0) {
+            // Next on the right of this group
+            auto nextSlot = innerTop.removeFromRight(juce::jmin(iconSlotW, innerTop.getWidth()));
+            const int nsz = juce::jmin(nextSlot.getHeight(), 24);
+            nextButton.setBounds(nextSlot.getX() + (nextSlot.getWidth() - nsz) / 2,
+                                 nextSlot.getCentreY() - nsz / 2,
+                                 nsz, nsz);
+        }
+        if (innerTop.getWidth() > 0)
+            innerTop.removeFromRight(juce::jmin(4, innerTop.getWidth())); // small gap between prev/next
+        if (innerTop.getWidth() > 0) {
+            auto prevSlot = innerTop.removeFromRight(juce::jmin(iconSlotW, innerTop.getWidth()));
+            const int psz = juce::jmin(prevSlot.getHeight(), 24);
+            prevButton.setBounds(prevSlot.getX() + (prevSlot.getWidth() - psz) / 2,
+                                 prevSlot.getCentreY() - psz / 2,
+                                 psz, psz);
+        }
 
         // Preset label consumes remaining space on the left, scales down if tight
         presetNameLabel.setBounds(innerTop);

@@ -1,6 +1,1 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="24" height="24" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Phosphor "lock-simple" (regular) -->
-  <rect x="40" y="112" width="176" height="104" rx="16" ry="16" stroke="#000000" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <path d="M176 112V88C176 60.386 153.614 38 126 38C98.386 38 76 60.386 76 88V112" stroke="#000000" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="#000000" viewBox="0 0 256 256"><path d="M208,80H176V56a48,48,0,0,0-96,0V80H48A16,16,0,0,0,32,96V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V96A16,16,0,0,0,208,80ZM96,56a32,32,0,0,1,64,0V80H96ZM208,208H48V96H208V208Z"></path></svg>
