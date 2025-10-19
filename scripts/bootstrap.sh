@@ -8,38 +8,44 @@ cd "$REPO_ROOT"
 echo "[bootstrap] MilkDAWp vcpkg-based dependency setup"
 echo
 
-# Check if VCPKG_ROOT is set
+# Ensure we have a usable VCPKG_ROOT, auto-install locally if missing (CI-friendly)
 if [ -z "${VCPKG_ROOT:-}" ]; then
-  echo "[bootstrap] ERROR: VCPKG_ROOT environment variable is not set."
-  echo "[bootstrap] Please install vcpkg and set VCPKG_ROOT to point to your vcpkg installation."
-  echo
-  echo "[bootstrap] Example installation steps:"
-  echo "[bootstrap]   git clone https://github.com/microsoft/vcpkg.git ~/vcpkg"
-  echo "[bootstrap]   cd ~/vcpkg"
-  echo "[bootstrap]   ./bootstrap-vcpkg.sh"
-  echo "[bootstrap]   export VCPKG_ROOT=~/vcpkg"
-  echo "[bootstrap]   # Add to ~/.bashrc or ~/.zshrc: export VCPKG_ROOT=~/vcpkg"
-  echo
-  echo "[bootstrap] After setting VCPKG_ROOT, restart your terminal and run this script again."
+  export VCPKG_ROOT="$REPO_ROOT/.vcpkg"
+  echo "[bootstrap] VCPKG_ROOT not set. Will use local: $VCPKG_ROOT"
+fi
+
+# Install vcpkg locally if not present
+if [ ! -d "$VCPKG_ROOT/.git" ]; then
+  echo "[bootstrap] vcpkg not found at $VCPKG_ROOT — cloning..."
+  mkdir -p "$VCPKG_ROOT"
+  rm -rf "$VCPKG_ROOT"/* 2>/dev/null || true
+  git clone --depth 1 https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+fi
+
+# Bootstrap vcpkg if executable missing
+VCPKG_EXE="$VCPKG_ROOT/vcpkg"
+if [ ! -f "$VCPKG_EXE" ]; then
+  echo "[bootstrap] Bootstrapping vcpkg..."
+  if [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "cygwin"* || "$OS" == "Windows_NT" ]]; then
+    bash "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+    VCPKG_EXE="$VCPKG_ROOT/vcpkg.exe"
+  else
+    bash "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+  fi
+fi
+
+if [ ! -f "$VCPKG_EXE" ]; then
+  echo "[bootstrap] ERROR: Failed to bootstrap vcpkg at $VCPKG_ROOT"
   exit 1
 fi
 
-echo "[bootstrap] Found vcpkg at: $VCPKG_ROOT"
-
-# Verify vcpkg executable exists
-if [ ! -f "$VCPKG_ROOT/vcpkg" ]; then
-  echo "[bootstrap] ERROR: vcpkg executable not found at $VCPKG_ROOT/vcpkg"
-  echo "[bootstrap] Please bootstrap vcpkg by running: $VCPKG_ROOT/bootstrap-vcpkg.sh"
-  exit 1
-fi
-
-echo "[bootstrap] vcpkg is ready."
+echo "[bootstrap] vcpkg is ready at: $VCPKG_ROOT"
 
 # Determine preset based on platform
 if [[ "$OSTYPE" == "darwin"* ]]; then
   PRESET="dev-mac"
   BUILD_DIR="build-mac"
-elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+elif [[ "$OSTYPE" == "linux-gnu"* || "$OSTYPE" == "linux"* ]]; then
   PRESET="ci-linux"
   BUILD_DIR="build-ci"
 else
