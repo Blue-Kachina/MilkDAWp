@@ -410,6 +410,7 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 - [ ] Preset rating system
 - [ ] Smart shuffle algorithm
 
+
 ---
 
 ## Notes for AI Agents
