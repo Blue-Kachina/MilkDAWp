@@ -12,10 +12,14 @@
 #include "VisualizationThread.h"
 #include <cstdint>
 #include <optional>
+#include <cstring>
 #ifdef _WIN32
   #define NOMINMAX
   #include <windows.h>
 #endif
+
+// Some asset bundles expose gear-six as a direct BinaryData symbol without getNamedResource table entries.
+namespace BinaryData { extern const char* gearsix_svg; }
 
 namespace {
     std::unique_ptr<juce::Drawable> loadSvgFromBinary(const void* data, int size)
@@ -29,7 +33,7 @@ namespace {
     // Robust loader using BinaryData::getNamedResource with multiple name variants
     std::unique_ptr<juce::Drawable> loadSvgByPhosphorName(const juce::String& baseName)
     {
-        // BaseName examples: "arrows-out-simple", "corners-out", "skip-back", "skip-forward"
+        // BaseName examples: "arrows-out-simple", "corners-out", "skip-back", "skip-forward", "gear-six"
         const juce::String ext = "_svg";
         juce::String candidates[3] = {
             baseName.retainCharacters("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_") + ext, // remove dashes
@@ -43,6 +47,18 @@ namespace {
             if (data != nullptr && dataSize > 0)
                 if (auto d = loadSvgFromBinary(data, dataSize))
                     return d;
+        }
+        // Special-case: some generated bundles may expose gear-six as BinaryData::gearsix_svg
+        if (baseName == "gear-six")
+        {
+            namespace BD = BinaryData;
+            if (BD::gearsix_svg != nullptr)
+            {
+                auto* data = BD::gearsix_svg;
+                int size = (int) std::strlen(data);
+                if (auto d = loadSvgFromBinary(data, size))
+                    return d;
+            }
         }
         return nullptr;
     }
@@ -1349,75 +1365,16 @@ public:
         addAndMakeVisible(settingsButton);
         settingsButton.setTooltip("Settings");
         {
-            // Load gear icon for Settings. Prefer embedded BinaryData, then Phosphor fallback.
-            auto setButtonImagesFromDrawable = [this](std::unique_ptr<juce::Drawable>& svgPtr)
+            // Load gear icon the same way other icons are loaded: from embedded BinaryData via Phosphor name.
+            if (auto svg = loadSvgByPhosphorName("gear-six"))
             {
-                if (svgPtr)
-                {
-                    auto n = makeTintedClone(*svgPtr, juce::Colours::white);
-                    auto o = makeTintedClone(*svgPtr, juce::Colours::white);
-                    auto d = makeTintedClone(*svgPtr, juce::Colours::white);
-                    settingsButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
-                    settingsButton.repaint();
-                    return true;
-                }
-                return false;
-            };
-
-            bool setOk = false;
-            // 1) Try BinaryData by likely resource names (JUCE mangles hyphens to underscores)
-            {
-                int dataSize = 0;
-                const char* data = nullptr;
-                const char* names[] = { "gearsix_svg", "gear_six_svg", "gear-six_svg", "resources_icons_gear_six_svg" };
-                for (auto* nm : names)
-                {
-                    data = BinaryData::getNamedResource(nm, dataSize);
-                    if (data != nullptr && dataSize > 0)
-                    {
-                        auto svg = juce::Drawable::createFromImageData(data, dataSize);
-                        std::unique_ptr<juce::Drawable> up(svg.release());
-                        setOk = setButtonImagesFromDrawable(up);
-                        if (setOk) break;
-                    }
-                }
-            }
-            // 2) Fallback: Phosphor icon set
-            if (!setOk)
-            {
-                if (auto svg = loadSvgByPhosphorName("gear-six")) { setOk = setButtonImagesFromDrawable(svg); }
-                if (!setOk)
-                {
-                    if (auto svg = loadSvgByPhosphorName("gear")) { setOk = setButtonImagesFromDrawable(svg); }
-                }
-            }
-            // 3) Final fallback: draw a minimal gear-like glyph
-            if (!setOk)
-            {
-                auto makeFallbackGear = [](juce::Colour c)
-                {
-                    auto dp = std::make_unique<juce::DrawablePath>();
-                    juce::Path p;
-                    // Simple cog: circle with 6 rectangular teeth
-                    p.addEllipse(8.0f, 8.0f, 8.0f, 8.0f);
-                    for (int i = 0; i < 6; ++i)
-                    {
-                        const float angle = juce::MathConstants<float>::twoPi * (i / 6.0f);
-                        juce::Path tooth;
-                        tooth.addRectangle(-1.0f, -10.0f, 2.0f, 4.0f);
-                        tooth.applyTransform(juce::AffineTransform::rotation(angle).translated(12.0f, 12.0f));
-                        p.addPath(tooth);
-                    }
-                    dp->setPath(p);
-                    dp->setFill(c);
-                    return dp;
-                };
-                auto n = makeFallbackGear(juce::Colours::white);
-                auto o = makeFallbackGear(juce::Colours::white);
-                auto d = makeFallbackGear(juce::Colours::white);
+                auto n = makeTintedClone(*svg, juce::Colours::white);
+                auto o = makeTintedClone(*svg, juce::Colours::white);
+                auto d = makeTintedClone(*svg, juce::Colours::white);
                 settingsButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
                 settingsButton.repaint();
             }
+            // No custom filesystem or drawn fallback to keep aesthetics consistent with other icons.
         }
         settingsButton.onClick = [this]{ this->openSettingsPanel(); };
  
@@ -2404,6 +2361,16 @@ private:
 
     void timerCallback() override
     {
+        // Watchdog: if fullscreen was exited by any external cause, immediately dock to enforce state model
+        if (isDetached)
+        {
+            auto* kiosk = juce::Desktop::getInstance().getKioskModeComponent();
+            const bool actuallyFullscreen = (externalWindow != nullptr && kiosk == externalWindow.get());
+            if (!actuallyFullscreen)
+            {
+                dockCanvas();
+            }
+        }
         auto name = currentDisplayName();
         if (name != lastDisplayedName)
         {
