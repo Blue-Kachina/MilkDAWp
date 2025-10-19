@@ -242,21 +242,21 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 - [x] Remove any obsolete UI elements
 
 ### 6.7 Detached Window Overlay Controls
-- [ ] Convert detached window button row to overlay
-- [ ] Position overlay at bottom of visualization (not top)
-- [ ] Implement hover detection for overlay visibility
-- [ ] Show overlay only on mouse hover
-- [ ] Hide overlay when mouse leaves area
-- [ ] Ensure overlay doesn't block visualization when hidden
-- [ ] Test overlay behavior in both windowed and fullscreen modes
+- [x] Convert detached window button row to overlay
+- [x] Position overlay at bottom of visualization (not top)
+- [x] Implement hover detection for overlay visibility
+- [x] Show overlay only on mouse hover
+- [x] Hide overlay when mouse leaves area
+- [x] Ensure overlay doesn't block visualization when hidden
+- [x] Test overlay behavior in both windowed and fullscreen modes
 
 ### 6.8 True Fullscreen & Resizable Window
-- [ ] Implement true fullscreen mode (not windowed fullscreen)
-- [ ] Ensure fullscreen occupies entire screen with no borders
-- [ ] Make non-fullscreen detached window properly resizable
-- [ ] Maintain aspect ratio or fill strategy on resize
-- [ ] Test fullscreen on multi-monitor setups
-- [ ] Verify smooth transitions between window states
+- [x] Implement true fullscreen mode (not windowed fullscreen)
+- [x] Ensure fullscreen occupies entire screen with no borders
+- [x] Make non-fullscreen detached window properly resizable
+- [x] Maintain aspect ratio or fill strategy on resize
+- [x] Test fullscreen on multi-monitor setups
+- [x] Verify smooth transitions between window states
 
 ---
 

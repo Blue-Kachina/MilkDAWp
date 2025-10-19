@@ -752,6 +752,7 @@ private:
     public:
         struct Content : public juce::Component {
             std::unique_ptr<juce::TooltipWindow> tooltipWindow;
+            juce::Component overlayBar; // overlay bar hosting controls (bottom overlay)
             juce::DrawableButton dockButton { "dockButton", juce::DrawableButton::ImageFitted };
             juce::DrawableButton hoverFsButton { "hoverFsButton", juce::DrawableButton::ImageFitted }; // Hover fullscreen toggle
             juce::DrawableButton prevButton { "extPrevButton", juce::DrawableButton::ImageFitted };
@@ -766,12 +767,18 @@ private:
                 setOpaque(false);
                 // Create a TooltipWindow for this top-level window so tooltips appear over its children
                 tooltipWindow = std::make_unique<juce::TooltipWindow>(this, 700);
-                addAndMakeVisible(dockButton);
+                // Overlay bar setup (hidden until hover)
+                addAndMakeVisible(overlayBar);
+                overlayBar.setVisible(false);
+                overlayBar.setOpaque(false);
+                addMouseListener(this, true);
+                // Buttons hosted inside overlay bar
+                overlayBar.addAndMakeVisible(dockButton);
                 dockButton.setTooltip("Dock to main window");
                 // Transport + preset name
-                addAndMakeVisible(prevButton);
-                addAndMakeVisible(nextButton);
-                addAndMakeVisible(presetLabel);
+                overlayBar.addAndMakeVisible(prevButton);
+                overlayBar.addAndMakeVisible(nextButton);
+                overlayBar.addAndMakeVisible(presetLabel);
                 presetLabel.setText("(no preset)", juce::dontSendNotification);
                 presetLabel.setJustificationType(juce::Justification::centredLeft);
                 presetLabel.setColour(juce::Label::textColourId, juce::Colours::white);
@@ -883,11 +890,11 @@ private:
                 }
                 prevButton.onClick = [this]{ if (onPrev) onPrev(); };
                 nextButton.onClick = [this]{ if (onNext) onNext(); };
-                // Hover Fullscreen button (hidden until mouse over)
-                addAndMakeVisible(hoverFsButton);
+                // Hover Fullscreen button (resides in overlay)
+                overlayBar.addAndMakeVisible(hoverFsButton);
                 hoverFsButton.setTooltip("Toggle Fullscreen (F11)");
-                hoverFsButton.setAlpha(0.75f);
-                hoverFsButton.setVisible(false);
+                hoverFsButton.setAlpha(0.9f);
+                hoverFsButton.setVisible(true);
                 hoverFsButton.setWantsKeyboardFocus(false);
                 {
                     if (auto svg = loadSvgByPhosphorName("corners-out"))
@@ -913,8 +920,8 @@ private:
                 attachedCanvas = c;
                 if (attachedCanvas != nullptr)
                     addAndMakeVisible(attachedCanvas);
-                // Keep hover button above canvas
-                hoverFsButton.toFront(true);
+                // Keep overlay above canvas
+                overlayBar.toFront(true);
                 resized();
             }
             juce::Component* detachCanvas()
@@ -938,30 +945,50 @@ private:
                 prevButton.setVisible(true);
                 nextButton.setVisible(true);
             }
-            void mouseEnter(const juce::MouseEvent&) override { hoverFsButton.setVisible(true); hoverFsButton.toFront(true); }
-            void mouseExit(const juce::MouseEvent&) override { hoverFsButton.setVisible(false); }
+            void mouseEnter(const juce::MouseEvent&) override { overlayBar.setVisible(true); overlayBar.toFront(true); }
+            void mouseExit(const juce::MouseEvent&) override { if (! isMouseOver(true)) overlayBar.setVisible(false); }
             void resized() override
             {
                 auto r = getLocalBounds();
-                auto top = r.removeFromTop(36);
-                // Right: dock
-                auto dockArea = top.removeFromRight(90).reduced(6);
-                dockButton.setBounds(dockArea);
-                // Left: transport + preset name
-                int prevW = juce::jmin(70, top.getWidth());
-                prevButton.setBounds(top.removeFromLeft(prevW));
-                if (top.getWidth() > 0) top.removeFromLeft(6);
-                int nextW = juce::jmin(70, top.getWidth());
-                nextButton.setBounds(top.removeFromLeft(nextW));
-                if (top.getWidth() > 0) top.removeFromLeft(8);
-                presetLabel.setBounds(top);
+                // Canvas takes full area; overlay drawn over it
                 if (attachedCanvas != nullptr)
                     attachedCanvas->setBounds(r);
-                // Place hover button at bottom-right with margin
-                const int btnW = 28, btnH = 24, margin = 8;
-                juce::Rectangle<int> br = getLocalBounds().removeFromBottom(btnH + margin).removeFromRight(btnW + margin);
-                hoverFsButton.setBounds({ br.getRight() - btnW, br.getBottom() - btnH, btnW, btnH });
-                hoverFsButton.toFront(true);
+                // Position overlay at bottom
+                const int overlayH = 44;
+                overlayBar.setBounds(getLocalBounds().removeFromBottom(overlayH));
+                // Layout children within overlay
+                auto ob = overlayBar.getLocalBounds().reduced(8);
+                // Right cluster: fullscreen + dock
+                int rightW = juce::jmin(130, ob.getWidth() / 3);
+                auto right = ob.removeFromRight(rightW);
+                auto fsArea = right.removeFromLeft(44);
+                hoverFsButton.setBounds(fsArea);
+                if (right.getWidth() > 0) right.removeFromLeft(8);
+                dockButton.setBounds(right);
+                // Left: transport + preset label
+                int prevW = juce::jmin(70, ob.getWidth());
+                prevButton.setBounds(ob.removeFromLeft(prevW));
+                if (ob.getWidth() > 0) ob.removeFromLeft(6);
+                int nextW = juce::jmin(70, ob.getWidth());
+                nextButton.setBounds(ob.removeFromLeft(nextW));
+                if (ob.getWidth() > 0) ob.removeFromLeft(8);
+                presetLabel.setBounds(ob);
+                // Always keep overlay on top (handles fullscreen reordering)
+                overlayBar.toFront(true);
+            }
+            void childrenChanged() override
+            {
+                // Ensure overlay remains above any child that moves to front (e.g., canvas during fullscreen toggles)
+                overlayBar.toFront(true);
+            }
+            void paintOverChildren(juce::Graphics& g) override
+            {
+                if (overlayBar.isVisible())
+                {
+                    auto b = overlayBar.getBounds().toFloat();
+                    g.setColour(juce::Colours::black.withAlpha(0.35f));
+                    g.fillRoundedRectangle(b, 6.0f);
+                }
             }
         };
 
@@ -969,7 +996,14 @@ private:
             : juce::DocumentWindow(name, juce::Colours::black, DocumentWindow::allButtons), onDock(std::move(onDockCb)), onToggleFullscreen(std::move(onToggleFs))
         {
             setUsingNativeTitleBar(true);
+            // Enable resizing with a constrainer to maintain a 16:9 aspect ratio and sensible limits
+            windowConstrainer = std::make_unique<juce::ComponentBoundsConstrainer>();
+            windowConstrainer->setFixedAspectRatio(16.0 / 9.0);
+            windowConstrainer->setMinimumOnscreenAmounts(32, 32, 32, 32);
+            windowConstrainer->setMinimumSize(480, 270);
+            windowConstrainer->setMaximumSize(3840, 2160);
             setResizable(true, true);
+            setConstrainer(windowConstrainer.get());
             setOpaque(false);
             setBackgroundColour(juce::Colours::transparentBlack);
             content = std::make_unique<Content>();
@@ -992,6 +1026,15 @@ private:
         bool keyPressed(const juce::KeyPress& key) override
         {
             if (key.getKeyCode() == juce::KeyPress::F11Key) { if (onToggleFullscreen) onToggleFullscreen(); return true; }
+            if (key.getKeyCode() == juce::KeyPress::escapeKey)
+            {
+                // Only exit fullscreen if this window is currently in kiosk mode
+                if (juce::Desktop::getInstance().getKioskModeComponent() == this)
+                {
+                    if (onToggleFullscreen) onToggleFullscreen();
+                    return true;
+                }
+            }
             return juce::DocumentWindow::keyPressed(key);
         }
         Content* getContent() const { return content.get(); }
@@ -999,6 +1042,7 @@ private:
         std::function<void()> onDock;
         std::function<void()> onToggleFullscreen;
         std::unique_ptr<Content> content;
+        std::unique_ptr<juce::ComponentBoundsConstrainer> windowConstrainer;
     };
 private:
     struct HardwareLookAndFeel : public juce::LookAndFeel_V4 {
@@ -1241,7 +1285,8 @@ public:
 
         // Pop-out support
         addAndMakeVisible(popOutButton);
-        popOutButton.setTooltip("Detach visualization to an external window");
+        popOutButton.setTooltip("Pop-out / Dock visualization");
+        popOutButton.setClickingTogglesState(true);
         {
             if (auto svg = loadSvgByPhosphorName("arrows-out-simple"))
             {
@@ -1282,28 +1327,37 @@ public:
         }
         popOutButton.onClick = [this]
         {
-            if (!isDetached)
+            if (popOutButton.getToggleState())
             {
-                // Create external window and move canvas into it
-                externalWindow = std::make_unique<ExternalVisualizationWindow>("MilkDAWp Visualization (OBS)", [this]{ this->dockCanvas(); }, [this]{ this->toggleFullscreen(); });
-                // Transfer canvas: remove from editor to avoid double-parenting
-                removeChildComponent(&vizCanvas);
-                if (auto* content = externalWindow->getContent()) {
-                    content->attachCanvas(&vizCanvas);
-                    // Wire window communication callbacks
-                    content->onPrev = [this]{ this->processor.prevPresetInPlaylist(); this->presetNameLabel.setText(this->currentDisplayName(), juce::dontSendNotification); if (this->externalWindow) { if (auto* ec = this->externalWindow->getContent()) { ec->setPresetName(this->currentDisplayName()); ec->setTransportEnabled(this->processor.hasActivePlaylistPublic()); } } };
-                    content->onNext = [this]{ this->processor.nextPresetInPlaylist(); this->presetNameLabel.setText(this->currentDisplayName(), juce::dontSendNotification); if (this->externalWindow) { if (auto* ec = this->externalWindow->getContent()) { ec->setPresetName(this->currentDisplayName()); ec->setTransportEnabled(this->processor.hasActivePlaylistPublic()); } } };
-                    // Initial UI state
-                    content->setPresetName(this->currentDisplayName());
-                    content->setTransportEnabled(this->processor.hasActivePlaylistPublic());
+                // Toggle ON → detach
+                if (!isDetached)
+                {
+                    // Create external window and move canvas into it
+                    externalWindow = std::make_unique<ExternalVisualizationWindow>("MilkDAWp Visualization (OBS)", [this]{ this->dockCanvas(); }, [this]{ this->toggleFullscreen(); });
+                    // Transfer canvas: remove from editor to avoid double-parenting
+                    removeChildComponent(&vizCanvas);
+                    if (auto* content = externalWindow->getContent()) {
+                        content->attachCanvas(&vizCanvas);
+                        // Wire window communication callbacks
+                        content->onPrev = [this]{ this->processor.prevPresetInPlaylist(); this->presetNameLabel.setText(this->currentDisplayName(), juce::dontSendNotification); if (this->externalWindow) { if (auto* ec = this->externalWindow->getContent()) { ec->setPresetName(this->currentDisplayName()); ec->setTransportEnabled(this->processor.hasActivePlaylistPublic()); } } };
+                        content->onNext = [this]{ this->processor.nextPresetInPlaylist(); this->presetNameLabel.setText(this->currentDisplayName(), juce::dontSendNotification); if (this->externalWindow) { if (auto* ec = this->externalWindow->getContent()) { ec->setPresetName(this->currentDisplayName()); ec->setTransportEnabled(this->processor.hasActivePlaylistPublic()); } } };
+                        // Initial UI state
+                        content->setPresetName(this->currentDisplayName());
+                        content->setTransportEnabled(this->processor.hasActivePlaylistPublic());
+                    }
+                    isDetached = true;
+                    // Show notice in main editor
+                    detachedNotice.setText("Visualization is detached. Click 'Dock' in the external window to reattach.", juce::dontSendNotification);
+                    detachedNotice.setJustificationType(juce::Justification::centred);
+                    detachedNotice.setColour(juce::Label::textColourId, juce::Colours::white);
+                    addAndMakeVisible(detachedNotice);
+                    resized();
                 }
-                isDetached = true;
-                // Show notice in main editor
-                detachedNotice.setText("Visualization is detached. Click 'Dock' in the external window to reattach.", juce::dontSendNotification);
-                detachedNotice.setJustificationType(juce::Justification::centred);
-                detachedNotice.setColour(juce::Label::textColourId, juce::Colours::white);
-                addAndMakeVisible(detachedNotice);
-                resized();
+            }
+            else
+            {
+                // Toggle OFF → dock (exit fullscreen first if needed)
+                dockCanvas();
             }
         };
 
@@ -1979,11 +2033,13 @@ private:
     {
         if (!isDetached)
             return;
-        // Ensure we exit fullscreen before docking
-        if (externalWindow && externalWindow->isFullScreen()) {
-            externalWindow->setFullScreen(false);
+        // Ensure we exit fullscreen (kiosk mode) before docking
+        if (isFullscreen) {
+            juce::Desktop::getInstance().setKioskModeComponent(nullptr);
+            isFullscreen = false;
+            // restore title bar for windowed mode
+            if (externalWindow) externalWindow->setUsingNativeTitleBar(true);
         }
-        isFullscreen = false;
         // Detach canvas from external window and add back to editor
         if (externalWindow)
         {
@@ -1996,6 +2052,9 @@ private:
         isDetached = false;
         detachedNotice.setText({}, juce::dontSendNotification);
         detachedNotice.setVisible(false);
+        // Sync pop-out toggle off when re-docking
+        if (popOutButton.getToggleState())
+            popOutButton.setToggleState(false, juce::dontSendNotification);
         resized();
     }
 
@@ -2014,6 +2073,9 @@ private:
                 content->setTransportEnabled(this->processor.hasActivePlaylistPublic());
             }
             isDetached = true;
+            // Sync pop-out toggle on when auto-detaching via fullscreen
+            if (!popOutButton.getToggleState())
+                popOutButton.setToggleState(true, juce::dontSendNotification);
             detachedNotice.setText("Visualization is detached. Click 'Dock' in the external window to reattach.", juce::dontSendNotification);
             detachedNotice.setJustificationType(juce::Justification::centred);
             detachedNotice.setColour(juce::Label::textColourId, juce::Colours::white);
@@ -2026,12 +2088,14 @@ private:
         {
             if (auto* d = getTargetDisplay())
                 ensureExternalWindowOnDisplay(*d);
-            externalWindow->setFullScreen(true);
+            if (externalWindow) externalWindow->setUsingNativeTitleBar(false);
+            juce::Desktop::getInstance().setKioskModeComponent(externalWindow.get());
             isFullscreen = true;
         }
         else
         {
-            externalWindow->setFullScreen(false);
+            juce::Desktop::getInstance().setKioskModeComponent(nullptr);
+            if (externalWindow) externalWindow->setUsingNativeTitleBar(true);
             isFullscreen = false;
         }
     }
@@ -2040,14 +2104,23 @@ private:
     {
         if (!externalWindow)
             return;
-        // Move the window to the target display before entering fullscreen
-        externalWindow->setTopLeftPosition(d.userArea.getX(), d.userArea.getY());
+        // Move the window to the target display before entering fullscreen (use totalArea to cover taskbar when in kiosk)
+        externalWindow->setTopLeftPosition(d.totalArea.getX(), d.totalArea.getY());
     }
 
     const juce::Displays::Display* getTargetDisplay() const
     {
         auto& desktop = juce::Desktop::getInstance();
         auto& displays = desktop.getDisplays();
+        // Prefer the display where the external window currently resides (if any)
+        if (externalWindow != nullptr)
+        {
+            auto extBounds = externalWindow->getScreenBounds();
+            if (!extBounds.isEmpty())
+                if (auto* d = displays.getDisplayForRect(extBounds))
+                    return d;
+        }
+        // Fallback to the display containing the plugin editor
         auto editorBounds = getScreenBounds();
         return displays.getDisplayForRect(editorBounds);
     }
