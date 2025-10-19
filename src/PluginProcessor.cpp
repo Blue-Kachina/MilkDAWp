@@ -780,7 +780,7 @@ private:
             std::function<void()> onNext;
             Content()
             {
-                setOpaque(false);
+                setOpaque(true);
                 // Create a TooltipWindow for this top-level window so tooltips appear over its children
                 tooltipWindow = std::make_unique<juce::TooltipWindow>(this, 700);
                 // Overlay bar setup (hidden until hover)
@@ -928,6 +928,11 @@ private:
                 }
                 hoverFsButton.onClick = [this]{ if (onToggleFullscreen) onToggleFullscreen(); };
             }
+            void paint(juce::Graphics& g) override
+            {
+                // Ensure a visible background in the external window
+                g.fillAll(juce::Colours::black);
+            }
             void attachCanvas(juce::Component* c)
             {
                 if (attachedCanvas == c) return;
@@ -1020,14 +1025,14 @@ private:
             windowConstrainer->setMaximumSize(3840, 2160);
             setResizable(true, true);
             setConstrainer(windowConstrainer.get());
-            setOpaque(false);
-            setBackgroundColour(juce::Colours::transparentBlack);
+            setOpaque(true);
+            setBackgroundColour(juce::Colours::black);
             content = std::make_unique<Content>();
             // Hide legacy dock button on overlay; docking via close button still works
             content->dockButton.setVisible(false);
             content->dockButton.onClick = [this]{ if (onDock) onDock(); };
             content->onToggleFullscreen = onToggleFullscreen;
-            setContentOwned(content.get(), false); // do not transfer ownership to window, we keep unique_ptr here
+            setContentNonOwned(content.get(), false); // keep ownership in unique_ptr; window will not delete our content
             centreWithSize(960, 540);
             setVisible(true);
         }
@@ -1046,8 +1051,8 @@ private:
             if (key.getKeyCode() == juce::KeyPress::F11Key) { if (onToggleFullscreen) onToggleFullscreen(); return true; }
             if (key.getKeyCode() == juce::KeyPress::escapeKey)
             {
-                // Only exit fullscreen if this window is currently in kiosk mode
-                if (juce::Desktop::getInstance().getKioskModeComponent() == this)
+                // Only exit fullscreen if this window is currently in fullscreen mode
+                if (isFullScreen())
                 {
                     if (onToggleFullscreen) onToggleFullscreen();
                     return true;
@@ -1240,6 +1245,11 @@ public:
         : juce::AudioProcessorEditor(&proc), processor(proc)
     {
         setLookAndFeel(&hardwareLAF);
+        // Enable resizing with sensible minimum size constraints
+        setResizable(true, true);
+        #if JUCE_MAJOR_VERSION >= 6
+        setResizeLimits(900, 520, 3840, 2160);
+        #endif
         setSize(1200, 650); // per README default window size
         // Ensure tooltips are enabled for this editor by creating a TooltipWindow attached to it
         tooltipWindow = std::make_unique<juce::TooltipWindow>(this, 700);
@@ -1506,28 +1516,38 @@ public:
         transitionButton.setTooltip("Transition Style");
         transitionButton.setClickingTogglesState(false);
         {
-            // Create a simple overlapping-squares icon to represent a transition
-            auto makeIcon = [](juce::Colour c)
+            // Use SVG icon for Transition style: resources/icons/cards-three.svg embedded in BinaryData
+            if (auto svg = loadSvgByPhosphorName("cards-three"))
             {
-                auto dp = std::make_unique<juce::DrawablePath>();
-                juce::Path p;
-                // Back square
-                p.addRoundedRectangle(5.0f, 5.0f, 12.0f, 12.0f, 2.5f);
-                // Front square offset
-                p.addRoundedRectangle(9.0f, 9.0f, 12.0f, 12.0f, 2.5f);
-                dp->setPath(p);
-                dp->setFill(c);
-                return dp;
-            };
-            // Non-toggle button: make icon white in all states (match style of Load Preset button)
-            auto whiteNormal  = makeIcon(juce::Colours::white);
-            auto whiteOver    = makeIcon(juce::Colours::white);
-            auto whiteDown    = makeIcon(juce::Colours::white);
-            // Provide the same white icons for the toggled-on variants as well (button is not a toggle)
-            auto whiteOnNorm  = makeIcon(juce::Colours::white);
-            auto whiteOnOver  = makeIcon(juce::Colours::white);
-            auto whiteOnDown  = makeIcon(juce::Colours::white);
-            transitionButton.setImages(whiteNormal.get(), whiteOver.get(), whiteDown.get(), whiteOnNorm.get(), whiteOnOver.get(), whiteOnDown.get(), nullptr);
+                auto off  = makeTintedClone(*svg, juce::Colours::white);
+                auto over = makeTintedClone(*svg, juce::Colours::white);
+                auto down = makeTintedClone(*svg, juce::Colours::white);
+                auto onN  = makeTintedClone(*svg, juce::Colours::white);
+                auto onO  = makeTintedClone(*svg, juce::Colours::white);
+                auto onD  = makeTintedClone(*svg, juce::Colours::white);
+                transitionButton.setImages(off.get(), over.get(), down.get(), onN.get(), onO.get(), onD.get(), nullptr);
+            }
+            else
+            {
+                // Fallback to simple overlapping-squares icon if SVG not embedded
+                auto makeIcon = [](juce::Colour c)
+                {
+                    auto dp = std::make_unique<juce::DrawablePath>();
+                    juce::Path p;
+                    p.addRoundedRectangle(5.0f, 5.0f, 12.0f, 12.0f, 2.5f);
+                    p.addRoundedRectangle(9.0f, 9.0f, 12.0f, 12.0f, 2.5f);
+                    dp->setPath(p);
+                    dp->setFill(c);
+                    return dp;
+                };
+                auto whiteNormal  = makeIcon(juce::Colours::white);
+                auto whiteOver    = makeIcon(juce::Colours::white);
+                auto whiteDown    = makeIcon(juce::Colours::white);
+                auto whiteOnNorm  = makeIcon(juce::Colours::white);
+                auto whiteOnOver  = makeIcon(juce::Colours::white);
+                auto whiteOnDown  = makeIcon(juce::Colours::white);
+                transitionButton.setImages(whiteNormal.get(), whiteOver.get(), whiteDown.get(), whiteOnNorm.get(), whiteOnOver.get(), whiteOnDown.get(), nullptr);
+            }
         }
         // Clicking opens a popover menu listing transition styles. Selection updates the APVTS choice parameter.
         transitionButton.onClick = [this]
@@ -1896,7 +1916,12 @@ public:
         }
 
         // File/picker controls
-        presetCombo.setBounds(innerTop.removeFromLeft(250));
+        {
+            // Make preset combobox stretch with window size while keeping a sensible minimum
+            const int comboMin = 200;
+            const int comboW = juce::jmax(comboMin, innerTop.getWidth() / 3);
+            presetCombo.setBounds(innerTop.removeFromLeft(comboW));
+        }
         innerTop.removeFromLeft(8);
         {
             auto b = innerTop.removeFromLeft(28);
@@ -2265,12 +2290,17 @@ private:
     {
         if (!isDetached)
             return;
-        // Ensure we exit fullscreen (kiosk mode) before docking
+        // Ensure we exit fullscreen (fake fullscreen borderless mode) before docking
         if (isFullscreen) {
-            juce::Desktop::getInstance().setKioskModeComponent(nullptr);
             isFullscreen = false;
-            // restore title bar for windowed mode
-            if (externalWindow) externalWindow->setUsingNativeTitleBar(true);
+            // restore standard windowed mode (native title bar, resizable)
+            if (externalWindow) {
+                externalWindow->setVisible(false);
+                externalWindow->setUsingNativeTitleBar(true);
+                externalWindow->setTitleBarHeight(30);
+                externalWindow->setResizable(true, true);
+                externalWindow->setVisible(true);
+            }
         }
         // Detach canvas from external window and add back to editor
         if (externalWindow)
@@ -2316,10 +2346,19 @@ private:
             return;
         if (!isFullscreen)
         {
+            // Enter pure borderless fake-fullscreen without using setFullScreen(true)
+            if (externalWindow) {
+                externalWindow->setVisible(false);
+                externalWindow->setUsingNativeTitleBar(false);
+                externalWindow->setTitleBarHeight(0);
+                externalWindow->setResizable(false, false);
+            }
             if (auto* d = getTargetDisplay())
                 ensureExternalWindowOnDisplay(*d);
-            if (externalWindow) externalWindow->setUsingNativeTitleBar(false);
-            juce::Desktop::getInstance().setKioskModeComponent(externalWindow.get());
+            if (externalWindow) {
+                externalWindow->setVisible(true);
+                externalWindow->toFront(true);
+            }
             isFullscreen = true;
         }
         else
@@ -2333,8 +2372,9 @@ private:
     {
         if (!externalWindow)
             return;
-        // Move the window to the target display before entering fullscreen (use totalArea to cover taskbar when in kiosk)
-        externalWindow->setTopLeftPosition(d.totalArea.getX(), d.totalArea.getY());
+        // Move and size the window to the target display before entering fullscreen (use totalArea to cover taskbar in fake fullscreen)
+        externalWindow->setBounds(d.totalArea);
+        externalWindow->toFront(true);
     }
 
     const juce::Displays::Display* getTargetDisplay() const
@@ -2362,10 +2402,24 @@ private:
     void timerCallback() override
     {
         // Watchdog: if fullscreen was exited by any external cause, immediately dock to enforce state model
-        if (isDetached)
+        if (isDetached && isFullscreen)
         {
-            auto* kiosk = juce::Desktop::getInstance().getKioskModeComponent();
-            const bool actuallyFullscreen = (externalWindow != nullptr && kiosk == externalWindow.get());
+            // Check if window is still in fullscreen state
+            bool actuallyFullscreen = false;
+            if (externalWindow != nullptr)
+            {
+                // Native fullscreen OR our borderless fake-fullscreen sized to the display bounds
+                bool nativeFS = externalWindow->isFullScreen();
+                bool borderlessFS = false;
+                if (auto* d = getTargetDisplay())
+                {
+                    // Use totalArea to include taskbar for our borderless mode
+                    auto target = d->totalArea;
+                    auto wb = externalWindow->getBounds();
+                    borderlessFS = (wb == target);
+                }
+                actuallyFullscreen = nativeFS || borderlessFS;
+            }
             if (!actuallyFullscreen)
             {
                 dockCanvas();
