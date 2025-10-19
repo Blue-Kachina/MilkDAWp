@@ -1349,21 +1349,74 @@ public:
         addAndMakeVisible(settingsButton);
         settingsButton.setTooltip("Settings");
         {
-            // Load gear icon from BinaryData by name variants
-            int dataSize = 0;
-            const char* data = nullptr;
-            const char* names[] = { "gearsix_svg", "gear_six_svg", "gear-six_svg" };
-            for (auto* nm : names) { if ((data = BinaryData::getNamedResource(nm, dataSize)) != nullptr) break; }
-            if (data != nullptr && dataSize > 0)
+            // Load gear icon for Settings. Prefer embedded BinaryData, then Phosphor fallback.
+            auto setButtonImagesFromDrawable = [this](std::unique_ptr<juce::Drawable>& svgPtr)
             {
-                auto svg = juce::Drawable::createFromImageData(data, dataSize);
-                if (svg)
+                if (svgPtr)
                 {
-                    auto n = makeTintedClone(*svg, juce::Colours::white);
-                    auto o = makeTintedClone(*svg, juce::Colours::white);
-                    auto d = makeTintedClone(*svg, juce::Colours::white);
+                    auto n = makeTintedClone(*svgPtr, juce::Colours::white);
+                    auto o = makeTintedClone(*svgPtr, juce::Colours::white);
+                    auto d = makeTintedClone(*svgPtr, juce::Colours::white);
                     settingsButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+                    settingsButton.repaint();
+                    return true;
                 }
+                return false;
+            };
+
+            bool setOk = false;
+            // 1) Try BinaryData by likely resource names (JUCE mangles hyphens to underscores)
+            {
+                int dataSize = 0;
+                const char* data = nullptr;
+                const char* names[] = { "gearsix_svg", "gear_six_svg", "gear-six_svg", "resources_icons_gear_six_svg" };
+                for (auto* nm : names)
+                {
+                    data = BinaryData::getNamedResource(nm, dataSize);
+                    if (data != nullptr && dataSize > 0)
+                    {
+                        auto svg = juce::Drawable::createFromImageData(data, dataSize);
+                        std::unique_ptr<juce::Drawable> up(svg.release());
+                        setOk = setButtonImagesFromDrawable(up);
+                        if (setOk) break;
+                    }
+                }
+            }
+            // 2) Fallback: Phosphor icon set
+            if (!setOk)
+            {
+                if (auto svg = loadSvgByPhosphorName("gear-six")) { setOk = setButtonImagesFromDrawable(svg); }
+                if (!setOk)
+                {
+                    if (auto svg = loadSvgByPhosphorName("gear")) { setOk = setButtonImagesFromDrawable(svg); }
+                }
+            }
+            // 3) Final fallback: draw a minimal gear-like glyph
+            if (!setOk)
+            {
+                auto makeFallbackGear = [](juce::Colour c)
+                {
+                    auto dp = std::make_unique<juce::DrawablePath>();
+                    juce::Path p;
+                    // Simple cog: circle with 6 rectangular teeth
+                    p.addEllipse(8.0f, 8.0f, 8.0f, 8.0f);
+                    for (int i = 0; i < 6; ++i)
+                    {
+                        const float angle = juce::MathConstants<float>::twoPi * (i / 6.0f);
+                        juce::Path tooth;
+                        tooth.addRectangle(-1.0f, -10.0f, 2.0f, 4.0f);
+                        tooth.applyTransform(juce::AffineTransform::rotation(angle).translated(12.0f, 12.0f));
+                        p.addPath(tooth);
+                    }
+                    dp->setPath(p);
+                    dp->setFill(c);
+                    return dp;
+                };
+                auto n = makeFallbackGear(juce::Colours::white);
+                auto o = makeFallbackGear(juce::Colours::white);
+                auto d = makeFallbackGear(juce::Colours::white);
+                settingsButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+                settingsButton.repaint();
             }
         }
         settingsButton.onClick = [this]{ this->openSettingsPanel(); };
@@ -2141,6 +2194,8 @@ private:
         };
 
         auto comp = std::make_unique<SettingsComp>();
+        // Ensure ComboBox popup uses our HardwareLookAndFeel so hover callback fires
+        comp->monitorCombo.setLookAndFeel(&hardwareLAF);
         // Prepare list and state
         auto& displays = juce::Desktop::getInstance().getDisplays();
         const auto defaultKey = getDefaultDisplayKey();
@@ -2294,7 +2349,7 @@ private:
             }
             isDetached = true;
             // Show notice in main editor
-            detachedNotice.setText("Visualization is detached. Click 'Dock' in the external window to reattach.", juce::dontSendNotification);
+            detachedNotice.setText("Visualization is detached. Toggle fullscreen off to reattach.", juce::dontSendNotification);
             detachedNotice.setJustificationType(juce::Justification::centred);
             detachedNotice.setColour(juce::Label::textColourId, juce::Colours::white);
             addAndMakeVisible(detachedNotice);
