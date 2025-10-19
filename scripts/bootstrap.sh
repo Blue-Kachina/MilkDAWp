@@ -26,7 +26,7 @@ fi
 VCPKG_EXE="$VCPKG_ROOT/vcpkg"
 if [ ! -f "$VCPKG_EXE" ]; then
   echo "[bootstrap] Bootstrapping vcpkg..."
-  if [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "cygwin"* || "$OS" == "Windows_NT" ]]; then
+  if [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "cygwin"* || "${OS:-}" == "Windows_NT" ]]; then
     bash "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
     VCPKG_EXE="$VCPKG_ROOT/vcpkg.exe"
   else
