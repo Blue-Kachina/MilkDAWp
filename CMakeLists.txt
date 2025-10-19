@@ -178,6 +178,7 @@ if(MILKDAWP_BUILD_PLUGIN)
       resources/icons/skip-back.svg
       resources/icons/skip-forward.svg
       resources/icons/gear-six.svg
+      resources/icons/cards-three.svg
   )
 
   # Public compile definitions and config toggles

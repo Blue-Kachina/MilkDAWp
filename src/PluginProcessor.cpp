@@ -1336,13 +1336,23 @@ public:
         // Fullscreen support
         addAndMakeVisible(fullscreenButton);
         fullscreenButton.setTooltip("Toggle fullscreen visualization (F11)");
+        fullscreenButton.setClickingTogglesState(true);
         {
+            const auto GreyN = juce::Colour(0xFF7F7F7F);
+            const auto GreyO = juce::Colour(0xFF9F9F9F);
+            const auto GreyD = juce::Colour(0xFF5F5F5F);
+            const auto BlueN = juce::Colour(0xFF6A8CAF);
+            const auto BlueO = juce::Colour(0xFF8FB3D1);
+            const auto BlueD = juce::Colour(0xFF4E6E8C);
             if (auto svg = loadSvgByPhosphorName("corners-out"))
             {
-                auto n = makeTintedClone(*svg, juce::Colours::white);
-                auto o = makeTintedClone(*svg, juce::Colours::white);
-                auto d = makeTintedClone(*svg, juce::Colours::white);
-                fullscreenButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+                auto offN = makeTintedClone(*svg, GreyN);
+                auto offO = makeTintedClone(*svg, GreyO);
+                auto offD = makeTintedClone(*svg, GreyD);
+                auto onN  = makeTintedClone(*svg, BlueN);
+                auto onO  = makeTintedClone(*svg, BlueO);
+                auto onD  = makeTintedClone(*svg, BlueD);
+                fullscreenButton.setImages(offN.get(), offO.get(), offD.get(), onN.get(), onO.get(), onD.get(), nullptr);
             }
             else
             {
@@ -1363,12 +1373,16 @@ public:
                     dp->setFill(c);
                     return dp;
                 };
-                auto wN = makeFsIcon(juce::Colours::white);
-                auto wO = makeFsIcon(juce::Colours::white);
-                auto wD = makeFsIcon(juce::Colours::white);
-                fullscreenButton.setImages(wN.get(), wO.get(), wD.get(), nullptr, nullptr, nullptr, nullptr);
+                auto offN = makeFsIcon(GreyN);
+                auto offO = makeFsIcon(GreyO);
+                auto offD = makeFsIcon(GreyD);
+                auto onN  = makeFsIcon(BlueN);
+                auto onO  = makeFsIcon(BlueO);
+                auto onD  = makeFsIcon(BlueD);
+                fullscreenButton.setImages(offN.get(), offO.get(), offD.get(), onN.get(), onO.get(), onD.get(), nullptr);
             }
         }
+        fullscreenButton.setToggleState(isFullscreen, juce::dontSendNotification);
         fullscreenButton.onClick = [this]{ this->toggleFullscreen(); };
 
         // Settings button (gear icon, white, icon-only)
@@ -1396,13 +1410,13 @@ public:
 
         // Knobs and toggles (Phase 4.2)
         addAndMakeVisible(beatLabel);
-        beatLabel.setText("Beat", juce::dontSendNotification);
+        beatLabel.setText("Sensitivity", juce::dontSendNotification);
         beatLabel.setJustificationType(juce::Justification::centred);
         beatLabel.setColour(juce::Label::textColourId, juce::Colours::white);
         addAndMakeVisible(beatSlider);
         beatSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         beatSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-        beatSlider.setTooltip("Beat Sensitivity (0.0 - 2.0)");
+        beatSlider.setTooltip("Sensitivity (0.0 - 2.0)");
         beatAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
             processor.getValueTreeState(), "beatSensitivity", beatSlider);
 
@@ -1416,6 +1430,9 @@ public:
         durationSlider.setTooltip("Transition Duration (seconds)");
         durationAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
             processor.getValueTreeState(), "transitionDurationSeconds", durationSlider);
+        // Move Duration control into Transition Style popover; keep hidden in main layout
+        durationLabel.setVisible(false);
+        durationSlider.setVisible(false);
 
         // Phase 6.4: Icon-based toggle buttons for Lock and Shuffle (Phosphor)
         // Lock button
@@ -1549,49 +1566,85 @@ public:
                 transitionButton.setImages(whiteNormal.get(), whiteOver.get(), whiteDown.get(), whiteOnNorm.get(), whiteOnOver.get(), whiteOnDown.get(), nullptr);
             }
         }
-        // Clicking opens a popover menu listing transition styles. Selection updates the APVTS choice parameter.
+        // Clicking opens a popover panel titled "Transition Style" with style options and the Duration control.
         transitionButton.onClick = [this]
         {
-            juce::PopupMenu m;
-            auto* p = processor.getValueTreeState().getParameter("transitionStyle");
-            int currentIndex = 0;
-            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*>(p))
-            {
-                currentIndex = choice->getIndex();
-            }
-            auto addItem = [&m, currentIndex](int idx, const juce::String& text)
-            {
-                m.addItem(idx + 1, text, true, idx == currentIndex);
-            };
-            addItem(0, "Cut");
-            addItem(1, "Crossfade");
-            addItem(2, "Blend");
-
-            m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&transitionButton),
-                [this](int result)
-                {
-                    if (result <= 0) return; // cancelled
-                    const int idx = result - 1; // our ids are 1-based
-                    if (auto* p = processor.getValueTreeState().getParameter("transitionStyle"))
-                    {
-                        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*>(p))
-                        {
-                            auto norm = choice->getNormalisableRange().convertTo0to1((float)idx);
-                            choice->beginChangeGesture();
-                            choice->setValueNotifyingHost(norm);
-                            choice->endChangeGesture();
-                        }
-                        else
-                        {
-                            // Fallback: direct normalized mapping (3 choices)
-                            auto norm = juce::jlimit(0.0f, 1.0f, (float)idx / 2.0f);
-                            p->beginChangeGesture();
-                            p->setValueNotifyingHost(norm);
-                            p->endChangeGesture();
-                        }
+            struct TransitionPopover : public juce::Component {
+                MilkDAWpAudioProcessor& processor;
+                juce::Label title { {}, "Transition Style" };
+                juce::ToggleButton cutBtn { "Cut" };
+                juce::ToggleButton xfadeBtn { "Crossfade" };
+                juce::ToggleButton blendBtn { "Blend" };
+                juce::Label durationLbl { {}, "Duration" };
+                juce::Slider durationKnob;
+                std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> durationAttach;
+                TransitionPopover(MilkDAWpAudioProcessor& p) : processor(p) {
+                    addAndMakeVisible(title);
+                    title.setJustificationType(juce::Justification::centred);
+                    title.setColour(juce::Label::textColourId, juce::Colours::white);
+                    // Radio group for three options
+                    const int groupId = 1001;
+                    cutBtn.setRadioGroupId(groupId);
+                    xfadeBtn.setRadioGroupId(groupId);
+                    blendBtn.setRadioGroupId(groupId);
+                    addAndMakeVisible(cutBtn);
+                    addAndMakeVisible(xfadeBtn);
+                    addAndMakeVisible(blendBtn);
+                    // Init selection from parameter
+                    if (auto* param = dynamic_cast<juce::AudioParameterChoice*>(processor.getValueTreeState().getParameter("transitionStyle"))) {
+                        const int idx = param->getIndex();
+                        cutBtn.setToggleState(idx == 0, juce::dontSendNotification);
+                        xfadeBtn.setToggleState(idx == 1, juce::dontSendNotification);
+                        blendBtn.setToggleState(idx == 2, juce::dontSendNotification);
                     }
+                    auto onChoose = [this](int idx){
+                        if (auto* p = processor.getValueTreeState().getParameter("transitionStyle")) {
+                            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*>(p)) {
+                                auto norm = choice->getNormalisableRange().convertTo0to1((float) idx);
+                                choice->beginChangeGesture();
+                                choice->setValueNotifyingHost(norm);
+                                choice->endChangeGesture();
+                            } else {
+                                auto norm = juce::jlimit(0.0f, 1.0f, (float)idx / 2.0f);
+                                p->beginChangeGesture(); p->setValueNotifyingHost(norm); p->endChangeGesture();
+                            }
+                        }
+                    };
+                    cutBtn.onClick   = [onChoose]{ onChoose(0); };
+                    xfadeBtn.onClick = [onChoose]{ onChoose(1); };
+                    blendBtn.onClick = [onChoose]{ onChoose(2); };
+                    // Duration control (rotary)
+                    addAndMakeVisible(durationLbl);
+                    durationLbl.setJustificationType(juce::Justification::centred);
+                    durationLbl.setColour(juce::Label::textColourId, juce::Colours::white);
+                    addAndMakeVisible(durationKnob);
+                    durationKnob.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+                    durationKnob.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+                    durationKnob.setTooltip("Transition Duration (seconds)");
+                    durationAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+                        processor.getValueTreeState(), "transitionDurationSeconds", durationKnob);
+                    setSize(240, 180);
                 }
-            );
+                void resized() override {
+                    auto r = getLocalBounds().reduced(12);
+                    auto titleArea = r.removeFromTop(20);
+                    title.setBounds(titleArea);
+                    r.removeFromTop(8);
+                    auto row = r.removeFromTop(24);
+                    cutBtn.setBounds(row.removeFromLeft(row.getWidth() / 3).reduced(2));
+                    xfadeBtn.setBounds(row.removeFromLeft(row.getWidth() / 2).reduced(2));
+                    blendBtn.setBounds(row.reduced(2));
+                    r.removeFromTop(10);
+                    auto durLab = r.removeFromTop(16);
+                    durationLbl.setBounds(durLab);
+                    auto knobArea = r.reduced(0, 6);
+                    int sz = juce::jmin(knobArea.getWidth(), knobArea.getHeight());
+                    auto centred = juce::Rectangle<int>(0,0,sz,sz).withCentre(knobArea.getCentre());
+                    durationKnob.setBounds(centred);
+                }
+            };
+            auto* comp = new TransitionPopover(processor);
+            juce::CallOutBox::launchAsynchronously(std::unique_ptr<juce::Component>(comp), transitionButton.getScreenBounds(), nullptr);
         };
 
         addAndMakeVisible(loadButton);
@@ -1919,7 +1972,9 @@ public:
         {
             // Make preset combobox stretch with window size while keeping a sensible minimum
             const int comboMin = 200;
-            const int comboW = juce::jmax(comboMin, innerTop.getWidth() / 3);
+            const int baseW = innerTop.getWidth() / 3;
+            const int targetW = (int) juce::roundToInt(baseW * 1.6f); // 160% of previous default width
+            const int comboW = juce::jlimit(comboMin, innerTop.getWidth(), targetW);
             presetCombo.setBounds(innerTop.removeFromLeft(comboW));
         }
         innerTop.removeFromLeft(8);
@@ -2301,6 +2356,8 @@ private:
                 externalWindow->setResizable(true, true);
                 externalWindow->setVisible(true);
             }
+            // Update fullscreen toggle button state
+            fullscreenButton.setToggleState(false, juce::dontSendNotification);
         }
         // Detach canvas from external window and add back to editor
         if (externalWindow)
@@ -2360,6 +2417,7 @@ private:
                 externalWindow->toFront(true);
             }
             isFullscreen = true;
+            fullscreenButton.setToggleState(true, juce::dontSendNotification);
         }
         else
         {
