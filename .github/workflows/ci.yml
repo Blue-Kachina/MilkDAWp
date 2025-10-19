@@ -56,25 +56,26 @@ jobs:
         run: |
           cmake -S . -B build-ci -G "Ninja" -DBUILD_TESTING=ON -DMILKDAWP_BUILD_PLUGIN=OFF
 
-      - name: Configure (tests only, Windows using dev-win preset)
+      - name: Configure, Build and Run tests (Windows, MSVC DevCmd)
         if: runner.os == 'Windows'
-        run: cmake --preset dev-win -DBUILD_TESTING=ON -DMILKDAWP_BUILD_PLUGIN=OFF
+        shell: cmd
+        run: |
+          "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath > vsdir.txt
+          set /p VSDIR=<vsdir.txt
+          call "%VSDIR%\Common7\Tools\VsDevCmd.bat" -arch=x64
+          cmake --preset dev-win -DBUILD_TESTING=ON -DMILKDAWP_BUILD_PLUGIN=OFF
+          cmake --build build-win --config RelWithDebInfo --parallel
+          ctest --test-dir build-win -C RelWithDebInfo --output-on-failure
 
       - name: Build tests (POSIX)
         if: runner.os != 'Windows'
         run: cmake --build build-ci --config RelWithDebInfo --parallel
 
-      - name: Build tests (Windows)
-        if: runner.os == 'Windows'
-        run: cmake --build build-win --config RelWithDebInfo --parallel
 
       - name: Run tests (POSIX)
         if: runner.os != 'Windows'
         run: ctest --test-dir build-ci -C RelWithDebInfo --output-on-failure
 
-      - name: Run tests (Windows)
-        if: runner.os == 'Windows'
-        run: ctest --test-dir build-win -C RelWithDebInfo --output-on-failure
 
   # Optional: package plugin on Windows to catch regressions (does not run tests)
   windows-plugin-build:
