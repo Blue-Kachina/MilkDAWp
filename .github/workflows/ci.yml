@@ -51,15 +51,30 @@ jobs:
         run: |
           scripts\bootstrap.bat
 
-      - name: Configure (tests only)
+      - name: Configure (tests only, POSIX)
+        if: runner.os != 'Windows'
         run: |
           cmake -S . -B build-ci -G "Ninja" -DBUILD_TESTING=ON -DMILKDAWP_BUILD_PLUGIN=OFF
 
-      - name: Build tests
+      - name: Configure (tests only, Windows using dev-win preset)
+        if: runner.os == 'Windows'
+        run: cmake --preset dev-win -DBUILD_TESTING=ON -DMILKDAWP_BUILD_PLUGIN=OFF
+
+      - name: Build tests (POSIX)
+        if: runner.os != 'Windows'
         run: cmake --build build-ci --config RelWithDebInfo --parallel
 
-      - name: Run tests
+      - name: Build tests (Windows)
+        if: runner.os == 'Windows'
+        run: cmake --build build-win --config RelWithDebInfo --parallel
+
+      - name: Run tests (POSIX)
+        if: runner.os != 'Windows'
         run: ctest --test-dir build-ci -C RelWithDebInfo --output-on-failure
+
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        run: ctest --test-dir build-win -C RelWithDebInfo --output-on-failure
 
   # Optional: package plugin on Windows to catch regressions (does not run tests)
   windows-plugin-build:
