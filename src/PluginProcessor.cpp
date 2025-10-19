@@ -1623,7 +1623,7 @@ public:
                     durationKnob.setTooltip("Transition Duration (seconds)");
                     durationAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
                         processor.getValueTreeState(), "transitionDurationSeconds", durationKnob);
-                    setSize(240, 180);
+                    setSize(360, 180);
                 }
                 void resized() override {
                     auto r = getLocalBounds().reduced(12);
@@ -1973,7 +1973,7 @@ public:
             // Make preset combobox stretch with window size while keeping a sensible minimum
             const int comboMin = 200;
             const int baseW = innerTop.getWidth() / 3;
-            const int targetW = (int) juce::roundToInt(baseW * 1.6f); // 160% of previous default width
+            const int targetW = (int) juce::roundToInt(baseW * 2.0f); // ~25% wider than current (1.6x -> 2.0x of base)
             const int comboW = juce::jlimit(comboMin, innerTop.getWidth(), targetW);
             presetCombo.setBounds(innerTop.removeFromLeft(comboW));
         }
@@ -2003,17 +2003,11 @@ public:
             const int sz = juce::jmin(b3.getHeight(), 24);
             transitionButton.setBounds(b3.getX(), b3.getCentreY() - sz/2, sz, sz);
         }
-        innerTop.removeFromLeft(12);
+        // Tighten spacing before knobs and place Sensitivity immediately after the buttons
+        innerTop.removeFromLeft(6);
 
-        // Knobs area
+        // Knobs area (Duration hidden; do not reserve space for it)
         auto knobW = 64;
-        {
-            auto area = innerTop.removeFromLeft(knobW);
-            auto lab = area.removeFromTop(14);
-            durationLabel.setBounds(lab);
-            durationSlider.setBounds(area);
-        }
-        innerTop.removeFromLeft(8);
         {
             auto area = innerTop.removeFromLeft(knobW);
             auto lab = area.removeFromTop(14);
