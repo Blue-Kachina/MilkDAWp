@@ -1007,6 +1007,8 @@ private:
             setOpaque(false);
             setBackgroundColour(juce::Colours::transparentBlack);
             content = std::make_unique<Content>();
+            // Hide legacy dock button on overlay; docking via close button still works
+            content->dockButton.setVisible(false);
             content->dockButton.onClick = [this]{ if (onDock) onDock(); };
             content->onToggleFullscreen = onToggleFullscreen;
             setContentOwned(content.get(), false); // do not transfer ownership to window, we keep unique_ptr here
@@ -1046,6 +1048,12 @@ private:
     };
 private:
     struct HardwareLookAndFeel : public juce::LookAndFeel_V4 {
+        // Callback used to notify when a popup menu item becomes highlighted (e.g., ComboBox dropdown hover)
+        std::function<void(const juce::String&)> popupHoverCallback;
+        juce::String lastPopupHoverText;
+        void setPopupHoverCallback(std::function<void(const juce::String&)> cb) { popupHoverCallback = std::move(cb); lastPopupHoverText.clear(); }
+        void clearPopupHoverCallback() { popupHoverCallback = nullptr; lastPopupHoverText.clear(); }
+        
         HardwareLookAndFeel()
         {
             setColour(juce::ResizableWindow::backgroundColourId, juce::Colour(0xFF101214));
@@ -1198,6 +1206,16 @@ private:
                 g.setColour(col);
                 g.strokePath(arrow, juce::PathStrokeType(2.0f));
             }
+
+            // Hover reporting: notify when item becomes highlighted (to allow monitor hover highlight)
+            if (isHighlighted && popupHoverCallback)
+            {
+                if (lastPopupHoverText != text)
+                {
+                    lastPopupHoverText = text;
+                    popupHoverCallback(text);
+                }
+            }
         }
     };
 public:
@@ -1283,83 +1301,11 @@ public:
             }
         }
 
-        // Pop-out support
+        // Pop-out support (removed UI; maintaining code path deprecated)
+        // Hide legacy popOutButton to enforce simplified state model (docked or detached fullscreen)
         addAndMakeVisible(popOutButton);
-        popOutButton.setTooltip("Pop-out / Dock visualization");
-        popOutButton.setClickingTogglesState(true);
-        {
-            if (auto svg = loadSvgByPhosphorName("arrows-out-simple"))
-            {
-                auto n = makeTintedClone(*svg, juce::Colours::white);
-                auto o = makeTintedClone(*svg, juce::Colours::white);
-                auto d = makeTintedClone(*svg, juce::Colours::white);
-                popOutButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
-            }
-            else
-            {
-                auto makePopIcon = [](juce::Colour c)
-                {
-                    auto dp = std::make_unique<juce::DrawablePath>();
-                    juce::Path p;
-                    // base window
-                    p.addRoundedRectangle(3.0f, 7.0f, 18.0f, 14.0f, 2.0f);
-                    // arrow pointing to top-right (indicating pop-out)
-                    juce::Path a;
-                    a.startNewSubPath(10.0f, 12.0f);
-                    a.lineTo(20.0f, 4.0f);
-                    a.lineTo(18.0f, 4.0f);
-                    a.lineTo(18.0f, 2.0f);
-                    a.lineTo(22.0f, 2.0f);
-                    a.lineTo(22.0f, 6.0f);
-                    a.lineTo(20.0f, 6.0f);
-                    a.lineTo(20.0f, 8.0f);
-                    a.closeSubPath();
-                    p.addPath(a);
-                    dp->setPath(p);
-                    dp->setFill(c);
-                    return dp;
-                };
-                auto wN = makePopIcon(juce::Colours::white);
-                auto wO = makePopIcon(juce::Colours::white);
-                auto wD = makePopIcon(juce::Colours::white);
-                popOutButton.setImages(wN.get(), wO.get(), wD.get(), nullptr, nullptr, nullptr, nullptr);
-            }
-        }
-        popOutButton.onClick = [this]
-        {
-            if (popOutButton.getToggleState())
-            {
-                // Toggle ON → detach
-                if (!isDetached)
-                {
-                    // Create external window and move canvas into it
-                    externalWindow = std::make_unique<ExternalVisualizationWindow>("MilkDAWp Visualization (OBS)", [this]{ this->dockCanvas(); }, [this]{ this->toggleFullscreen(); });
-                    // Transfer canvas: remove from editor to avoid double-parenting
-                    removeChildComponent(&vizCanvas);
-                    if (auto* content = externalWindow->getContent()) {
-                        content->attachCanvas(&vizCanvas);
-                        // Wire window communication callbacks
-                        content->onPrev = [this]{ this->processor.prevPresetInPlaylist(); this->presetNameLabel.setText(this->currentDisplayName(), juce::dontSendNotification); if (this->externalWindow) { if (auto* ec = this->externalWindow->getContent()) { ec->setPresetName(this->currentDisplayName()); ec->setTransportEnabled(this->processor.hasActivePlaylistPublic()); } } };
-                        content->onNext = [this]{ this->processor.nextPresetInPlaylist(); this->presetNameLabel.setText(this->currentDisplayName(), juce::dontSendNotification); if (this->externalWindow) { if (auto* ec = this->externalWindow->getContent()) { ec->setPresetName(this->currentDisplayName()); ec->setTransportEnabled(this->processor.hasActivePlaylistPublic()); } } };
-                        // Initial UI state
-                        content->setPresetName(this->currentDisplayName());
-                        content->setTransportEnabled(this->processor.hasActivePlaylistPublic());
-                    }
-                    isDetached = true;
-                    // Show notice in main editor
-                    detachedNotice.setText("Visualization is detached. Click 'Dock' in the external window to reattach.", juce::dontSendNotification);
-                    detachedNotice.setJustificationType(juce::Justification::centred);
-                    detachedNotice.setColour(juce::Label::textColourId, juce::Colours::white);
-                    addAndMakeVisible(detachedNotice);
-                    resized();
-                }
-            }
-            else
-            {
-                // Toggle OFF → dock (exit fullscreen first if needed)
-                dockCanvas();
-            }
-        };
+        popOutButton.setVisible(false);
+        popOutButton.setInterceptsMouseClicks(false, false);
 
         // Fullscreen support
         addAndMakeVisible(fullscreenButton);
@@ -1398,6 +1344,29 @@ public:
             }
         }
         fullscreenButton.onClick = [this]{ this->toggleFullscreen(); };
+
+        // Settings button (gear icon, white, icon-only)
+        addAndMakeVisible(settingsButton);
+        settingsButton.setTooltip("Settings");
+        {
+            // Load gear icon from BinaryData by name variants
+            int dataSize = 0;
+            const char* data = nullptr;
+            const char* names[] = { "gearsix_svg", "gear_six_svg", "gear-six_svg" };
+            for (auto* nm : names) { if ((data = BinaryData::getNamedResource(nm, dataSize)) != nullptr) break; }
+            if (data != nullptr && dataSize > 0)
+            {
+                auto svg = juce::Drawable::createFromImageData(data, dataSize);
+                if (svg)
+                {
+                    auto n = makeTintedClone(*svg, juce::Colours::white);
+                    auto o = makeTintedClone(*svg, juce::Colours::white);
+                    auto d = makeTintedClone(*svg, juce::Colours::white);
+                    settingsButton.setImages(n.get(), o.get(), d.get(), nullptr, nullptr, nullptr, nullptr);
+                }
+            }
+        }
+        settingsButton.onClick = [this]{ this->openSettingsPanel(); };
  
          // Visualization canvas (embedded OpenGL)
          addAndMakeVisible(vizCanvas);
@@ -1968,7 +1937,7 @@ public:
         // Transition Style controls (hidden in Phase 6.6 Compact Layout)
         // reserved spacing minimal; controls are hidden so no layout here
 
-        // Prioritize Fullscreen and Pop-out visibility: allocate them first from the right
+        // Prioritize Fullscreen and Settings visibility: allocate them first from the right
         const int iconSlotW = 28;  // matches Lock/Shuffle slots
         const int gapPx = 8;
 
@@ -1983,13 +1952,13 @@ public:
         // Gap
         if (innerTop.getWidth() > 0)
             innerTop.removeFromRight(juce::jmin(gapPx, innerTop.getWidth()));
-        // Pop-out next (icon-only, same size as Lock/Shuffle)
+        // Settings button to the left of fullscreen
         if (innerTop.getWidth() > 0) {
-            auto popSlot = innerTop.removeFromRight(juce::jmin(iconSlotW, innerTop.getWidth()));
-            const int sz = juce::jmin(popSlot.getHeight(), 24);
-            popOutButton.setBounds(popSlot.getX() + (popSlot.getWidth() - sz) / 2,
-                                   popSlot.getCentreY() - sz / 2,
-                                   sz, sz);
+            auto setSlot = innerTop.removeFromRight(juce::jmin(iconSlotW, innerTop.getWidth()));
+            const int sz = juce::jmin(setSlot.getHeight(), 24);
+            settingsButton.setBounds(setSlot.getX() + (setSlot.getWidth() - sz) / 2,
+                                     setSlot.getCentreY() - sz / 2,
+                                     sz, sz);
         }
         // Gap
         if (innerTop.getWidth() > 0)
@@ -2029,6 +1998,257 @@ public:
     }
 
 private:
+    // Persistent settings handling for fullscreen target display
+    juce::PropertiesFile& getSettings() const
+    {
+        static std::unique_ptr<juce::PropertiesFile> props;
+        if (!props)
+        {
+            juce::PropertiesFile::Options opt;
+            opt.applicationName     = "MilkDAWp";
+            opt.filenameSuffix      = "settings";
+            opt.osxLibrarySubFolder = "Application Support";
+            opt.storageFormat       = juce::PropertiesFile::storeAsXML;
+            opt.commonToAllUsers    = false;
+            opt.millisecondsBeforeSaving = 500;
+            props = std::make_unique<juce::PropertiesFile>(opt);
+        }
+        return *props;
+    }
+
+    static juce::String displayKey(const juce::Displays::Display& d)
+    {
+        auto a = d.totalArea; // use total area for stability across taskbar
+        return juce::String(a.getX()) + "," + juce::String(a.getY()) + "," + juce::String(a.getWidth()) + "," + juce::String(a.getHeight());
+    }
+
+    const juce::Displays::Display* findDisplayByKey(const juce::String& key) const
+    {
+        if (key.isEmpty()) return nullptr;
+        auto& displays = juce::Desktop::getInstance().getDisplays();
+        for (auto& d : displays.displays)
+        {
+            if (displayKey(d) == key)
+                return &d;
+        }
+        return nullptr;
+    }
+
+    // Persistence helpers for display selection/default
+    juce::String getDefaultDisplayKey() const
+    {
+        auto& pf = getSettings();
+        auto key = pf.getValue("defaultFullscreenDisplay");
+        if (key.isEmpty())
+        {
+            // Back-compat with legacy key used previously
+            key = pf.getValue("preferredFullscreenDisplay");
+        }
+        return key;
+    }
+    void setDefaultDisplayKey(const juce::String& key) const
+    {
+        auto& pf = getSettings();
+        pf.setValue("defaultFullscreenDisplay", key);
+        // Maintain legacy key too for safety
+        pf.setValue("preferredFullscreenDisplay", key);
+        pf.saveIfNeeded();
+    }
+    juce::String getSelectedDisplayKey() const
+    {
+        auto& pf = getSettings();
+        return pf.getValue("selectedFullscreenDisplay");
+    }
+    void setSelectedDisplayKey(const juce::String& key) const
+    {
+        auto& pf = getSettings();
+        pf.setValue("selectedFullscreenDisplay", key);
+        pf.saveIfNeeded();
+    }
+    const juce::Displays::Display* getDefaultDisplay() const
+    {
+        if (auto* d = findDisplayByKey(getDefaultDisplayKey()))
+            return d;
+        return nullptr;
+    }
+    const juce::Displays::Display* getSelectedDisplay() const
+    {
+        if (auto* d = findDisplayByKey(getSelectedDisplayKey()))
+            return d;
+        return nullptr;
+    }
+    // Deprecated: retained for callers, now returns default display
+    const juce::Displays::Display* getPreferredDisplay() const
+    {
+        return getDefaultDisplay();
+    }
+
+    void highlightDisplay(const juce::Displays::Display& d)
+    {
+        struct Overlay : juce::Component, juce::Timer {
+            void startOn(const juce::Rectangle<int>& r)
+            {
+                setAlwaysOnTop(true);
+                setInterceptsMouseClicks(false, false);
+                setBounds(r);
+                addToDesktop(juce::ComponentPeer::windowIgnoresKeyPresses | juce::ComponentPeer::windowIsTemporary);
+                setVisible(true);
+                startTimer(700);
+            }
+            void paint(juce::Graphics& g) override
+            {
+                auto b = getLocalBounds().toFloat();
+                g.setColour(juce::Colours::yellow.withAlpha(0.9f));
+                g.drawRect(b, 6.0f);
+            }
+            void timerCallback() override { stopTimer(); delete this; }
+        };
+        auto* ov = new Overlay();
+        ov->startOn(d.totalArea);
+    }
+
+    void openSettingsPanel()
+    {
+        struct SettingsComp : public juce::Component {
+            juce::Label title { {}, "Fullscreen Options" };
+            juce::ComboBox monitorCombo;
+            juce::TextButton useAsDefault { "Use as default" };
+            std::function<void(int)> onSelection; // index in displays
+            std::function<void()> onMakeDefault;
+            juce::String defaultKey;
+            void paint(juce::Graphics& g) override { g.fillAll(juce::Colour(0xFF101214)); }
+            SettingsComp()
+            {
+                setSize(420, 140);
+                addAndMakeVisible(title);
+                title.setColour(juce::Label::textColourId, juce::Colours::white);
+                title.setFont(juce::Font(18.0f, juce::Font::bold));
+                addAndMakeVisible(monitorCombo);
+                addAndMakeVisible(useAsDefault);
+            }
+            void resized() override
+            {
+                auto r = getLocalBounds().reduced(16);
+                title.setBounds(r.removeFromTop(28));
+                r.removeFromTop(8);
+                auto row = r.removeFromTop(28);
+                monitorCombo.setBounds(row);
+                r.removeFromTop(12);
+                auto btnRow = r.removeFromTop(28);
+                useAsDefault.setBounds(btnRow.removeFromLeft(140));
+                juce::ignoreUnused(btnRow);
+            }
+        };
+
+        auto comp = std::make_unique<SettingsComp>();
+        // Prepare list and state
+        auto& displays = juce::Desktop::getInstance().getDisplays();
+        const auto defaultKey = getDefaultDisplayKey();
+        // Determine initial selected: default if set; otherwise current editor display
+        juce::String selectedKey = getSelectedDisplayKey();
+        if (selectedKey.isEmpty())
+            selectedKey = defaultKey;
+        if (selectedKey.isEmpty())
+        {
+            if (auto* cur = displays.getDisplayForRect(getScreenBounds()))
+                selectedKey = displayKey(*cur);
+        }
+        comp->defaultKey = defaultKey;
+
+        auto rebuildItems = [this, &displays, cptr = comp.get()]()
+        {
+            cptr->monitorCombo.clear(juce::dontSendNotification);
+            int idx = 0;
+            for (auto& d : displays.displays)
+            {
+                auto key = displayKey(d);
+                auto label = juce::String("Display ") + juce::String(idx + 1) + " - " + juce::String(d.userArea.getWidth()) + "x" + juce::String(d.userArea.getHeight());
+                if (key == cptr->defaultKey)
+                    label += " (default)";
+                cptr->monitorCombo.addItem(label, idx + 1);
+                ++idx;
+            }
+        };
+        rebuildItems();
+
+        // Set initial selection
+        int currentIndex = 0;
+        {
+            int i = 0;
+            for (auto& d : displays.displays)
+            {
+                if (displayKey(d) == selectedKey) { currentIndex = i; break; }
+                ++i;
+            }
+        }
+        comp->monitorCombo.setSelectedItemIndex(juce::jlimit(0, juce::jmax(0, (int)displays.displays.size()-1), currentIndex), juce::dontSendNotification);
+
+        // Wire selection change: immediately persist selected_monitor and update default button
+        comp->onSelection = [this, cptr = comp.get()](int sel)
+        {
+            auto& disp = juce::Desktop::getInstance().getDisplays();
+            if (sel >= 0 && sel < disp.displays.size())
+            {
+                auto& d = disp.displays.getReference(sel);
+                this->setSelectedDisplayKey(displayKey(d));
+                // Enable/disable default button based on match
+                const bool isAlreadyDefault = (this->getDefaultDisplayKey() == this->getSelectedDisplayKey());
+                cptr->useAsDefault.setEnabled(!isAlreadyDefault);
+            }
+        };
+        comp->monitorCombo.onChange = [cptr = comp.get()]()
+        {
+            if (cptr->onSelection)
+                cptr->onSelection(cptr->monitorCombo.getSelectedItemIndex());
+        };
+        // Initial enable state
+        comp->useAsDefault.setEnabled(!(getDefaultDisplayKey().isNotEmpty() && getDefaultDisplayKey() == selectedKey));
+
+        // Wire default button
+        comp->onMakeDefault = [this, &displays, cptr = comp.get(), rebuildItems]() mutable
+        {
+            const int sel = cptr->monitorCombo.getSelectedItemIndex();
+            if (sel >= 0 && sel < displays.displays.size())
+            {
+                auto& d = displays.displays.getReference(sel);
+                auto key = displayKey(d);
+                this->setDefaultDisplayKey(key);
+                cptr->defaultKey = key;
+                rebuildItems();
+                // Refresh enable state
+                const bool isAlreadyDefault = (this->getDefaultDisplayKey() == this->getSelectedDisplayKey());
+                cptr->useAsDefault.setEnabled(!isAlreadyDefault);
+            }
+        };
+        comp->useAsDefault.onClick = [cptr = comp.get()]{ if (cptr->onMakeDefault) cptr->onMakeDefault(); };
+
+        // Hover highlight via LookAndFeel callback: parse item label to index
+        hardwareLAF.setPopupHoverCallback([this](const juce::String& text)
+        {
+            if (! text.startsWithIgnoreCase("Display ")) return;
+            auto dash = text.indexOfChar('-');
+            auto spacePos = text.indexOfChar(' ');
+            if (spacePos < 0) return;
+            auto afterSpace = text.substring(spacePos + 1).trimStart();
+            int displayNumber = afterSpace.getIntValue();
+            if (displayNumber <= 0) return;
+            auto& disp = juce::Desktop::getInstance().getDisplays();
+            int idx = displayNumber - 1;
+            if (idx >= 0 && idx < disp.displays.size())
+                highlightDisplay(disp.displays.getReference(idx));
+            juce::ignoreUnused(dash);
+        });
+
+        juce::DialogWindow::LaunchOptions lo;
+        lo.content.setOwned(comp.release());
+        lo.dialogTitle = "Settings";
+        lo.componentToCentreAround = this;
+        lo.useNativeTitleBar = true;
+        lo.resizable = false;
+        lo.escapeKeyTriggersCloseButton = true;
+        lo.launchAsync();
+    }
+
     void dockCanvas()
     {
         if (!isDetached)
@@ -2073,9 +2293,7 @@ private:
                 content->setTransportEnabled(this->processor.hasActivePlaylistPublic());
             }
             isDetached = true;
-            // Sync pop-out toggle on when auto-detaching via fullscreen
-            if (!popOutButton.getToggleState())
-                popOutButton.setToggleState(true, juce::dontSendNotification);
+            // Show notice in main editor
             detachedNotice.setText("Visualization is detached. Click 'Dock' in the external window to reattach.", juce::dontSendNotification);
             detachedNotice.setJustificationType(juce::Justification::centred);
             detachedNotice.setColour(juce::Label::textColourId, juce::Colours::white);
@@ -2094,9 +2312,8 @@ private:
         }
         else
         {
-            juce::Desktop::getInstance().setKioskModeComponent(nullptr);
-            if (externalWindow) externalWindow->setUsingNativeTitleBar(true);
-            isFullscreen = false;
+            // Exiting fullscreen should dock immediately (no intermediate undocked state)
+            dockCanvas();
         }
     }
 
@@ -2112,7 +2329,12 @@ private:
     {
         auto& desktop = juce::Desktop::getInstance();
         auto& displays = desktop.getDisplays();
-        // Prefer the display where the external window currently resides (if any)
+        // Priority: selected_monitor (per-instance) → default_monitor → current window/editor
+        if (auto* sel = getSelectedDisplay())
+            return sel;
+        if (auto* def = getDefaultDisplay())
+            return def;
+        // Next: the display where the external window currently resides (if any)
         if (externalWindow != nullptr)
         {
             auto extBounds = externalWindow->getScreenBounds();
@@ -2655,6 +2877,7 @@ private:
     // Detached window support (Phase 5.1)
     juce::DrawableButton popOutButton { "popOutButton", juce::DrawableButton::ImageFitted };
     juce::DrawableButton fullscreenButton { "fullscreenButton", juce::DrawableButton::ImageFitted };
+    juce::DrawableButton settingsButton { "settingsButton", juce::DrawableButton::ImageFitted };
     juce::Label detachedNotice;
     std::unique_ptr<ExternalVisualizationWindow> externalWindow;
     bool isDetached { false };
