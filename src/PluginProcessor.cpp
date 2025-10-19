@@ -16,10 +16,39 @@
 #ifdef _WIN32
   #define NOMINMAX
   #include <windows.h>
+  #include <dwmapi.h> // For DWMWA_WINDOW_CORNER_PREFERENCE (Windows 11+); we will load dynamically at runtime
 #endif
 
 // Some asset bundles expose gear-six as a direct BinaryData symbol without getNamedResource table entries.
 namespace BinaryData { extern const char* gearsix_svg; }
+
+#ifdef _WIN32
+namespace {
+    // Dynamically call DwmSetWindowAttribute to avoid linking against dwmapi.lib explicitly.
+    inline void setWin11WindowCornerPreference(juce::Component& comp, int preference /*0=Default,1=DoNotRound,2=Round,3=RoundSmall*/)
+    {
+        if (auto* peer = comp.getPeer())
+        {
+            auto hwnd = reinterpret_cast<HWND>(peer->getNativeHandle());
+            if (hwnd == nullptr)
+                return;
+            HMODULE hDwm = ::GetModuleHandleW(L"dwmapi.dll");
+            if (hDwm == nullptr)
+                hDwm = ::LoadLibraryW(L"dwmapi.dll");
+            if (hDwm == nullptr)
+                return;
+            using DwmSetWindowAttributeFn = HRESULT (WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
+            auto proc = reinterpret_cast<DwmSetWindowAttributeFn>(::GetProcAddress(hDwm, "DwmSetWindowAttribute"));
+            if (proc == nullptr)
+                return;
+            // DWMWA_WINDOW_CORNER_PREFERENCE = 33 (Windows 11)
+            const DWORD DWMWA_WINDOW_CORNER_PREFERENCE = 33u;
+            DWORD pref = static_cast<DWORD>(preference);
+            proc(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &pref, sizeof(pref));
+        }
+    }
+}
+#endif
 
 namespace {
     std::unique_ptr<juce::Drawable> loadSvgFromBinary(const void* data, int size)
@@ -2348,6 +2377,11 @@ private:
                 externalWindow->setUsingNativeTitleBar(true);
                 externalWindow->setTitleBarHeight(30);
                 externalWindow->setResizable(true, true);
+                externalWindow->setDropShadowEnabled(true);
+            #ifdef _WIN32
+                // Restore default corner behavior when leaving fullscreen
+                setWin11WindowCornerPreference(*externalWindow, 0 /*Default*/);
+            #endif
                 externalWindow->setVisible(true);
             }
             // Update fullscreen toggle button state
@@ -2403,6 +2437,11 @@ private:
                 externalWindow->setUsingNativeTitleBar(false);
                 externalWindow->setTitleBarHeight(0);
                 externalWindow->setResizable(false, false);
+                externalWindow->setDropShadowEnabled(false);
+            #ifdef _WIN32
+                // Request square corners on Windows 11+ while in borderless fullscreen
+                setWin11WindowCornerPreference(*externalWindow, 1 /*DoNotRound*/);
+            #endif
             }
             if (auto* d = getTargetDisplay())
                 ensureExternalWindowOnDisplay(*d);
