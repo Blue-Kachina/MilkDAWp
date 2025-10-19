@@ -32,6 +32,10 @@ jobs:
           chmod +x scripts/bootstrap.sh
           ./scripts/bootstrap.sh
 
+      - name: Set up vcpkg (Windows)
+        if: runner.os == 'Windows'
+        uses: microsoft/setup-vcpkg@v1
+
       - name: Bootstrap dependencies (Windows)
         if: runner.os == 'Windows'
         shell: cmd
@@ -62,6 +66,9 @@ jobs:
 
       - name: Set up CMake
         uses: lukka/get-cmake@v3.28.3
+
+      - name: Set up vcpkg
+        uses: microsoft/setup-vcpkg@v1
 
       - name: Bootstrap
         shell: cmd
