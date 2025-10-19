@@ -67,22 +67,22 @@ jobs:
         shell: cmd
         run: scripts\bootstrap.bat
 
-      - name: Configure (plugin)
-        run: cmake -S . -B build -G "Ninja Multi-Config" -DMILKDAWP_BUILD_PLUGIN=ON -DBUILD_TESTING=OFF -DMILKDAWP_WITH_PROJECTM=ON
+      - name: Configure (plugin, dev-win preset)
+        run: cmake --preset dev-win
 
-      - name: Build VST3 (Debug)
-        run: cmake --build build --target MilkDAWp_VST3 --config Debug --parallel
+      - name: Build VST3 (Release via preset)
+        run: cmake --build --preset dev-win-Release --target MilkDAWp_VST3 --parallel
 
       - name: Verify runtime layout (projectM DLL next to VST3)
         shell: pwsh
         run: |
-          ./scripts/ci/check_runtime_win.ps1 -BuildDir "build" -Config "Debug"
+          ./scripts/ci/check_runtime_win.ps1 -BuildDir "build-win" -Config "Release"
 
       - name: Upload artefacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-vst3-debug
+          name: windows-vst3-release
           path: |
-            build/MilkDAWp_artefacts/Debug/VST3/**/*.vst3
-            build/MilkDAWp_artefacts/Debug/VST3/**/*.dll
+            build-win/MilkDAWp_artefacts/Release/VST3/**/*.vst3
+            build-win/MilkDAWp_artefacts/Release/VST3/**/*.dll
           if-no-files-found: warn
