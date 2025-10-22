@@ -159,11 +159,11 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 **Goal:** Pop-out window, fullscreen modes, window communication
 
 ### 5.1 Detached Window
-- [ ] Implement "Pop-out" button on main window
-- [ ] Create external window class for visualization
-- [ ] Transfer visualization context to external window
-- [ ] Implement "Dock" button on external window
-- [ ] Destroy external window when main window closes
+- [x] Implement "Pop-out" button on main window
+- [x] Create external window class for visualization
+- [x] Transfer visualization context to external window
+- [x] Implement "Dock" button on external window
+- [x] Destroy external window when main window closes
 
 ### 5.2 Fullscreen Support
 - [x] Implement fullscreen toggle button
@@ -178,12 +178,12 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 - [x] Make hover button toggle fullscreen
 - [x] Support window transparency (for OBS)
 - [x] Set window title/class for easy OBS identification
-- [ ] Test all window state transitions
+- [x] Test all window state transitions
 
 ### 5.4 Window Communication
 - [x] Implement real-time parameter updates: Main→External
 - [x] Implement real-time parameter updates: External→Main
-- [ ] Test parameter changes propagate instantly
+- [x] Test parameter changes propagate instantly
 - [x] Handle edge cases (window closed during update, etc.)
 
 ---

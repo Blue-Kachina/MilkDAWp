@@ -1,7 +1,9 @@
 >>>>>>> # MilkDAWp
-## Vendor: Otitis Media
+    Otitis Media Putting The Eye In Infection
 
-MilkDAWp at its core is a VST3 plugin that uses projectM for visuals.
+
+It's a VST plugin. 
+Put it in your DAW and it will make visualizations from your audio.
 
 ### Purpose & Scope
 MilkDAWp is a JUCE-based VST3 effect that renders realtime projectM/libprojectm visualizations using the audio from the channel it was inserted on.

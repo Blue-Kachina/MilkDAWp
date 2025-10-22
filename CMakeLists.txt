@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 # MilkDAWp - JUCE-based VST3 effect (scaffolding)
-project(MilkDAWp VERSION 0.0.1 LANGUAGES C CXX)
+project(MilkDAWp VERSION 0.6.0 LANGUAGES C CXX)
 
 # Prevent in-source builds which can corrupt the source tree and conflict with CLion's out-of-source profiles
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
