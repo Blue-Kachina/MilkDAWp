@@ -193,8 +193,10 @@ public:
             "shuffle", "Shuffle", false));
         params.emplace_back(std::make_unique<juce::AudioParameterBool>(
             "lockCurrentPreset", "Lock Current Preset", false));
+        // Increase max range significantly to support large preset folders; actual value will be
+        // clamped to current playlist size wherever applied.
         params.emplace_back(std::make_unique<juce::AudioParameterInt>(
-            "presetIndex", "Preset Index", 0, 128, 0));
+            "presetIndex", "Preset Index", 0, 4095, 0));
         params.emplace_back(std::make_unique<juce::AudioParameterChoice>(
             "transitionStyle", "Transition Style",
             juce::StringArray{ "Cut", "Crossfade", "Blend" }, 0));
