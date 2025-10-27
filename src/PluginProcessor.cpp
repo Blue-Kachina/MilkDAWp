@@ -495,6 +495,7 @@ public:
 public:
     // Phase 3.2 public API for editor
     void setPlaylistFolderAndScanPublic(const juce::String& folderPath) { setPlaylistFolderAndScan(folderPath); }
+    void setPlaylistFolderAndScanPublic(const juce::String& folderPath, const juce::String& initiallySelectFullPath) { setPlaylistFolderAndScan(folderPath, initiallySelectFullPath); }
     void clearPlaylistPublic() { clearPlaylist(); }
     bool hasActivePlaylistPublic() const noexcept { return hasActivePlaylist(); }
     void nextPresetInPlaylist() { goToPlaylistRelative(1); }
@@ -608,7 +609,7 @@ private:
 
     bool hasActivePlaylist() const noexcept { return playlistPos >= 0 && playlistPos < playlistOrder.size(); }
 
-    void setPlaylistFolderAndScan(const juce::String& folderPath)
+    void setPlaylistFolderAndScan(const juce::String& folderPath, const juce::String& initiallySelectFullPath = {})
     {
         currentPlaylistFolderPath = folderPath;
         playlistFiles.clear();
@@ -665,16 +666,38 @@ private:
             found.sort(comp);
             playlistFiles = found;
             rebuildPlaylistOrder();
-            if (hasActivePlaylist())
-            {
-                const auto idx = playlistOrder[(int)playlistPos];
-                if ((unsigned)idx < (unsigned)playlistFiles.size())
-                {
-                    const auto& f = playlistFiles.getReference(idx);
-                    setCurrentPresetPathAndPostLoad(f.getFullPathName());
+
+            // Determine target selection
+            int fileIndex = -1;
+            if (initiallySelectFullPath.isNotEmpty()) {
+                juce::File target(initiallySelectFullPath);
+                for (int i = 0; i < playlistFiles.size(); ++i) {
+                    if (playlistFiles.getReference(i) == target) { fileIndex = i; break; }
                 }
-                syncPresetIndexParam();
-                restartAutoAdvanceTimer();
+            }
+
+            if (!playlistFiles.isEmpty())
+            {
+                // If a specific file is requested and present, move playlistPos to its ordered index
+                if (fileIndex >= 0) {
+                    int orderedIndex = -1;
+                    for (int k = 0; k < playlistOrder.size(); ++k) {
+                        if (playlistOrder.getReference(k) == fileIndex) { orderedIndex = k; break; }
+                    }
+                    if (orderedIndex >= 0) playlistPos = orderedIndex;
+                }
+
+                if (hasActivePlaylist())
+                {
+                    const auto idx = playlistOrder[(int)playlistPos];
+                    if ((unsigned)idx < (unsigned)playlistFiles.size())
+                    {
+                        const auto& f = playlistFiles.getReference(idx);
+                        setCurrentPresetPathAndPostLoad(f.getFullPathName());
+                    }
+                    syncPresetIndexParam();
+                    restartAutoAdvanceTimer();
+                }
             }
         }
     }
@@ -1698,13 +1721,24 @@ public:
                     juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Preset Load", "Please select a .milk preset file.");
                     return;
                 }
-                processor.setCurrentPresetPathAndPostLoad(f.getFullPathName());
-                // Ensure viz thread is running so the preset takes effect immediately
-                processor.ensureVizThreadStartedForUI();
-                // Switch to single-preset mode: clear any active playlist and stop transport
-                processor.clearPlaylistPublic();
-                presetNameLabel.setText(f.getFileNameWithoutExtension(), juce::dontSendNotification);
-                refreshTransportVisibility();
+                auto parent = f.getParentDirectory();
+                if (parent.isDirectory())
+                {
+                    // Make parent folder the active playlist and select this preset within it
+                    processor.setPlaylistFolderAndScanPublic(parent.getFullPathName(), f.getFullPathName());
+                    // Ensure viz thread is running so the preset takes effect immediately
+                    processor.ensureVizThreadStartedForUI();
+                    // UI updates
+                    presetNameLabel.setText(f.getFileNameWithoutExtension(), juce::dontSendNotification);
+                    refreshTransportVisibility();
+                } else {
+                    // Fallback: just load the preset directly
+                    processor.setCurrentPresetPathAndPostLoad(f.getFullPathName());
+                    processor.ensureVizThreadStartedForUI();
+                    processor.clearPlaylistPublic();
+                    presetNameLabel.setText(f.getFileNameWithoutExtension(), juce::dontSendNotification);
+                    refreshTransportVisibility();
+                }
             });
         };
 
