@@ -26,11 +26,35 @@ jobs:
       - name: Set up CMake
         uses: lukka/get-cmake@v3.28.3
 
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libfreetype-dev \
+            libgl1-mesa-dev \
+            libasound2-dev
+
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
       - name: Bootstrap dependencies (POSIX)
         if: runner.os != 'Windows'
         run: |
           chmod +x scripts/bootstrap.sh
           ./scripts/bootstrap.sh
+          # Export VCPKG_ROOT for subsequent steps
+          if [ -z "${VCPKG_ROOT:-}" ]; then
+            echo "VCPKG_ROOT=$PWD/.vcpkg" >> $GITHUB_ENV
+          else
+            echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
+          fi
 
       - name: Install vcpkg (Windows)
         if: runner.os == 'Windows'
@@ -51,10 +75,29 @@ jobs:
         run: |
           scripts\bootstrap.bat
 
-      - name: Configure (tests only, POSIX)
-        if: runner.os != 'Windows'
+      - name: Configure (tests only, Linux)
+        if: runner.os == 'Linux'
         run: |
-          cmake -S . -B build-ci -G "Ninja" -DBUILD_TESTING=ON -DMILKDAWP_BUILD_PLUGIN=OFF
+          cmake -S . -B build-ci -G "Ninja" \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+            -DVCPKG_TARGET_TRIPLET=x64-linux-dynamic \
+            -DVCPKG_OVERLAY_TRIPLETS=./triplets \
+            -DVCPKG_INSTALLED_DIR=./build-ci/vcpkg_installed \
+            -DBUILD_TESTING=ON \
+            -DMILKDAWP_BUILD_PLUGIN=OFF
+
+      - name: Configure (tests only, macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -S . -B build-ci -G "Ninja" \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+            -DVCPKG_TARGET_TRIPLET=x64-osx-dynamic \
+            -DVCPKG_OVERLAY_TRIPLETS=./triplets \
+            -DVCPKG_INSTALLED_DIR=./build-ci/vcpkg_installed \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DBUILD_TESTING=ON \
+            -DMILKDAWP_BUILD_PLUGIN=OFF
 
       - name: Configure, Build and Run tests (Windows, MSVC DevCmd)
         if: runner.os == 'Windows'
