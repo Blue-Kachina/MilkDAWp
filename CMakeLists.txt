@@ -397,6 +397,7 @@ if(BUILD_TESTING)
     tests/AudioAnalysisQueueTests.cpp
     tests/MessageThreadTests.cpp
     tests/StateTests.cpp
+    tests/SharedAssetCacheTests.cpp
     src/PluginProcessor.cpp
     src/PluginEditor.cpp
     src/Version.h
@@ -405,6 +406,7 @@ if(BUILD_TESTING)
     src/VisualizationThread.h
     src/ThreadSafeQueue.h
     src/MessageThreadBridge.h
+    src/SharedAssetCache.h
   )
   target_compile_features(${PROJECT_NAME}_tests PRIVATE cxx_std_17)
   target_link_libraries(${PROJECT_NAME}_tests PRIVATE

@@ -264,9 +264,9 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 **Goal:** Efficient resource sharing between plugin instances
 
 ### 7.1 Asset Caching
-- [ ] Implement shared preset cache across instances
+- [x] Implement shared preset cache across instances
 - [ ] Implement shared texture/resource pool
-- [ ] Add reference counting for shared resources
+- [x] Add reference counting for shared resources
 - [ ] Test load time improvements with multiple instances
 
 ### 7.2 Memory Management
@@ -281,16 +281,16 @@ To make projectM respond directly to the plugin’s audio input (beyond the CPU 
 **Goal:** Maintain performance under heavy CPU/GPU load
 
 ### 8.1 Performance Monitoring
-- [ ] Implement FPS counter
-- [ ] Monitor CPU usage per thread
+- [x] Implement FPS counter
+- [x] Monitor CPU usage per thread
 - [ ] Monitor GPU usage/frame time
-- [ ] Add performance metrics logging
+- [x] Add performance metrics logging
 
 ### 8.2 Adaptive Quality System
-- [ ] Define quality levels (resolution, particle count, etc.)
-- [ ] Implement automatic quality reduction under load
-- [ ] Implement automatic quality increase when headroom available
-- [ ] Add manual quality override option
+- [x] Define quality levels (resolution, particle count, etc.)
+- [x] Implement automatic quality reduction under load
+- [x] Implement automatic quality increase when headroom available
+- [x] Add manual quality override option
 - [ ] Test under various load conditions
 
 ---

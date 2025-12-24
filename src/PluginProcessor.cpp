@@ -200,6 +200,10 @@ public:
         params.emplace_back(std::make_unique<juce::AudioParameterChoice>(
             "transitionStyle", "Transition Style",
             juce::StringArray{ "Cut", "Crossfade", "Blend" }, 0));
+        // Phase 8.2: Quality override (0=Auto, 1=Low/0.5x, 2=Medium/0.75x, 3=High/1.0x)
+        params.emplace_back(std::make_unique<juce::AudioParameterChoice>(
+            "qualityOverride", "Quality",
+            juce::StringArray{ "Auto", "Low", "Medium", "High" }, 0));
         return { params.begin(), params.end() };
     }
 
@@ -266,6 +270,7 @@ public:
         apvts.addParameterListener("lockCurrentPreset", this);
         apvts.addParameterListener("presetIndex", this);
         apvts.addParameterListener("transitionStyle", this);
+        apvts.addParameterListener("qualityOverride", this);
     }
 
     ~MilkDAWpAudioProcessor() override {
@@ -276,6 +281,7 @@ public:
         apvts.removeParameterListener("lockCurrentPreset", this);
         apvts.removeParameterListener("presetIndex", this);
         apvts.removeParameterListener("transitionStyle", this);
+        apvts.removeParameterListener("qualityOverride", this);
         milkdawp::Logging::shutdown();
     }
 

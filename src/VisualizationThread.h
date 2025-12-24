@@ -11,6 +11,15 @@
 #include "AudioAnalysisQueue.h"
 #include "MessageThreadBridge.h"
 #include "Logging.h"
+#include "SharedAssetCache.h"
+#include "AdaptiveQuality.h"
+
+#if JUCE_WINDOWS
+  #ifndef NOMINMAX
+    #define NOMINMAX
+  #endif
+  #include <windows.h>
+#endif
 
 namespace milkdawp {
 
@@ -130,10 +139,27 @@ public:
         if (fps < 1.0) fps = 1.0;
         if (fps > 240.0) fps = 240.0;
         targetFps.store(fps, std::memory_order_relaxed);
+#if defined(MDW_ENABLE_ADAPTIVE_QUALITY)
+        if (MDW_ENABLE_ADAPTIVE_QUALITY)
+            aqController.setTargetFps(fps);
+#endif
     }
 
     double getTargetFps() const { return targetFps.load(std::memory_order_relaxed); }
     uint64_t getFramesRendered() const { return framesRendered.load(std::memory_order_acquire); }
+    double getInstantFps() const { return fpsInstant.load(std::memory_order_relaxed); }
+    double getAverageFps() const { return fpsAverage.load(std::memory_order_relaxed); }
+    double getCacheHitRate() const {
+        const uint64_t hits = cacheHits.load(std::memory_order_relaxed);
+        const uint64_t misses = cacheMisses.load(std::memory_order_relaxed);
+        const uint64_t total = hits + misses;
+        if (total == 0) return 0.0;
+        return (double)hits / (double)total;
+    }
+    // CPU / frame-time metrics getters
+    double getVizThreadCpuPercent() const { return vizCpuPercent.load(std::memory_order_relaxed); }
+    double getInstantFrameMs() const { return frameMsInstant.load(std::memory_order_relaxed); }
+    double getAverageFrameMs() const { return frameMsAverage.load(std::memory_order_relaxed); }
 
     // Surface/resize API (message thread calls via editor)
     void setSurfaceSize(int w, int h)
@@ -223,11 +249,22 @@ private:
                 pm.setPresetIndex((int)std::lround(pc.value));
             else if (pc.paramID == "transitionStyle")
                 pm.setTransitionStyle((int)std::lround(pc.value));
+            else if (pc.paramID == "qualityOverride")
+            {
+            #if defined(MDW_ENABLE_ADAPTIVE_QUALITY)
+                if (MDW_ENABLE_ADAPTIVE_QUALITY)
+                {
+                    int mode = (int)std::lround(pc.value);
+                    aqController.setQualityMode(static_cast<QualityMode>(mode));
+                }
+            #endif
+            }
         }
     }
 
     void applyPendingPresetLoads()
     {
+        const double tStartMs_global = juce::Time::getMillisecondCounterHiRes();
         // Drain queue and keep only the most recent unique path
         juce::String pendingPath;
         juce::String tmp;
@@ -236,17 +273,71 @@ private:
         }
         if (pendingPath.isEmpty()) return;
         if (pendingPath == lastAppliedPreset) return; // de-dup same preset
-        juce::String err;
-        if (!pm.loadPreset(pendingPath, err)) {
-            MDW_LOG_ERROR(juce::String("Failed to load preset: ") + pendingPath + ": " + err);
+
+        // Use shared cache for preset metadata to avoid redundant disk/parse work
+        auto& cache = SharedAssetCache::instance();
+        SharedAssetCache::PresetMeta meta;
+        bool hit = cache.getPresetMeta(pendingPath, meta);
+
+        // Validate cache entry by timestamp; if file has changed, recompute
+        const juce::File f(pendingPath);
+        const juce::Time ts = f.getLastModificationTime();
+        if (!hit || !(ts == meta.lastModified)) {
+            // Recompute meta using same logic as ProjectMContext::loadPreset
+            juce::String err;
+            const double t0 = juce::Time::getMillisecondCounterHiRes();
+            if (!pm.loadPreset(pendingPath, err)) {
+                MDW_LOG_ERROR(juce::String("Failed to load preset: ") + pendingPath + ": " + err);
+                return;
+            }
+            const double dt = juce::Time::getMillisecondCounterHiRes() - t0;
+            meta.name = pm.currentPresetName;
+            meta.paletteIndex = pm.paletteIndex;
+            meta.lastModified = ts;
+            cache.upsertPresetMeta(pendingPath, meta);
+            cacheMisses.fetch_add(1, std::memory_order_relaxed);
+            // Update EMA for miss time (viz thread only)
+            const double alpha = 0.2;
+            avgCacheMissMs = (1.0 - alpha) * avgCacheMissMs + alpha * dt;
+            MDW_LOG_INFO(juce::String("Loaded preset (cache miss): ") + pendingPath + juce::String(" in ") + juce::String(dt, 2) + " ms");
         } else {
-            MDW_LOG_INFO(juce::String("Loaded preset: ") + pendingPath);
-            lastAppliedPreset = pendingPath;
+            // Apply cached meta to projectM context quickly
+            const double t0 = juce::Time::getMillisecondCounterHiRes();
+            pm.currentPresetName = meta.name;
+            pm.paletteIndex = meta.paletteIndex;
+            const double dt = juce::Time::getMillisecondCounterHiRes() - t0;
+            cacheHits.fetch_add(1, std::memory_order_relaxed);
+            const double alpha = 0.2;
+            avgCacheHitMs = (1.0 - alpha) * avgCacheHitMs + alpha * dt;
+            MDW_LOG_INFO(juce::String("Loaded preset (cache hit): ") + pendingPath + juce::String(" in ") + juce::String(dt, 2) + " ms");
         }
+
+        // Refcount management: add ref for new, release previous
+        cache.addRef(pendingPath);
+        if (lastAppliedPreset.isNotEmpty() && lastAppliedPreset != pendingPath)
+            cache.release(lastAppliedPreset);
+
+        lastAppliedPreset = pendingPath;
     }
 
     void run()
     {
+        // Initialize metrics timers on this thread
+        lastFrameEndMs = 0.0;
+        double metricsLogIntervalMs = 2000.0;
+        nextMetricsLogMs = juce::Time::getMillisecondCounterHiRes() + metricsLogIntervalMs;
+        // Initialize CPU sampling state
+        lastCpuSampleWallMs = juce::Time::getMillisecondCounterHiRes();
+        #if JUCE_WINDOWS
+        {
+            FILETIME createTime{}, exitTime{}, kernelTime{}, userTime{};
+            if (GetThreadTimes(GetCurrentThread(), &createTime, &exitTime, &kernelTime, &userTime))
+            {
+                lastThreadKernel100ns = fileTimeTo100ns(kernelTime);
+                lastThreadUser100ns = fileTimeTo100ns(userTime);
+            }
+        }
+        #endif
         // Initialize projectM stub and surface on this thread
         pm.init();
         surface.resize(1280, 720);
@@ -351,12 +442,119 @@ private:
                 }
                 framesRendered.fetch_add(1, std::memory_order_relaxed);
 
+                // Update FPS metrics
+                const double frameEnd = juce::Time::getMillisecondCounterHiRes();
+                if (lastFrameEndMs > 0.0) {
+                    const double frameDt = frameEnd - lastFrameEndMs;
+                    if (frameDt > 0.0001) {
+                        // Frame time metrics (ms)
+                        const double frameMs = frameDt;
+                        frameMsInstant.store(frameMs, std::memory_order_relaxed);
+                        const double alphaMs = 0.1;
+                        const double prevMs = frameMsAverage.load(std::memory_order_relaxed);
+                        const double emaMs = (prevMs <= 0.0) ? frameMs : (1.0 - alphaMs) * prevMs + alphaMs * frameMs;
+                        frameMsAverage.store(emaMs, std::memory_order_relaxed);
+                        // FPS metrics
+                        const double inst = 1000.0 / frameDt;
+                        fpsInstant.store(inst, std::memory_order_relaxed);
+                        const double alpha = 0.1;
+                        const double prev = fpsAverage.load(std::memory_order_relaxed);
+                        const double ema = (prev <= 0.0) ? inst : (1.0 - alpha) * prev + alpha * inst;
+                        fpsAverage.store(ema, std::memory_order_relaxed);
+                    }
+                }
+                lastFrameEndMs = frameEnd;
+
                 // Schedule next frame; avoid drift by stepping in increments
                 nextFrameTimeMs += frameDurMs;
                 if (nowMs - nextFrameTimeMs > 5 * frameDurMs) {
                     // If we fell behind significantly, reset to now
                     nextFrameTimeMs = nowMs + frameDurMs;
                 }
+            }
+
+            // Periodic metrics log
+            const double tnow = juce::Time::getMillisecondCounterHiRes();
+
+            // Update CPU usage (Windows)
+            #if JUCE_WINDOWS
+            if (tnow - lastCpuSampleWallMs >= 250.0) // sample every 250ms
+            {
+                FILETIME createTime{}, exitTime{}, kernelTime{}, userTime{};
+                if (GetThreadTimes(GetCurrentThread(), &createTime, &exitTime, &kernelTime, &userTime))
+                {
+                    const uint64_t k = fileTimeTo100ns(kernelTime);
+                    const uint64_t u = fileTimeTo100ns(userTime);
+                    const uint64_t dk = (lastThreadKernel100ns == 0) ? 0ULL : (k - lastThreadKernel100ns);
+                    const uint64_t du = (lastThreadUser100ns == 0) ? 0ULL : (u - lastThreadUser100ns);
+                    const uint64_t dCpu100ns = dk + du; // 100ns units
+                    const double dWallMs = (tnow - lastCpuSampleWallMs); // ms
+                    if (dWallMs > 0.0)
+                    {
+                        const double dWall100ns = dWallMs * 10000.0; // 1 ms = 10,000 * 100ns
+                        const double pct = juce::jlimit(0.0, 100.0, (dCpu100ns / dWall100ns) * 100.0);
+                        vizCpuPercent.store(pct, std::memory_order_relaxed);
+                    }
+                    lastThreadKernel100ns = k;
+                    lastThreadUser100ns = u;
+                }
+                lastCpuSampleWallMs = tnow;
+            }
+            #endif
+
+            if (tnow >= nextMetricsLogMs) {
+                const double inst = fpsInstant.load(std::memory_order_relaxed);
+                const double avg = fpsAverage.load(std::memory_order_relaxed);
+                const double fMsInst = frameMsInstant.load(std::memory_order_relaxed);
+                const double fMsAvg = frameMsAverage.load(std::memory_order_relaxed);
+                const double cpuPct = vizCpuPercent.load(std::memory_order_relaxed);
+                const uint64_t fr = framesRendered.load(std::memory_order_relaxed);
+                const uint64_t ch = cacheHits.load(std::memory_order_relaxed);
+                const uint64_t cm = cacheMisses.load(std::memory_order_relaxed);
+                const uint64_t total = ch + cm;
+                const double hitRate = (total > 0) ? (double)ch / (double)total : 0.0;
+
+                juce::String aqSuffix;
+            #if defined(MDW_ENABLE_ADAPTIVE_QUALITY)
+                if (MDW_ENABLE_ADAPTIVE_QUALITY) {
+                    auto decision = aqController.evaluate(avg, fMsAvg, cpuPct);
+                    // Apply the resolution scaling decision
+                    const double prevScale = currentResolutionScale;
+                    currentResolutionScale = decision.suggestedScale;
+                    // If scale changed significantly, resize backbuffer on next frame
+                    if (std::abs(currentResolutionScale - prevScale) > 0.01) {
+                        juce::ScopedLock sl(backBufferLock);
+                        const int targetW = juce::jmax(2, (int)(surface.width * currentResolutionScale));
+                        const int targetH = juce::jmax(2, (int)(surface.height * currentResolutionScale));
+                        if (backBuffer.getWidth() != targetW || backBuffer.getHeight() != targetH) {
+                            backBuffer = juce::Image(juce::Image::ARGB, targetW, targetH, true);
+                            MDW_LOG_INFO(juce::String("Adaptive Quality: resized backbuffer to ") +
+                                       juce::String(targetW) + "x" + juce::String(targetH) +
+                                       " (scale=" + juce::String(currentResolutionScale, 2) + ")");
+                        }
+                    }
+                #if MDW_VERBOSE_ADAPTIVE_QUALITY
+                    aqSuffix = juce::String(", AQ scale=") + juce::String(decision.suggestedScale, 2) +
+                               ", reason=" + decision.reason;
+                #else
+                    aqSuffix = juce::String(", AQ scale=") + juce::String(decision.suggestedScale, 2);
+                    juce::ignoreUnused(decision);
+                #endif
+                }
+            #endif
+
+                MDW_LOG_INFO(juce::String("Viz perf: fps inst=") + juce::String(inst, 1) + 
+                             ", avg=" + juce::String(avg, 1) +
+                             ", frameMs inst=" + juce::String(fMsInst, 2) +
+                             ", avg=" + juce::String(fMsAvg, 2) +
+                             ", CPU%=" + juce::String(cpuPct, 1) +
+                             ", framesRendered=" + juce::String((double)fr, 0) +
+                             ", cache: hits=" + juce::String((double)ch, 0) + 
+                             ", misses=" + juce::String((double)cm, 0) + 
+                             ", hitRate=" + juce::String(hitRate * 100.0, 1) + "%" +
+                             ", avgHitMs=" + juce::String(avgCacheHitMs, 2) + 
+                             ", avgMissMs=" + juce::String(avgCacheMissMs, 2) + aqSuffix);
+                nextMetricsLogMs = tnow + metricsLogIntervalMs;
             }
 
             // Sleep a little to yield CPU; coarse timing is fine for tests
@@ -432,6 +630,38 @@ private:
     ThreadSafeSPSCQueue<ParameterChange, 64> paramChanges;
     ThreadSafeSPSCQueue<juce::String, 8> presetLoadRequests;
     juce::String lastAppliedPreset;
+
+    // Performance metrics
+    std::atomic<double> fpsInstant{ 0.0 };
+    std::atomic<double> fpsAverage{ 0.0 }; // EMA of FPS
+    // New: frame-time metrics (ms)
+    std::atomic<double> frameMsInstant{ 0.0 };
+    std::atomic<double> frameMsAverage{ 0.0 };
+    // New: viz thread CPU usage percent (Windows implementation)
+    std::atomic<double> vizCpuPercent{ 0.0 };
+    double lastFrameEndMs { 0.0 }; // viz thread only
+    double nextMetricsLogMs { 0.0 }; // viz thread only
+    static constexpr double metricsLogIntervalMs = 2000.0;
+
+    // Adaptive Quality (skeleton)
+#if defined(MDW_ENABLE_ADAPTIVE_QUALITY)
+    AdaptiveQualityController aqController;
+    double currentResolutionScale { 1.0 }; // viz thread only, applied from aqController decision
+#endif
+
+    // CPU sampling state (viz thread only)
+    double lastCpuSampleWallMs { 0.0 };
+    #if JUCE_WINDOWS
+    static uint64_t fileTimeTo100ns(const FILETIME& ft) { return ((uint64_t)ft.dwHighDateTime << 32) | (uint64_t)ft.dwLowDateTime; }
+    uint64_t lastThreadKernel100ns { 0 };
+    uint64_t lastThreadUser100ns { 0 };
+    #endif
+
+    // Preset cache metrics
+    std::atomic<uint64_t> cacheHits{ 0 };
+    std::atomic<uint64_t> cacheMisses{ 0 };
+    double avgCacheHitMs { 0.0 }; // EMA, viz thread only
+    double avgCacheMissMs { 0.0 }; // EMA, viz thread only
 };
 
 } // namespace milkdawp
