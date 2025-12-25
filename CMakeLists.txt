@@ -390,6 +390,22 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES
 
 # Tests: JUCE UnitTest runner
 if(BUILD_TESTING)
+  # Create BinaryData assets for tests if not already created by plugin target
+  if(NOT TARGET ${PROJECT_NAME}Assets)
+    juce_add_binary_data(${PROJECT_NAME}Assets
+      SOURCES
+        resources/images/MilkDAWp_Logo.png
+        resources/icons/lock-simple.svg
+        resources/icons/shuffle.svg
+        resources/icons/arrows-out-simple.svg
+        resources/icons/corners-out.svg
+        resources/icons/skip-back.svg
+        resources/icons/skip-forward.svg
+        resources/icons/gear-six.svg
+        resources/icons/cards-three.svg
+    )
+  endif()
+
   add_executable(${PROJECT_NAME}_tests
     tests/Main.cpp
     tests/SampleTests.cpp

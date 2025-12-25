@@ -435,7 +435,7 @@ private:
                             g.fillRoundedRectangle(textBounds.reduced(2).toFloat(), 4.0f);
                             // Text
                             g.setColour(juce::Colours::white.withAlpha(0.92f));
-                            g.setFont(juce::Font(18.0f, juce::Font::bold));
+                            g.setFont(juce::FontOptions(18.0f).withStyle(juce::Font::bold));
                             g.drawFittedText(pm.currentPresetName, textBounds, juce::Justification::centredRight, 1);
                         }
                     }
