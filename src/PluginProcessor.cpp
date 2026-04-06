@@ -2277,7 +2277,7 @@ private:
                 setSize(420, 140);
                 addAndMakeVisible(title);
                 title.setColour(juce::Label::textColourId, juce::Colours::white);
-                title.setFont(juce::FontOptions(18.0f).withStyle(juce::Font::bold));
+                title.setFont(juce::FontOptions(18.0f).withStyle("Bold"));
                 addAndMakeVisible(monitorCombo);
                 addAndMakeVisible(useAsDefault);
             }
