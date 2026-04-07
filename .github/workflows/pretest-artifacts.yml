@@ -1,0 +1,139 @@
+name: Pretest Artifacts
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - 'v*.*.*-pretest'
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgJsonGlob: 'vcpkg.json'
+
+      - name: Configure (dev-mac Release)
+        run: cmake --preset dev-mac-Release
+
+      - name: Build VST3
+        run: cmake --build build-mac --config Release --target MilkDAWp_VST3
+
+      - name: Package artifact (zip)
+        run: |
+          mkdir -p dist/macos
+          VST3_PATH=$(find build-mac -name '*.vst3' -maxdepth 4 | head -n 1)
+          if [ -z "$VST3_PATH" ]; then echo 'No .vst3 bundle found' && exit 1; fi
+          cp -R "$VST3_PATH" dist/macos/
+          # Optional docs
+          if [ -f resources/Quickstart_macOS.md ]; then cp resources/Quickstart_macOS.md dist/macos/; fi
+          if [ -f resources/Known-Issues.md ]; then cp resources/Known-Issues.md dist/macos/; fi
+          if [ -f resources/How-to-Collect-Logs.md ]; then cp resources/How-to-Collect-Logs.md dist/macos/; fi
+          (cd dist && zip -r MilkDAWp_v0.1.0-pretest_macOS.zip macos)
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MilkDAWp_v0.1.0-pretest_macOS
+          path: dist/MilkDAWp_v0.1.0-pretest_macOS.zip
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config zip
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgJsonGlob: 'vcpkg.json'
+
+      - name: Configure (plugin-enabled linux)
+        run: |
+          cmake -S . -B build-ci-plugin \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux-dynamic \
+            -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/triplets \
+            -DMILKDAWP_BUILD_PLUGIN=ON \
+            -DBUILD_TESTING=OFF \
+            -DMILKDAWP_WITH_PROJECTM=ON
+
+      - name: Build VST3
+        run: cmake --build build-ci-plugin --target MilkDAWp_VST3
+
+      - name: Package artifact (zip)
+        run: |
+          mkdir -p dist/linux
+          VST3_PATH=$(find build-ci-plugin -name '*.vst3' -maxdepth 4 | head -n 1)
+          if [ -z "$VST3_PATH" ]; then echo 'No .vst3 built' && exit 1; fi
+          cp -R "$VST3_PATH" dist/linux/
+          if [ -f resources/Quickstart_Linux.md ]; then cp resources/Quickstart_Linux.md dist/linux/; fi
+          if [ -f resources/Known-Issues.md ]; then cp resources/Known-Issues.md dist/linux/; fi
+          if [ -f resources/How-to-Collect-Logs.md ]; then cp resources/How-to-Collect-Logs.md dist/linux/; fi
+          (cd dist && zip -r MilkDAWp_v0.1.0-pretest_Linux.zip linux)
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MilkDAWp_v0.1.0-pretest_Linux
+          path: dist/MilkDAWp_v0.1.0-pretest_Linux.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSVC Dev Cmd
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}\\vcpkg'
+          vcpkgJsonGlob: 'vcpkg.json'
+
+      - name: Configure (dev-win Release)
+        run: cmake --preset dev-win-Release
+        shell: pwsh
+
+      - name: Build VST3
+        run: cmake --build build-win --config Release --target MilkDAWp_VST3
+        shell: pwsh
+
+      - name: Package artifact (zip)
+        run: |
+          New-Item -ItemType Directory -Force -Path dist\windows | Out-Null
+          $vst3 = Get-ChildItem -Path build-win -Filter *.vst3 -Recurse | Select-Object -First 1
+          if (-not $vst3) { Write-Host 'No .vst3 built' ; exit 1 }
+          Copy-Item $vst3.FullName dist\windows -Recurse
+          if (Test-Path resources\Quickstart_Windows.md) { Copy-Item resources\Quickstart_Windows.md dist\windows }
+          if (Test-Path resources\Known-Issues.md) { Copy-Item resources\Known-Issues.md dist\windows }
+          if (Test-Path resources\How-to-Collect-Logs.md) { Copy-Item resources\How-to-Collect-Logs.md dist\windows }
+          Compress-Archive -Path dist\windows -DestinationPath dist\MilkDAWp_v0.1.0-pretest_Windows.zip -Force
+        shell: pwsh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MilkDAWp_v0.1.0-pretest_Windows
+          path: dist/MilkDAWp_v0.1.0-pretest_Windows.zip

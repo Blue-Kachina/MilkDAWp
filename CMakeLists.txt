@@ -425,6 +425,13 @@ if(BUILD_TESTING)
     src/SharedAssetCache.h
   )
   target_compile_features(${PROJECT_NAME}_tests PRIVATE cxx_std_17)
+  target_compile_definitions(${PROJECT_NAME}_tests PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    MILKDAWP_HAS_PROJECTM=0
+  )
+  target_include_directories(${PROJECT_NAME}_tests PRIVATE ${CMAKE_SOURCE_DIR})
   target_link_libraries(${PROJECT_NAME}_tests PRIVATE
     juce::juce_core
     juce::juce_audio_basics
