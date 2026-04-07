@@ -127,6 +127,13 @@ namespace {
     typedef void (__cdecl *PFN_PM_SET_ASPECT)(projectm_handle, bool);
     typedef void (__cdecl *PFN_PM_LOAD_PRESET_FILE)(projectm_handle, const char*, bool);
     typedef void (__cdecl *PFN_PM_OPENGL_RENDER_FRAME)(projectm_handle);
+    // Beat detection and preset transition API
+    typedef void (__cdecl *PFN_PM_SET_BEAT_SENSITIVITY)(projectm_handle, float);
+    typedef void (__cdecl *PFN_PM_SET_HARD_CUT_ENABLED)(projectm_handle, bool);
+    typedef void (__cdecl *PFN_PM_SET_HARD_CUT_DURATION)(projectm_handle, double);
+    typedef void (__cdecl *PFN_PM_SET_HARD_CUT_SENSITIVITY)(projectm_handle, float);
+    typedef void (__cdecl *PFN_PM_SET_PRESET_DURATION)(projectm_handle, double);
+    typedef void (__cdecl *PFN_PM_SET_PRESET_SWITCH_CB)(projectm_handle, void(*)(bool, void*), void*);
 
     static HMODULE g_pmModule = nullptr;
     static PFN_PM_CREATE                g_pm_create = nullptr;
@@ -136,6 +143,12 @@ namespace {
     static PFN_PM_SET_ASPECT            g_pm_set_aspect = nullptr;
     static PFN_PM_LOAD_PRESET_FILE      g_pm_load_preset_file = nullptr;
     static PFN_PM_OPENGL_RENDER_FRAME   g_pm_opengl_render_frame = nullptr;
+    static PFN_PM_SET_BEAT_SENSITIVITY     g_pm_set_beat_sensitivity     = nullptr;
+    static PFN_PM_SET_HARD_CUT_ENABLED     g_pm_set_hard_cut_enabled     = nullptr;
+    static PFN_PM_SET_HARD_CUT_DURATION    g_pm_set_hard_cut_duration    = nullptr;
+    static PFN_PM_SET_HARD_CUT_SENSITIVITY g_pm_set_hard_cut_sensitivity = nullptr;
+    static PFN_PM_SET_PRESET_DURATION      g_pm_set_preset_duration      = nullptr;
+    static PFN_PM_SET_PRESET_SWITCH_CB     g_pm_set_preset_switch_cb     = nullptr;
 }
 #endif
 
@@ -1305,6 +1318,11 @@ public:
         : juce::AudioProcessorEditor(&proc), processor(proc)
     {
         setLookAndFeel(&hardwareLAF);
+
+        // Apply persisted logging preference. The processor constructor always initialises the
+        // file logger so early startup messages are captured; here we honour the user's choice.
+        milkdawp::Logging::setEnabled(getSettings().getBoolValue("loggingEnabled", true));
+
         // Enable resizing with sensible minimum size constraints
         setResizable(true, true);
         #if JUCE_MAJOR_VERSION >= 6
@@ -2268,29 +2286,40 @@ private:
             juce::Label title { {}, "Fullscreen Options" };
             juce::ComboBox monitorCombo;
             juce::TextButton useAsDefault { "Use as default" };
+            juce::ToggleButton loggingToggle { "Enable file logging" };
             std::function<void(int)> onSelection; // index in displays
             std::function<void()> onMakeDefault;
             juce::String defaultKey;
-            void paint(juce::Graphics& g) override { g.fillAll(juce::Colour(0xFF101214)); }
+            void paint(juce::Graphics& g) override
+            {
+                g.fillAll(juce::Colour(0xFF101214));
+                // Divider between fullscreen section and logging section
+                g.setColour(juce::Colours::white.withAlpha(0.12f));
+                auto divY = getHeight() - 58;
+                g.drawHorizontalLine(divY, 16.0f, (float)(getWidth() - 16));
+            }
             SettingsComp()
             {
-                setSize(420, 140);
+                setSize(420, 190);
                 addAndMakeVisible(title);
                 title.setColour(juce::Label::textColourId, juce::Colours::white);
                 title.setFont(juce::FontOptions(18.0f).withStyle("Bold"));
                 addAndMakeVisible(monitorCombo);
                 addAndMakeVisible(useAsDefault);
+                addAndMakeVisible(loggingToggle);
+                loggingToggle.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
             }
             void resized() override
             {
                 auto r = getLocalBounds().reduced(16);
                 title.setBounds(r.removeFromTop(28));
                 r.removeFromTop(8);
-                auto row = r.removeFromTop(28);
-                monitorCombo.setBounds(row);
+                monitorCombo.setBounds(r.removeFromTop(28));
                 r.removeFromTop(12);
                 auto btnRow = r.removeFromTop(28);
                 useAsDefault.setBounds(btnRow.removeFromLeft(140));
+                r.removeFromTop(16); // divider gap
+                loggingToggle.setBounds(r.removeFromTop(24));
                 juce::ignoreUnused(btnRow);
             }
         };
@@ -2378,6 +2407,17 @@ private:
             }
         };
         comp->useAsDefault.onClick = [cptr = comp.get()]{ if (cptr->onMakeDefault) cptr->onMakeDefault(); };
+
+        // Logging toggle: initial state from settings, persist on change
+        const bool loggingOn = getSettings().getBoolValue("loggingEnabled", true);
+        comp->loggingToggle.setToggleState(loggingOn, juce::dontSendNotification);
+        comp->loggingToggle.onClick = [this, cptr = comp.get()]()
+        {
+            const bool nowOn = cptr->loggingToggle.getToggleState();
+            milkdawp::Logging::setEnabled(nowOn);
+            getSettings().setValue("loggingEnabled", nowOn);
+            getSettings().saveIfNeeded();
+        };
 
         // Hover highlight via LookAndFeel callback: parse item label to index
         hardwareLAF.setPopupHoverCallback([this](const juce::String& text)
@@ -2820,6 +2860,13 @@ private:
             g_pm_set_aspect          = (PFN_PM_SET_ASPECT) gp("projectm_set_aspect_correction");
             g_pm_load_preset_file    = (PFN_PM_LOAD_PRESET_FILE) gp("projectm_load_preset_file");
             g_pm_opengl_render_frame = (PFN_PM_OPENGL_RENDER_FRAME) gp("projectm_opengl_render_frame");
+            // Beat detection and preset transition API (non-critical; older DLLs may not have all of these)
+            g_pm_set_beat_sensitivity     = (PFN_PM_SET_BEAT_SENSITIVITY)     gp("projectm_set_beat_sensitivity");
+            g_pm_set_hard_cut_enabled     = (PFN_PM_SET_HARD_CUT_ENABLED)     gp("projectm_set_hard_cut_enabled");
+            g_pm_set_hard_cut_duration    = (PFN_PM_SET_HARD_CUT_DURATION)    gp("projectm_set_hard_cut_duration");
+            g_pm_set_hard_cut_sensitivity = (PFN_PM_SET_HARD_CUT_SENSITIVITY) gp("projectm_set_hard_cut_sensitivity");
+            g_pm_set_preset_duration      = (PFN_PM_SET_PRESET_DURATION)      gp("projectm_set_preset_duration");
+            g_pm_set_preset_switch_cb     = (PFN_PM_SET_PRESET_SWITCH_CB)     gp("projectm_set_preset_switch_requested_event_callback");
             if (!g_pm_create || !g_pm_destroy || !g_pm_set_window_size || !g_pm_set_fps || !g_pm_set_aspect || !g_pm_load_preset_file || !g_pm_opengl_render_frame) {
                 MDW_LOG_ERROR("projectM: one or more required API symbols missing; will use CPU fallback");
             } else {
@@ -2871,6 +2918,41 @@ private:
                         pmReady = true;
                         pmCanRender = false;
                         lastPMPath.clear();
+                        // Configure beat detection parameters on the freshly-created instance
+                        {
+                            float bs = 1.0f, td = 5.0f;
+                            if (auto* p = owner->getValueTreeState().getRawParameterValue("beatSensitivity"))
+                                bs = p->load();
+                            if (auto* p = owner->getValueTreeState().getRawParameterValue("transitionDurationSeconds"))
+                                td = p->load();
+                            if (g_pm_set_beat_sensitivity)     g_pm_set_beat_sensitivity(pmHandle, bs);
+                            if (g_pm_set_hard_cut_enabled)     g_pm_set_hard_cut_enabled(pmHandle, true);
+                            // Allow hard cuts after 50% of the transition duration has elapsed
+                            if (g_pm_set_hard_cut_duration)    g_pm_set_hard_cut_duration(pmHandle, (double)(td * 0.5));
+                            // Map sensitivity slider to the hard-cut volume-delta threshold (normalised to [0,1])
+                            if (g_pm_set_hard_cut_sensitivity) g_pm_set_hard_cut_sensitivity(pmHandle, juce::jlimit(0.0f, 1.0f, bs / 2.0f));
+                            // Disable projectM's own soft-cut timer — AutoAdvanceTimer handles timed transitions
+                            if (g_pm_set_preset_duration)      g_pm_set_preset_duration(pmHandle, 86400.0);
+                            // Register callback so hard cuts advance the playlist on the JUCE message thread
+                            if (g_pm_set_preset_switch_cb) {
+                                g_pm_set_preset_switch_cb(pmHandle,
+                                    [](bool isHardCut, void* userData) {
+                                        if (!isHardCut) return; // soft-cut timer is disabled; nothing to do
+                                        auto* canvas = static_cast<VizOpenGLCanvas*>(userData);
+                                        // owner outlives the canvas; callAsync is safe to use here
+                                        if (canvas && canvas->owner) {
+                                            auto* proc = canvas->owner;
+                                            juce::MessageManager::callAsync([proc]() {
+                                                proc->nextPresetInPlaylist();
+                                            });
+                                        }
+                                    },
+                                    this);
+                            }
+                            lastAppliedBeatSens_ = bs;
+                            lastAppliedTransDur_  = td;
+                            MDW_LOG_INFO("projectM: beat detection configured (hard cuts enabled)");
+                        }
                     }
                 }
             }
@@ -2988,6 +3070,23 @@ private:
                                #endif // _WIN32
                             }
                         }
+                        // Live-sync beat sensitivity to projectM if the parameter has changed
+                        if (owner) {
+                            float bs = 1.0f, td = 5.0f;
+                            if (auto* p = owner->getValueTreeState().getRawParameterValue("beatSensitivity"))
+                                bs = p->load();
+                            if (auto* p = owner->getValueTreeState().getRawParameterValue("transitionDurationSeconds"))
+                                td = p->load();
+                            if (bs != lastAppliedBeatSens_) {
+                                if (g_pm_set_beat_sensitivity)     g_pm_set_beat_sensitivity(pmHandle, bs);
+                                if (g_pm_set_hard_cut_sensitivity) g_pm_set_hard_cut_sensitivity(pmHandle, juce::jlimit(0.0f, 1.0f, bs / 2.0f));
+                                lastAppliedBeatSens_ = bs;
+                            }
+                            if (td != lastAppliedTransDur_) {
+                                if (g_pm_set_hard_cut_duration) g_pm_set_hard_cut_duration(pmHandle, (double)(td * 0.5));
+                                lastAppliedTransDur_ = td;
+                            }
+                        }
                         if (g_pm_opengl_render_frame) g_pm_opengl_render_frame(pmHandle);
                     } else {
                         static double lastSkipLogMs = 0.0;
@@ -3069,6 +3168,8 @@ private:
         bool pmReady { false };
         bool pmCanRender { false };
         bool isLoadingPreset { false };
+        float lastAppliedBeatSens_ { -1.0f }; // tracks last value pushed to projectm_set_beat_sensitivity
+        float lastAppliedTransDur_  { -1.0f }; // tracks last value pushed to projectm_set_hard_cut_duration
        #ifdef _WIN32
         /* Removed experimental PCM injection hooks after instability reports */
        #endif

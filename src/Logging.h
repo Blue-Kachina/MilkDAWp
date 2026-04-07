@@ -10,21 +10,60 @@ namespace milkdawp {
 struct Logging {
     static void init(const juce::String& appName, const juce::String& version)
     {
-        juce::ignoreUnused(appName, version);
-        // JUCE's default Logger writes to OS debug output / stdout depending on platform.
-        // We just emit a banner once; guard against duplicate banners using a static flag.
         static std::atomic<bool> initialised{ false };
         bool expected = false;
-        if (initialised.compare_exchange_strong(expected, true))
+        if (!initialised.compare_exchange_strong(expected, true))
+            return;
+
+        // Route all MDW_LOG_* output to a rolling file log.
+        // JUCE trims the file at open time if it exceeds maxInitialFileSizeBytes,
+        // so old sessions never bloat the log past ~4 MB.
+        auto logDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                          .getChildFile("MilkDAWp");
+        logDir.createDirectory();
+        auto logFile = logDir.getChildFile("MilkDAWp.log");
+
+        fileLogger.reset(new juce::FileLogger(
+            logFile,
+            appName + " " + version + " — log started",
+            4 * 1024 * 1024 /* 4 MB rolling cap */));
+        juce::Logger::setCurrentLogger(fileLogger.get());
+
+        juce::Logger::writeToLog("[MilkDAWp] Logging initialised");
+    }
+
+    // Disable logging at runtime: removes the file logger so no disk I/O occurs.
+    // The enabled state is NOT persisted here — callers (e.g. the settings panel)
+    // are responsible for saving and restoring the preference.
+    static void setEnabled(bool shouldLog)
+    {
+        if (shouldLog == enabled_)
+            return;
+
+        enabled_ = shouldLog;
+
+        if (shouldLog)
         {
-            juce::Logger::writeToLog("[MilkDAWp] Logging initialised");
+            if (fileLogger)
+                juce::Logger::setCurrentLogger(fileLogger.get());
+        }
+        else
+        {
+            juce::Logger::setCurrentLogger(nullptr);
         }
     }
 
+    static bool isEnabled() { return enabled_; }
+
     static void shutdown()
     {
-        // Nothing to clean up for now; placeholder for future log sinks.
+        juce::Logger::setCurrentLogger(nullptr);
+        fileLogger.reset();
     }
+
+private:
+    static inline std::unique_ptr<juce::FileLogger> fileLogger;
+    static inline bool enabled_ = true;
 };
 
 } // namespace milkdawp
