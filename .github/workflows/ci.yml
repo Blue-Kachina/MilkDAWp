@@ -83,6 +83,7 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-linux-dynamic \
             -DVCPKG_OVERLAY_TRIPLETS=./triplets \
             -DVCPKG_INSTALLED_DIR=./build-ci/vcpkg_installed \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DBUILD_TESTING=ON \
             -DMILKDAWP_BUILD_PLUGIN=OFF
 
@@ -96,6 +97,7 @@ jobs:
             -DVCPKG_INSTALLED_DIR=./build-ci/vcpkg_installed \
             -DCMAKE_OSX_ARCHITECTURES=x86_64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DBUILD_TESTING=ON \
             -DMILKDAWP_BUILD_PLUGIN=OFF
 
