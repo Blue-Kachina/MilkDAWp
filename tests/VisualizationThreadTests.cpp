@@ -12,6 +12,8 @@ public:
         beginTest("Consumes snapshots independently of producer");
         AudioAnalysisQueue<64> q;
         VisualizationThread viz(q);
+        // Use a tiny surface so software rendering doesn't block the queue-drain loop
+        viz.setSurfaceSize(4, 4);
         viz.start();
 
         // Produce a handful of snapshots quickly

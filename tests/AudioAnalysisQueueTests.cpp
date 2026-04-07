@@ -28,21 +28,23 @@ public:
             }
             expectEquals(q.getNumAvailable(), 1);
 
-            // Fill to capacity
-            for (int i = 3; i < 4; ++i) {
+            // Fill to capacity: AudioAnalysisQueue<4> uses a ring buffer that leaves
+            // one slot empty, so effective capacity = 3. With 1 item remaining,
+            // we need 2 more pushes to reach capacity.
+            for (int i = 3; i < 5; ++i) {
                 s.shortTimeEnergy = (float)i;
                 s.samplePosition = (uint64_t)i;
                 expect(q.tryPush(s));
             }
 
-            // Queue may be full now; pushing one more should fail
+            // Queue is now full (3/3); pushing one more should fail
             expect(!q.tryPush(s));
 
-            // Pop remaining
+            // Pop remaining (3 items: values 2, 3, 4)
             milkdawp::AudioAnalysisSnapshot out;
             int count = 0;
             while (q.tryPop(out)) { ++count; }
-            expectEquals(count, 2);
+            expectEquals(count, 3);
             expectEquals(q.getNumAvailable(), 0);
         }
     }
