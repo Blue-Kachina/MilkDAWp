@@ -110,7 +110,7 @@ jobs:
           call "%VSDIR%\Common7\Tools\VsDevCmd.bat" -arch=x64
           cmake --preset dev-win -DBUILD_TESTING=ON -DMILKDAWP_BUILD_PLUGIN=OFF
           cmake --build build-win --config RelWithDebInfo --parallel
-          ctest --test-dir build-win -C RelWithDebInfo --output-on-failure
+          ctest --test-dir build-win -C RelWithDebInfo --output-on-failure --verbose
 
       - name: Build tests (POSIX)
         if: runner.os != 'Windows'
