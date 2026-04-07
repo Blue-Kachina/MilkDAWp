@@ -153,6 +153,11 @@ jobs:
         shell: cmd
         run: scripts\bootstrap.bat
 
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Configure (plugin, dev-win preset)
         run: cmake --preset dev-win
 
