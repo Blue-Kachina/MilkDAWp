@@ -133,6 +133,7 @@ namespace {
     typedef void (__cdecl *PFN_PM_SET_HARD_CUT_DURATION)(projectm_handle, double);
     typedef void (__cdecl *PFN_PM_SET_HARD_CUT_SENSITIVITY)(projectm_handle, float);
     typedef void (__cdecl *PFN_PM_SET_PRESET_DURATION)(projectm_handle, double);
+    typedef void (__cdecl *PFN_PM_SET_SOFT_CUT_DURATION)(projectm_handle, double);
     typedef void (__cdecl *PFN_PM_SET_PRESET_SWITCH_CB)(projectm_handle, void(*)(bool, void*), void*);
 
     static HMODULE g_pmModule = nullptr;
@@ -148,6 +149,7 @@ namespace {
     static PFN_PM_SET_HARD_CUT_DURATION    g_pm_set_hard_cut_duration    = nullptr;
     static PFN_PM_SET_HARD_CUT_SENSITIVITY g_pm_set_hard_cut_sensitivity = nullptr;
     static PFN_PM_SET_PRESET_DURATION      g_pm_set_preset_duration      = nullptr;
+    static PFN_PM_SET_SOFT_CUT_DURATION    g_pm_set_soft_cut_duration    = nullptr;
     static PFN_PM_SET_PRESET_SWITCH_CB     g_pm_set_preset_switch_cb     = nullptr;
 }
 #endif
@@ -210,9 +212,17 @@ public:
         // clamped to current playlist size wherever applied.
         params.emplace_back(std::make_unique<juce::AudioParameterInt>(
             "presetIndex", "Preset Index", 0, 4095, 0));
-        params.emplace_back(std::make_unique<juce::AudioParameterChoice>(
-            "transitionStyle", "Transition Style",
-            juce::StringArray{ "Cut", "Crossfade", "Blend" }, 0));
+        params.emplace_back(std::make_unique<juce::AudioParameterBool>(
+            "hardCutEnabled", "Hard Cuts", false));
+        params.emplace_back(std::make_unique<juce::AudioParameterFloat>(
+            "hardCutSensitivity", "Hard Cut Sensitivity",
+            juce::NormalisableRange<float>(0.0f, 1.0f, 0.0f, 1.0f), 0.5f));
+        params.emplace_back(std::make_unique<juce::AudioParameterFloat>(
+            "softCutDuration", "Blend Time (s)",
+            juce::NormalisableRange<float>(0.5f, 10.0f, 0.0f, 1.0f), 3.0f));
+        params.emplace_back(std::make_unique<juce::AudioParameterFloat>(
+            "hardCutDuration", "Min. Cut Interval (s)",
+            juce::NormalisableRange<float>(1.0f, 30.0f, 0.0f, 1.0f), 5.0f));
         // Phase 8.2: Quality override (0=Auto, 1=Low/0.5x, 2=Medium/0.75x, 3=High/1.0x)
         params.emplace_back(std::make_unique<juce::AudioParameterChoice>(
             "qualityOverride", "Quality",
@@ -282,7 +292,10 @@ public:
         apvts.addParameterListener("shuffle", this);
         apvts.addParameterListener("lockCurrentPreset", this);
         apvts.addParameterListener("presetIndex", this);
-        apvts.addParameterListener("transitionStyle", this);
+        apvts.addParameterListener("hardCutEnabled", this);
+        apvts.addParameterListener("hardCutSensitivity", this);
+        apvts.addParameterListener("softCutDuration", this);
+        apvts.addParameterListener("hardCutDuration", this);
         apvts.addParameterListener("qualityOverride", this);
     }
 
@@ -293,7 +306,10 @@ public:
         apvts.removeParameterListener("shuffle", this);
         apvts.removeParameterListener("lockCurrentPreset", this);
         apvts.removeParameterListener("presetIndex", this);
-        apvts.removeParameterListener("transitionStyle", this);
+        apvts.removeParameterListener("hardCutEnabled", this);
+        apvts.removeParameterListener("hardCutSensitivity", this);
+        apvts.removeParameterListener("softCutDuration", this);
+        apvts.removeParameterListener("hardCutDuration", this);
         apvts.removeParameterListener("qualityOverride", this);
         milkdawp::Logging::shutdown();
     }
@@ -775,7 +791,10 @@ private:
         send("shuffle");
         send("lockCurrentPreset");
         send("presetIndex");
-        send("transitionStyle");
+        send("hardCutEnabled");
+        send("hardCutSensitivity");
+        send("softCutDuration");
+        send("hardCutDuration");
     #endif
         }
 
@@ -1166,6 +1185,8 @@ private:
         {
             auto bounds = button.getLocalBounds().toFloat();
             auto base = backgroundColour;
+            if (button.getToggleState())
+                base = findColour(juce::Slider::rotarySliderFillColourId).withAlpha(0.85f);
             if (isButtonDown) base = base.brighter(0.1f);
             else if (isMouseOverButton) base = base.brighter(0.06f);
             g.setColour(base);
@@ -1199,6 +1220,12 @@ private:
                                           bounds.getCentreY() + arcRadius * std::sin(toAngle - juce::MathConstants<float>::halfPi));
             g.setColour(findColour(juce::Slider::thumbColourId));
             g.fillEllipse(thumbPoint.x - lineW, thumbPoint.y - lineW, lineW * 2.0f, lineW * 2.0f);
+
+            // value text in centre
+            g.setColour(juce::Colours::white.withAlpha(0.8f));
+            g.setFont(juce::Font(juce::FontOptions(juce::jmax(8.0f, radius * 0.42f))));
+            g.drawText(juce::String(slider.getValue(), 1), bounds.toNearestInt(),
+                       juce::Justification::centred, false);
         }
         // Reduce font size in dropdown lists (PopupMenu used by ComboBox)
         juce::Font getPopupMenuFont() override { return juce::Font(12.0f); }
@@ -1498,19 +1525,6 @@ public:
         beatAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
             processor.getValueTreeState(), "beatSensitivity", beatSlider);
 
-        addAndMakeVisible(durationLabel);
-        durationLabel.setText("Duration", juce::dontSendNotification);
-        durationLabel.setJustificationType(juce::Justification::centred);
-        durationLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-        addAndMakeVisible(durationSlider);
-        durationSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-        durationSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-        durationSlider.setTooltip("Transition Duration (seconds)");
-        durationAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-            processor.getValueTreeState(), "transitionDurationSeconds", durationSlider);
-        // Move Duration control into Transition Style popover; keep hidden in main layout
-        durationLabel.setVisible(false);
-        durationSlider.setVisible(false);
 
         // Phase 6.4: Icon-based toggle buttons for Lock and Shuffle (Phosphor)
         // Lock button
@@ -1649,76 +1663,112 @@ public:
         {
             struct TransitionPopover : public juce::Component {
                 MilkDAWpAudioProcessor& processor;
-                juce::Label title { {}, "Transition Style" };
-                juce::ToggleButton cutBtn { "Cut" };
-                juce::ToggleButton xfadeBtn { "Crossfade" };
-                juce::ToggleButton blendBtn { "Blend" };
+                HardwareLookAndFeel laf;
+                juce::Label title { {}, "Transitions" };
+                juce::ToggleButton hardCutToggle { "Hard Cuts" };
+                juce::Label cutSensLbl { {}, "Cut Sensitivity" };
+                juce::Slider cutSensKnob;
                 juce::Label durationLbl { {}, "Duration" };
                 juce::Slider durationKnob;
+                juce::Label blendTimeLbl { {}, "Blend Time" };
+                juce::Slider blendTimeKnob;
+                std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> hardCutAttach;
+                std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> cutSensAttach;
+                juce::Label hardCutDurLbl { {}, "Min. Interval" };
+                juce::Slider hardCutDurKnob;
+                std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> hardCutDurAttach;
                 std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> durationAttach;
+                std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> blendTimeAttach;
+
+                ~TransitionPopover() { setLookAndFeel(nullptr); }
                 TransitionPopover(MilkDAWpAudioProcessor& p) : processor(p) {
-                    addAndMakeVisible(title);
-                    title.setJustificationType(juce::Justification::centred);
-                    title.setColour(juce::Label::textColourId, juce::Colours::white);
-                    // Radio group for three options
-                    const int groupId = 1001;
-                    cutBtn.setRadioGroupId(groupId);
-                    xfadeBtn.setRadioGroupId(groupId);
-                    blendBtn.setRadioGroupId(groupId);
-                    addAndMakeVisible(cutBtn);
-                    addAndMakeVisible(xfadeBtn);
-                    addAndMakeVisible(blendBtn);
-                    // Init selection from parameter
-                    if (auto* param = dynamic_cast<juce::AudioParameterChoice*>(processor.getValueTreeState().getParameter("transitionStyle"))) {
-                        const int idx = param->getIndex();
-                        cutBtn.setToggleState(idx == 0, juce::dontSendNotification);
-                        xfadeBtn.setToggleState(idx == 1, juce::dontSendNotification);
-                        blendBtn.setToggleState(idx == 2, juce::dontSendNotification);
-                    }
-                    auto onChoose = [this](int idx){
-                        if (auto* p = processor.getValueTreeState().getParameter("transitionStyle")) {
-                            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*>(p)) {
-                                auto norm = choice->getNormalisableRange().convertTo0to1((float) idx);
-                                choice->beginChangeGesture();
-                                choice->setValueNotifyingHost(norm);
-                                choice->endChangeGesture();
-                            } else {
-                                auto norm = juce::jlimit(0.0f, 1.0f, (float)idx / 2.0f);
-                                p->beginChangeGesture(); p->setValueNotifyingHost(norm); p->endChangeGesture();
-                            }
-                        }
+                    setLookAndFeel(&laf);
+                    auto& vts = processor.getValueTreeState();
+                    auto makeLbl = [this](juce::Label& l) {
+                        addAndMakeVisible(l);
+                        l.setJustificationType(juce::Justification::centred);
+                        l.setColour(juce::Label::textColourId, juce::Colours::white);
+                        l.setFont(juce::FontOptions(12.0f));
                     };
-                    cutBtn.onClick   = [onChoose]{ onChoose(0); };
-                    xfadeBtn.onClick = [onChoose]{ onChoose(1); };
-                    blendBtn.onClick = [onChoose]{ onChoose(2); };
-                    // Duration control (rotary)
-                    addAndMakeVisible(durationLbl);
-                    durationLbl.setJustificationType(juce::Justification::centred);
-                    durationLbl.setColour(juce::Label::textColourId, juce::Colours::white);
-                    addAndMakeVisible(durationKnob);
-                    durationKnob.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-                    durationKnob.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-                    durationKnob.setTooltip("Transition Duration (seconds)");
+                    auto makeKnob = [this](juce::Slider& s, const juce::String& tip) {
+                        addAndMakeVisible(s);
+                        s.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+                        s.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+                        s.setTooltip(tip);
+                    };
+
+                    makeLbl(title);
+                    title.setFont(juce::FontOptions(14.0f).withStyle("Bold"));
+
+                    addAndMakeVisible(hardCutToggle);
+                    hardCutToggle.setTooltip("Enable beat-triggered hard cuts between presets");
+                    hardCutAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+                        vts, "hardCutEnabled", hardCutToggle);
+
+                    makeLbl(cutSensLbl);
+                    makeKnob(cutSensKnob, "Beat volume threshold that triggers a hard cut (0=easy, 1=hard)");
+                    cutSensAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+                        vts, "hardCutSensitivity", cutSensKnob);
+
+                    makeLbl(hardCutDurLbl);
+                    makeKnob(hardCutDurKnob, "Minimum seconds between hard cuts (cooldown)");
+                    hardCutDurAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+                        vts, "hardCutDuration", hardCutDurKnob);
+
+                    // Show/hide hard-cut controls based on toggle state
+                    auto updateSensVis = [this]{
+                        const bool on = hardCutToggle.getToggleState();
+                        cutSensLbl.setVisible(on);
+                        cutSensKnob.setVisible(on);
+                        hardCutDurLbl.setVisible(on);
+                        hardCutDurKnob.setVisible(on);
+                        resized();
+                    };
+                    hardCutToggle.onStateChange = updateSensVis;
+                    updateSensVis();
+
+                    makeLbl(durationLbl);
+                    makeKnob(durationKnob, "How long each preset plays before switching (seconds)");
                     durationAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-                        processor.getValueTreeState(), "transitionDurationSeconds", durationKnob);
-                    setSize(360, 180);
+                        vts, "transitionDurationSeconds", durationKnob);
+
+                    makeLbl(blendTimeLbl);
+                    makeKnob(blendTimeKnob, "Crossfade blend time between presets (seconds)");
+                    blendTimeAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+                        vts, "softCutDuration", blendTimeKnob);
+
+                    setSize(280, 240);
                 }
+
                 void resized() override {
+                    const bool showHC = hardCutToggle.getToggleState();
+                    const int ksz = 48;
                     auto r = getLocalBounds().reduced(12);
-                    auto titleArea = r.removeFromTop(20);
-                    title.setBounds(titleArea);
-                    r.removeFromTop(8);
-                    auto row = r.removeFromTop(24);
-                    cutBtn.setBounds(row.removeFromLeft(row.getWidth() / 3).reduced(2));
-                    xfadeBtn.setBounds(row.removeFromLeft(row.getWidth() / 2).reduced(2));
-                    blendBtn.setBounds(row.reduced(2));
-                    r.removeFromTop(10);
-                    auto durLab = r.removeFromTop(16);
-                    durationLbl.setBounds(durLab);
-                    auto knobArea = r.reduced(0, 6);
-                    int sz = juce::jmin(knobArea.getWidth(), knobArea.getHeight());
-                    auto centred = juce::Rectangle<int>(0,0,sz,sz).withCentre(knobArea.getCentre());
-                    durationKnob.setBounds(centred);
+                    title.setBounds(r.removeFromTop(18));
+                    r.removeFromTop(6);
+                    hardCutToggle.setBounds(r.removeFromTop(22));
+                    r.removeFromTop(6);
+                    if (showHC) {
+                        // Sensitivity + Min. Interval side by side
+                        auto hcRow = r.removeFromTop(14 + ksz + 4);
+                        const int half = hcRow.getWidth() / 2;
+                        auto sensCol = hcRow.removeFromLeft(half);
+                        auto durCol  = hcRow;
+                        cutSensLbl.setBounds(sensCol.removeFromTop(14));
+                        cutSensKnob.setBounds(juce::Rectangle<int>(0,0,ksz,ksz).withCentre(sensCol.getCentre()));
+                        hardCutDurLbl.setBounds(durCol.removeFromTop(14));
+                        hardCutDurKnob.setBounds(juce::Rectangle<int>(0,0,ksz,ksz).withCentre(durCol.getCentre()));
+                        r.removeFromTop(4);
+                    }
+                    // Duration + Blend Time side by side
+                    auto row = r;
+                    const int half = row.getWidth() / 2;
+                    auto leftCol  = row.removeFromLeft(half);
+                    auto rightCol = row;
+                    durationLbl.setBounds(leftCol.removeFromTop(14));
+                    durationKnob.setBounds(juce::Rectangle<int>(0,0,ksz,ksz).withCentre(leftCol.getCentre()));
+                    blendTimeLbl.setBounds(rightCol.removeFromTop(14));
+                    blendTimeKnob.setBounds(juce::Rectangle<int>(0,0,ksz,ksz).withCentre(rightCol.getCentre()));
                 }
             };
             auto* comp = new TransitionPopover(processor);
@@ -1969,19 +2019,6 @@ public:
         prevButton.setVisible(false);
         nextButton.setVisible(false);
 
-        // Transition Style UI
-        addAndMakeVisible(transitionStyleLabel);
-        transitionStyleLabel.setText("Transition:", juce::dontSendNotification);
-        transitionStyleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-        addAndMakeVisible(transitionStyleCombo);
-        transitionStyleCombo.addItem("Cut", 1);
-        transitionStyleCombo.addItem("Crossfade", 2);
-        transitionStyleCombo.addItem("Blend", 3);
-        transitionStyleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-            processor.getValueTreeState(), "transitionStyle", transitionStyleCombo);
-        // Phase 6.6: Hide legacy transition label/combobox in compact layout
-        transitionStyleLabel.setVisible(false);
-        transitionStyleCombo.setVisible(false);
 
         addAndMakeVisible(presetNameLabel);
         presetNameLabel.setText(initialPresetName(), juce::dontSendNotification);
@@ -2866,6 +2903,7 @@ private:
             g_pm_set_hard_cut_duration    = (PFN_PM_SET_HARD_CUT_DURATION)    gp("projectm_set_hard_cut_duration");
             g_pm_set_hard_cut_sensitivity = (PFN_PM_SET_HARD_CUT_SENSITIVITY) gp("projectm_set_hard_cut_sensitivity");
             g_pm_set_preset_duration      = (PFN_PM_SET_PRESET_DURATION)      gp("projectm_set_preset_duration");
+            g_pm_set_soft_cut_duration    = (PFN_PM_SET_SOFT_CUT_DURATION)    gp("projectm_set_soft_cut_duration");
             g_pm_set_preset_switch_cb     = (PFN_PM_SET_PRESET_SWITCH_CB)     gp("projectm_set_preset_switch_requested_event_callback");
             if (!g_pm_create || !g_pm_destroy || !g_pm_set_window_size || !g_pm_set_fps || !g_pm_set_aspect || !g_pm_load_preset_file || !g_pm_opengl_render_frame) {
                 MDW_LOG_ERROR("projectM: one or more required API symbols missing; will use CPU fallback");
@@ -2918,40 +2956,60 @@ private:
                         pmReady = true;
                         pmCanRender = false;
                         lastPMPath.clear();
-                        // Configure beat detection parameters on the freshly-created instance
+                        // Apply initial parameter values from APVTS
                         {
-                            float bs = 1.0f, td = 5.0f;
-                            if (auto* p = owner->getValueTreeState().getRawParameterValue("beatSensitivity"))
-                                bs = p->load();
-                            if (auto* p = owner->getValueTreeState().getRawParameterValue("transitionDurationSeconds"))
-                                td = p->load();
+                            auto& vts = owner->getValueTreeState();
+                            float bs = 1.0f;
+                            if (auto* p = vts.getRawParameterValue("beatSensitivity"))   bs = p->load();
+                            bool hcEn = false;
+                            if (auto* p = vts.getRawParameterValue("hardCutEnabled"))    hcEn = p->load() >= 0.5f;
+                            float hcSens = 0.5f;
+                            if (auto* p = vts.getRawParameterValue("hardCutSensitivity")) hcSens = p->load();
+                            float scDur = 3.0f;
+                            if (auto* p = vts.getRawParameterValue("softCutDuration"))   scDur = p->load();
+                            float hcDur = 5.0f;
+                            if (auto* p = vts.getRawParameterValue("hardCutDuration"))   hcDur = p->load();
+
                             if (g_pm_set_beat_sensitivity)     g_pm_set_beat_sensitivity(pmHandle, bs);
-                            if (g_pm_set_hard_cut_enabled)     g_pm_set_hard_cut_enabled(pmHandle, true);
-                            // Allow hard cuts after 50% of the transition duration has elapsed
-                            if (g_pm_set_hard_cut_duration)    g_pm_set_hard_cut_duration(pmHandle, (double)(td * 0.5));
-                            // Map sensitivity slider to the hard-cut volume-delta threshold (normalised to [0,1])
-                            if (g_pm_set_hard_cut_sensitivity) g_pm_set_hard_cut_sensitivity(pmHandle, juce::jlimit(0.0f, 1.0f, bs / 2.0f));
+                            if (g_pm_set_hard_cut_enabled)     g_pm_set_hard_cut_enabled(pmHandle, hcEn);
+                            // Tell projectM the minimum interval too, as a secondary guard
+                            if (g_pm_set_hard_cut_duration)    g_pm_set_hard_cut_duration(pmHandle, (double)hcDur);
+                            // Invert: UI "sensitivity" = ease of triggering; API "sensitivity" = volume threshold (higher = harder)
+                            if (g_pm_set_hard_cut_sensitivity) g_pm_set_hard_cut_sensitivity(pmHandle, 1.0f - hcSens);
                             // Disable projectM's own soft-cut timer — AutoAdvanceTimer handles timed transitions
                             if (g_pm_set_preset_duration)      g_pm_set_preset_duration(pmHandle, 86400.0);
-                            // Register callback so hard cuts advance the playlist on the JUCE message thread
+                            if (g_pm_set_soft_cut_duration)    g_pm_set_soft_cut_duration(pmHandle, (double)scDur);
+                            // Register callback so beat-triggered hard cuts advance our playlist.
+                            // We enforce our own cooldown here because projectM's internal hard_cut_duration
+                            // timer does not reset when we load presets externally via g_pm_load_preset_file.
                             if (g_pm_set_preset_switch_cb) {
                                 g_pm_set_preset_switch_cb(pmHandle,
                                     [](bool isHardCut, void* userData) {
                                         if (!isHardCut) return; // soft-cut timer is disabled; nothing to do
                                         auto* canvas = static_cast<VizOpenGLCanvas*>(userData);
-                                        // owner outlives the canvas; callAsync is safe to use here
-                                        if (canvas && canvas->owner) {
-                                            auto* proc = canvas->owner;
-                                            juce::MessageManager::callAsync([proc]() {
-                                                proc->nextPresetInPlaylist();
-                                            });
-                                        }
+                                        if (!canvas || !canvas->owner) return;
+                                        // Application-level cooldown: read hardCutDuration param for the interval
+                                        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+                                        const double lastMs = canvas->lastHardCutMs.load(std::memory_order_relaxed);
+                                        float cooldownSecs = 5.0f;
+                                        if (auto* p = canvas->owner->getValueTreeState().getRawParameterValue("hardCutDuration"))
+                                            cooldownSecs = p->load();
+                                        if (nowMs - lastMs < (double)cooldownSecs * 1000.0) return;
+                                        canvas->lastHardCutMs.store(nowMs, std::memory_order_relaxed);
+                                        auto* proc = canvas->owner;
+                                        juce::MessageManager::callAsync([proc]() {
+                                            proc->nextPresetInPlaylist();
+                                        });
                                     },
                                     this);
                             }
-                            lastAppliedBeatSens_ = bs;
-                            lastAppliedTransDur_  = td;
-                            MDW_LOG_INFO("projectM: beat detection configured (hard cuts enabled)");
+                            lastAppliedBeatSens_    = bs;
+                            lastAppliedHardCutEn_   = hcEn ? 1.0f : 0.0f;
+                            lastAppliedHardCutSens_ = hcSens;
+                            lastAppliedSoftCutDur_  = scDur;
+                            lastAppliedHardCutDur_  = hcDur;
+                            MDW_LOG_INFO(juce::String("projectM: parameters applied (hardCuts=")
+                                + (hcEn ? "on" : "off") + ", beatSens=" + juce::String(bs, 2) + ")");
                         }
                     }
                 }
@@ -2999,13 +3057,6 @@ private:
                                 double sr = 0.0;
                                 // Request around 1024 frames for responsiveness; VisualizationThread will clamp to available
                                 vt->getLatestPcmWindow(pcm, 1024, sr);
-                                // Apply Beat Sensitivity scaling to input amplitude before feeding
-                                float scale = 1.0f;
-                                if (auto* pBeat = owner->getValueTreeState().getRawParameterValue("beatSensitivity"))
-                                    scale = pBeat->load();
-                                if (scale != 1.0f) {
-                                    for (auto& s : pcm) s *= scale;
-                                }
                                 // Determine bypass and recent-audio status
                                 bool bypassed = false;
                                 if (auto* bp = owner->getBypassParameter())
@@ -3070,21 +3121,44 @@ private:
                                #endif // _WIN32
                             }
                         }
-                        // Live-sync beat sensitivity to projectM if the parameter has changed
+                        // Live-sync parameters to projectM when APVTS values change
                         if (owner) {
-                            float bs = 1.0f, td = 5.0f;
-                            if (auto* p = owner->getValueTreeState().getRawParameterValue("beatSensitivity"))
-                                bs = p->load();
-                            if (auto* p = owner->getValueTreeState().getRawParameterValue("transitionDurationSeconds"))
-                                td = p->load();
-                            if (bs != lastAppliedBeatSens_) {
-                                if (g_pm_set_beat_sensitivity)     g_pm_set_beat_sensitivity(pmHandle, bs);
-                                if (g_pm_set_hard_cut_sensitivity) g_pm_set_hard_cut_sensitivity(pmHandle, juce::jlimit(0.0f, 1.0f, bs / 2.0f));
-                                lastAppliedBeatSens_ = bs;
+                            auto& vts = owner->getValueTreeState();
+                            if (auto* p = vts.getRawParameterValue("beatSensitivity")) {
+                                float v = p->load();
+                                if (v != lastAppliedBeatSens_) {
+                                    if (g_pm_set_beat_sensitivity) g_pm_set_beat_sensitivity(pmHandle, v);
+                                    lastAppliedBeatSens_ = v;
+                                }
                             }
-                            if (td != lastAppliedTransDur_) {
-                                if (g_pm_set_hard_cut_duration) g_pm_set_hard_cut_duration(pmHandle, (double)(td * 0.5));
-                                lastAppliedTransDur_ = td;
+                            if (auto* p = vts.getRawParameterValue("hardCutEnabled")) {
+                                float v = p->load();
+                                if (v != lastAppliedHardCutEn_) {
+                                    if (g_pm_set_hard_cut_enabled) g_pm_set_hard_cut_enabled(pmHandle, v >= 0.5f);
+                                    lastAppliedHardCutEn_ = v;
+                                }
+                            }
+                            if (auto* p = vts.getRawParameterValue("hardCutSensitivity")) {
+                                float v = p->load();
+                                if (v != lastAppliedHardCutSens_) {
+                                    // Invert: UI "sensitivity" = ease of triggering; API "sensitivity" = volume threshold
+                                    if (g_pm_set_hard_cut_sensitivity) g_pm_set_hard_cut_sensitivity(pmHandle, 1.0f - v);
+                                    lastAppliedHardCutSens_ = v;
+                                }
+                            }
+                            if (auto* p = vts.getRawParameterValue("softCutDuration")) {
+                                float v = p->load();
+                                if (v != lastAppliedSoftCutDur_) {
+                                    if (g_pm_set_soft_cut_duration) g_pm_set_soft_cut_duration(pmHandle, (double)v);
+                                    lastAppliedSoftCutDur_ = v;
+                                }
+                            }
+                            if (auto* p = vts.getRawParameterValue("hardCutDuration")) {
+                                float v = p->load();
+                                if (v != lastAppliedHardCutDur_) {
+                                    if (g_pm_set_hard_cut_duration) g_pm_set_hard_cut_duration(pmHandle, (double)v);
+                                    lastAppliedHardCutDur_ = v;
+                                }
                             }
                         }
                         if (g_pm_opengl_render_frame) g_pm_opengl_render_frame(pmHandle);
@@ -3168,8 +3242,12 @@ private:
         bool pmReady { false };
         bool pmCanRender { false };
         bool isLoadingPreset { false };
-        float lastAppliedBeatSens_ { -1.0f }; // tracks last value pushed to projectm_set_beat_sensitivity
-        float lastAppliedTransDur_  { -1.0f }; // tracks last value pushed to projectm_set_hard_cut_duration
+        float lastAppliedBeatSens_    { -1.0f }; // last value sent to projectm_set_beat_sensitivity
+        float lastAppliedHardCutEn_   { -2.0f }; // last value sent to projectm_set_hard_cut_enabled (-2 = unset)
+        float lastAppliedHardCutSens_ { -1.0f }; // last value sent to projectm_set_hard_cut_sensitivity
+        float lastAppliedSoftCutDur_  { -1.0f }; // last value sent to projectm_set_soft_cut_duration
+        float lastAppliedHardCutDur_  { -1.0f }; // last value sent to projectm_set_hard_cut_duration
+        std::atomic<double> lastHardCutMs { 0.0 }; // wall-clock time of last hard cut we processed
        #ifdef _WIN32
         /* Removed experimental PCM injection hooks after instability reports */
        #endif
@@ -3198,8 +3276,6 @@ private:
     // Phase 4.2 controls
     juce::Label beatLabel;
     juce::Slider beatSlider;
-    juce::Label durationLabel;
-    juce::Slider durationSlider;
     juce::DrawableButton lockButton { "lockButton", juce::DrawableButton::ImageFitted };
     juce::DrawableButton shuffleButton { "shuffleButton", juce::DrawableButton::ImageFitted };
     juce::DrawableButton transitionButton { "transitionButton", juce::DrawableButton::ImageFitted }; // Phase 6.5
@@ -3212,17 +3288,13 @@ private:
     juce::DrawableButton nextButton { "nextButton", juce::DrawableButton::ImageFitted };
     juce::Label presetNameLabel;
     juce::String lastDisplayedName;
-    juce::Label transitionStyleLabel;
-    juce::ComboBox transitionStyleCombo;
     int lastKnownPlaylistSize { 0 }; // Phase 6.2 tracking
     bool updatingPresetCombo { false }; // guard to avoid feedback
 
     // Attachments
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> beatAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> durationAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> lockAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> shuffleAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> transitionStyleAttachment;
 
     std::unique_ptr<juce::FileChooser> fileChooser;
 

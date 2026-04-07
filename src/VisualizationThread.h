@@ -33,7 +33,10 @@ struct ProjectMContext {
     std::atomic<bool> shuffle{false};
     std::atomic<bool> lockCurrentPreset{false};
     std::atomic<int> presetIndex{0};
-    std::atomic<int> transitionStyle{0}; // 0=Cut, 1=Crossfade, 2=Blend
+    std::atomic<bool> hardCutEnabled{false};
+    std::atomic<float> hardCutSensitivity{0.5f};
+    std::atomic<float> hardCutDuration{5.0f};
+    std::atomic<float> softCutDuration{3.0f};
 
     juce::String currentPresetName; // for UI display
     int paletteIndex = 0; // derived visual palette for stub renderer
@@ -56,7 +59,10 @@ struct ProjectMContext {
     void setShuffle(bool v) { shuffle.store(v, std::memory_order_relaxed); }
     void setLockCurrentPreset(bool v) { lockCurrentPreset.store(v, std::memory_order_relaxed); }
     void setPresetIndex(int v) { presetIndex.store(v, std::memory_order_relaxed); }
-    void setTransitionStyle(int v) { transitionStyle.store(v, std::memory_order_relaxed); }
+    void setHardCutEnabled(bool v) { hardCutEnabled.store(v, std::memory_order_relaxed); }
+    void setHardCutSensitivity(float v) { hardCutSensitivity.store(v, std::memory_order_relaxed); }
+    void setHardCutDuration(float v) { hardCutDuration.store(v, std::memory_order_relaxed); }
+    void setSoftCutDuration(float v) { softCutDuration.store(v, std::memory_order_relaxed); }
 
     bool loadPreset(const juce::String& path, juce::String& outError)
     {
@@ -247,8 +253,14 @@ private:
                 pm.setLockCurrentPreset(pc.value >= 0.5f);
             else if (pc.paramID == "presetIndex")
                 pm.setPresetIndex((int)std::lround(pc.value));
-            else if (pc.paramID == "transitionStyle")
-                pm.setTransitionStyle((int)std::lround(pc.value));
+            else if (pc.paramID == "hardCutEnabled")
+                pm.setHardCutEnabled(pc.value >= 0.5f);
+            else if (pc.paramID == "hardCutSensitivity")
+                pm.setHardCutSensitivity(pc.value);
+            else if (pc.paramID == "hardCutDuration")
+                pm.setHardCutDuration(pc.value);
+            else if (pc.paramID == "softCutDuration")
+                pm.setSoftCutDuration(pc.value);
             else if (pc.paramID == "qualityOverride")
             {
             #if defined(MDW_ENABLE_ADAPTIVE_QUALITY)
