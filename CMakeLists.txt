@@ -48,7 +48,7 @@ option(MILKDAWP_COPY_DLLS_TO_ARTEFACTS "Copy dependent DLLs next to the built VS
 # Multi-platform defaults to ensure builds on Windows, macOS, and Linux
 if(APPLE)
   # Universal build (Intel + Apple Silicon) and reasonable deployment target
-  set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "Architectures for macOS builds" FORCE)
+  set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "Architectures for macOS builds")
   set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version" FORCE)
 elseif(UNIX)
   # Linux: ensure position independent code and X11 usage for JUCE GUI modules

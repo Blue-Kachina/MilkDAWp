@@ -41,24 +41,20 @@ jobs:
         run: scripts\bootstrap.bat
 
       - name: Configure
-        run: cmake --preset dev-win
+        run: cmake --preset release-win
         shell: pwsh
 
       - name: Build VST3
-        run: cmake --build --preset dev-win-Release --target MilkDAWp_VST3 --parallel
+        run: cmake --build --preset release-win-Release --target MilkDAWp_VST3 --parallel
         shell: pwsh
 
       - name: Package (zip)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist\windows | Out-Null
-          $vst3 = Get-ChildItem -Path build-win -Filter *.vst3 -Recurse | Select-Object -First 1
-          if (-not $vst3) { Write-Error 'No .vst3 built'; exit 1 }
-          Copy-Item $vst3.FullName dist\windows -Recurse
-          # Copy runtime DLLs alongside the VST3
-          Get-ChildItem -Path build-win -Filter *.dll -Recurse |
-            Where-Object { $_.DirectoryName -like '*x86_64-win*' } |
-            ForEach-Object { Copy-Item $_.FullName dist\windows }
+          $vst3 = "build-win-release\MilkDAWp_artefacts\Release\VST3\MilkDAWp.vst3"
+          if (-not (Test-Path $vst3)) { Write-Error "VST3 bundle not found at $vst3"; exit 1 }
+          Copy-Item $vst3 dist\windows -Recurse
           if (Test-Path resources\Quickstart_Windows.md) { Copy-Item resources\Quickstart_Windows.md dist\windows }
           if (Test-Path resources\Known-Issues.md)       { Copy-Item resources\Known-Issues.md       dist\windows }
           if (Test-Path resources\How-to-Collect-Logs.md){ Copy-Item resources\How-to-Collect-Logs.md dist\windows }
@@ -96,15 +92,15 @@ jobs:
           fi
 
       - name: Configure
-        run: cmake --preset dev-mac
+        run: cmake --preset release-mac
 
       - name: Build VST3
-        run: cmake --build --preset dev-mac-Release --target MilkDAWp_VST3 --parallel
+        run: cmake --build --preset release-mac-Release --target MilkDAWp_VST3 --parallel
 
       - name: Fix up dylib install names
         shell: bash
         run: |
-          VST3_PATH=$(find build-mac -name '*.vst3' -maxdepth 4 | head -n 1)
+          VST3_PATH=$(find build-mac-release -name '*.vst3' -maxdepth 4 | head -n 1)
           FRAMEWORKS="${VST3_PATH}/Contents/Frameworks"
           MACOS_BIN="${VST3_PATH}/Contents/MacOS/MilkDAWp"
           # Update install IDs and cross-references for every bundled dylib
@@ -129,14 +125,14 @@ jobs:
 
       - name: Ad-hoc codesign
         run: |
-          VST3_PATH=$(find build-mac -name '*.vst3' -maxdepth 4 | head -n 1)
+          VST3_PATH=$(find build-mac-release -name '*.vst3' -maxdepth 4 | head -n 1)
           codesign --force --deep --sign - "$VST3_PATH"
 
       - name: Package (zip)
         shell: bash
         run: |
           mkdir -p dist/macos
-          VST3_PATH=$(find build-mac -name '*.vst3' -maxdepth 4 | head -n 1)
+          VST3_PATH=$(find build-mac-release -name '*.vst3' -maxdepth 4 | head -n 1)
           if [ -z "$VST3_PATH" ]; then echo 'No .vst3 bundle found' && exit 1; fi
           cp -R "$VST3_PATH" dist/macos/
           if [ -f resources/Quickstart_macOS.md ];    then cp resources/Quickstart_macOS.md    dist/macos/; fi

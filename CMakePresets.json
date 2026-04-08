@@ -58,6 +58,41 @@
       }
     },
     {
+      "name": "release-win",
+      "displayName": "Release (Windows, plugin)",
+      "description": "Plugin-only build for Windows releases and CI; no tests, no local VST3 install",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build-win-release",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-dynamic",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/build-win-release/vcpkg_installed",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL",
+        "MILKDAWP_BUILD_PLUGIN": "ON",
+        "BUILD_TESTING": "OFF",
+        "MILKDAWP_WITH_PROJECTM": "ON"
+      }
+    },
+    {
+      "name": "release-mac",
+      "displayName": "Release (macOS, plugin)",
+      "description": "Plugin-only build for macOS releases and CI; ARM64, no tests",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build-mac-release",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "arm64-osx-dynamic",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/build-mac-release/vcpkg_installed",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "11.0",
+        "MILKDAWP_BUILD_PLUGIN": "ON",
+        "BUILD_TESTING": "OFF",
+        "MILKDAWP_WITH_PROJECTM": "ON"
+      }
+    },
+    {
       "name": "release-linux",
       "displayName": "Release (Linux, plugin)",
       "description": "Plugin-only build for Linux releases and CI; no tests",
@@ -82,6 +117,8 @@
     { "name": "dev-mac-Debug",   "configurePreset": "dev-mac", "configuration": "Debug" },
     { "name": "ci-linux-RelWithDebInfo", "configurePreset": "ci-linux", "configuration": "RelWithDebInfo" },
     { "name": "ci-linux-Debug", "configurePreset": "ci-linux", "configuration": "Debug" },
+    { "name": "release-win-Release",   "configurePreset": "release-win",   "configuration": "Release" },
+    { "name": "release-mac-Release",   "configurePreset": "release-mac",   "configuration": "Release" },
     { "name": "release-linux-Release", "configurePreset": "release-linux", "configuration": "Release" }
   ],
   "testPresets": [
