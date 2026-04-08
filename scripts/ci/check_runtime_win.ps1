@@ -16,10 +16,10 @@ if (-not (Test-Path $vst3Root)) {
   throw "VST3 output directory not found: $vst3Root"
 }
 
-# Find MilkDAWp.vst3 (there may be nested Company/Product folders depending on JUCE version)
-$vst3s = Get-ChildItem -Path $vst3Root -Recurse -Filter *.vst3 -ErrorAction SilentlyContinue
+# Find MilkDAWp.vst3 binary files (not the .vst3 bundle directory itself)
+$vst3s = Get-ChildItem -Path $vst3Root -Recurse -Filter *.vst3 -File -ErrorAction SilentlyContinue
 if ($vst3s.Count -eq 0) {
-  throw "No .vst3 bundles found under $vst3Root"
+  throw "No .vst3 binaries found under $vst3Root"
 }
 
 $failures = @()

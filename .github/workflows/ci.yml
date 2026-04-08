@@ -159,7 +159,7 @@ jobs:
           arch: x64
 
       - name: Configure (plugin, dev-win preset)
-        run: cmake --preset dev-win
+        run: cmake --preset dev-win -DMILKDAWP_VST3_COPY_TO_USER_DIR=OFF -DMILKDAWP_COPY_DLLS_TO_ARTEFACTS=ON
 
       - name: Build VST3 (Release via preset)
         run: cmake --build --preset dev-win-Release --target MilkDAWp_VST3 --parallel
