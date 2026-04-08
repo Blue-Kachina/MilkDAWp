@@ -28,3 +28,5 @@ while having the visualization displaying on another one (in fullscreen).
 - All controls automatable and MIDI-assignable.
 - State restores deterministically.
 - Fullscreen window mode operates correctly.
+
+Note: Now creates new releases upon pushing of a tag
