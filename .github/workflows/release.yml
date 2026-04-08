@@ -1,0 +1,206 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write   # needed to create GitHub Releases
+
+jobs:
+  build-windows:
+    name: Build Windows VST3
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up CMake
+        uses: lukka/get-cmake@v3.28.3
+
+      - name: Setup MSVC Dev Cmd
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install vcpkg
+        shell: pwsh
+        run: |
+          $vcpkgRoot = 'C:\vcpkg'
+          if (-not (Test-Path $vcpkgRoot)) {
+            git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
+          }
+          Set-Location $vcpkgRoot
+          git pull
+          .\bootstrap-vcpkg.bat
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Bootstrap
+        shell: cmd
+        run: scripts\bootstrap.bat
+
+      - name: Configure (dev-win Release)
+        run: cmake --preset dev-win-Release
+        shell: pwsh
+
+      - name: Build VST3
+        run: cmake --build build-win --config Release --target MilkDAWp_VST3 --parallel
+        shell: pwsh
+
+      - name: Package (zip)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist\windows | Out-Null
+          $vst3 = Get-ChildItem -Path build-win -Filter *.vst3 -Recurse | Select-Object -First 1
+          if (-not $vst3) { Write-Error 'No .vst3 built'; exit 1 }
+          Copy-Item $vst3.FullName dist\windows -Recurse
+          # Copy runtime DLLs alongside the VST3
+          Get-ChildItem -Path build-win -Filter *.dll -Recurse |
+            Where-Object { $_.DirectoryName -like '*x86_64-win*' } |
+            ForEach-Object { Copy-Item $_.FullName dist\windows }
+          if (Test-Path resources\Quickstart_Windows.md) { Copy-Item resources\Quickstart_Windows.md dist\windows }
+          if (Test-Path resources\Known-Issues.md)       { Copy-Item resources\Known-Issues.md       dist\windows }
+          if (Test-Path resources\How-to-Collect-Logs.md){ Copy-Item resources\How-to-Collect-Logs.md dist\windows }
+          $tag = "${{ github.ref_name }}"
+          Compress-Archive -Path dist\windows -DestinationPath "dist\MilkDAWp_${tag}_Windows.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: dist/MilkDAWp_${{ github.ref_name }}_Windows.zip
+
+  build-macos:
+    name: Build macOS VST3
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up CMake
+        uses: lukka/get-cmake@v3.28.3
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Bootstrap dependencies
+        run: |
+          chmod +x scripts/bootstrap.sh
+          ./scripts/bootstrap.sh
+          if [ -z "${VCPKG_ROOT:-}" ]; then
+            echo "VCPKG_ROOT=$PWD/.vcpkg" >> $GITHUB_ENV
+          else
+            echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
+          fi
+
+      - name: Configure (dev-mac Release)
+        run: cmake --preset dev-mac-Release
+
+      - name: Build VST3
+        run: cmake --build build-mac --config Release --target MilkDAWp_VST3 --parallel
+
+      - name: Package (zip)
+        shell: bash
+        run: |
+          mkdir -p dist/macos
+          VST3_PATH=$(find build-mac -name '*.vst3' -maxdepth 4 | head -n 1)
+          if [ -z "$VST3_PATH" ]; then echo 'No .vst3 bundle found' && exit 1; fi
+          cp -R "$VST3_PATH" dist/macos/
+          if [ -f resources/Quickstart_macOS.md ];    then cp resources/Quickstart_macOS.md    dist/macos/; fi
+          if [ -f resources/Known-Issues.md ];        then cp resources/Known-Issues.md        dist/macos/; fi
+          if [ -f resources/How-to-Collect-Logs.md ]; then cp resources/How-to-Collect-Logs.md dist/macos/; fi
+          TAG=${{ github.ref_name }}
+          (cd dist && zip -r MilkDAWp_${TAG}_macOS.zip macos)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: dist/MilkDAWp_${{ github.ref_name }}_macOS.zip
+
+  build-linux:
+    name: Build Linux VST3
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build zip \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libfreetype-dev libgl1-mesa-dev libasound2-dev
+
+      - name: Set up CMake
+        uses: lukka/get-cmake@v3.28.3
+
+      - name: Bootstrap dependencies
+        run: |
+          chmod +x scripts/bootstrap.sh
+          ./scripts/bootstrap.sh
+          if [ -z "${VCPKG_ROOT:-}" ]; then
+            echo "VCPKG_ROOT=$PWD/.vcpkg" >> $GITHUB_ENV
+          else
+            echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
+          fi
+
+      - name: Configure (plugin, Linux)
+        run: |
+          cmake -S . -B build-ci-plugin \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux-dynamic \
+            -DVCPKG_OVERLAY_TRIPLETS=./triplets \
+            -DVCPKG_INSTALLED_DIR=./build-ci-plugin/vcpkg_installed \
+            -DMILKDAWP_BUILD_PLUGIN=ON \
+            -DBUILD_TESTING=OFF \
+            -DMILKDAWP_WITH_PROJECTM=ON
+
+      - name: Build VST3
+        run: cmake --build build-ci-plugin --target MilkDAWp_VST3 --parallel
+
+      - name: Package (zip)
+        shell: bash
+        run: |
+          mkdir -p dist/linux
+          VST3_PATH=$(find build-ci-plugin -name '*.vst3' -maxdepth 4 | head -n 1)
+          if [ -z "$VST3_PATH" ]; then echo 'No .vst3 built' && exit 1; fi
+          cp -R "$VST3_PATH" dist/linux/
+          if [ -f resources/Quickstart_Linux.md ];    then cp resources/Quickstart_Linux.md    dist/linux/; fi
+          if [ -f resources/Known-Issues.md ];        then cp resources/Known-Issues.md        dist/linux/; fi
+          if [ -f resources/How-to-Collect-Logs.md ]; then cp resources/How-to-Collect-Logs.md dist/linux/; fi
+          TAG=${{ github.ref_name }}
+          (cd dist && zip -r MilkDAWp_${TAG}_Linux.zip linux)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: dist/MilkDAWp_${{ github.ref_name }}_Linux.zip
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: MilkDAWp ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: dist/*.zip

@@ -37,13 +37,14 @@ jobs:
           if [ -f resources/Quickstart_macOS.md ]; then cp resources/Quickstart_macOS.md dist/macos/; fi
           if [ -f resources/Known-Issues.md ]; then cp resources/Known-Issues.md dist/macos/; fi
           if [ -f resources/How-to-Collect-Logs.md ]; then cp resources/How-to-Collect-Logs.md dist/macos/; fi
-          (cd dist && zip -r MilkDAWp_v0.1.0-pretest_macOS.zip macos)
+          TAG=${{ github.ref_name }}
+          (cd dist && zip -r MilkDAWp_${TAG}_macOS.zip macos)
         shell: bash
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MilkDAWp_v0.1.0-pretest_macOS
-          path: dist/MilkDAWp_v0.1.0-pretest_macOS.zip
+          name: MilkDAWp_${{ github.ref_name }}_macOS
+          path: dist/MilkDAWp_${{ github.ref_name }}_macOS.zip
 
   linux:
     runs-on: ubuntu-latest
@@ -88,13 +89,14 @@ jobs:
           if [ -f resources/Quickstart_Linux.md ]; then cp resources/Quickstart_Linux.md dist/linux/; fi
           if [ -f resources/Known-Issues.md ]; then cp resources/Known-Issues.md dist/linux/; fi
           if [ -f resources/How-to-Collect-Logs.md ]; then cp resources/How-to-Collect-Logs.md dist/linux/; fi
-          (cd dist && zip -r MilkDAWp_v0.1.0-pretest_Linux.zip linux)
+          TAG=${{ github.ref_name }}
+          (cd dist && zip -r MilkDAWp_${TAG}_Linux.zip linux)
         shell: bash
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MilkDAWp_v0.1.0-pretest_Linux
-          path: dist/MilkDAWp_v0.1.0-pretest_Linux.zip
+          name: MilkDAWp_${{ github.ref_name }}_Linux
+          path: dist/MilkDAWp_${{ github.ref_name }}_Linux.zip
 
   windows:
     runs-on: windows-latest
@@ -130,10 +132,11 @@ jobs:
           if (Test-Path resources\Quickstart_Windows.md) { Copy-Item resources\Quickstart_Windows.md dist\windows }
           if (Test-Path resources\Known-Issues.md) { Copy-Item resources\Known-Issues.md dist\windows }
           if (Test-Path resources\How-to-Collect-Logs.md) { Copy-Item resources\How-to-Collect-Logs.md dist\windows }
-          Compress-Archive -Path dist\windows -DestinationPath dist\MilkDAWp_v0.1.0-pretest_Windows.zip -Force
+          $tag = "${{ github.ref_name }}"
+          Compress-Archive -Path dist\windows -DestinationPath "dist\MilkDAWp_${tag}_Windows.zip" -Force
         shell: pwsh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MilkDAWp_v0.1.0-pretest_Windows
-          path: dist/MilkDAWp_v0.1.0-pretest_Windows.zip
+          name: MilkDAWp_${{ github.ref_name }}_Windows
+          path: dist/MilkDAWp_${{ github.ref_name }}_Windows.zip
