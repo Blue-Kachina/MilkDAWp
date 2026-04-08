@@ -101,6 +101,37 @@ jobs:
       - name: Build VST3
         run: cmake --build --preset dev-mac-Release --target MilkDAWp_VST3 --parallel
 
+      - name: Fix up dylib install names
+        shell: bash
+        run: |
+          VST3_PATH=$(find build-mac -name '*.vst3' -maxdepth 4 | head -n 1)
+          FRAMEWORKS="${VST3_PATH}/Contents/Frameworks"
+          MACOS_BIN="${VST3_PATH}/Contents/MacOS/MilkDAWp"
+          # Update install IDs and cross-references for every bundled dylib
+          for dylib in "${FRAMEWORKS}"/*.dylib; do
+            [ -f "$dylib" ] || continue
+            libname=$(basename "$dylib")
+            install_name_tool -id "@rpath/${libname}" "$dylib" 2>/dev/null || true
+            while IFS= read -r ref; do
+              refname=$(basename "$ref")
+              [ -f "${FRAMEWORKS}/${refname}" ] || continue
+              install_name_tool -change "$ref" "@rpath/${refname}" "$dylib" 2>/dev/null || true
+            done < <(otool -L "$dylib" | tail -n +2 | awk '{print $1}')
+          done
+          # Fix references in the plugin binary itself
+          if [ -f "$MACOS_BIN" ]; then
+            while IFS= read -r ref; do
+              refname=$(basename "$ref")
+              [ -f "${FRAMEWORKS}/${refname}" ] || continue
+              install_name_tool -change "$ref" "@rpath/${refname}" "$MACOS_BIN" 2>/dev/null || true
+            done < <(otool -L "$MACOS_BIN" | tail -n +2 | awk '{print $1}')
+          fi
+
+      - name: Ad-hoc codesign
+        run: |
+          VST3_PATH=$(find build-mac -name '*.vst3' -maxdepth 4 | head -n 1)
+          codesign --force --deep --sign - "$VST3_PATH"
+
       - name: Package (zip)
         shell: bash
         run: |
@@ -149,21 +180,11 @@ jobs:
             echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
           fi
 
-      - name: Configure (plugin, Linux)
-        run: |
-          cmake -S . -B build-ci-plugin \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_TARGET_TRIPLET=x64-linux-dynamic \
-            -DVCPKG_OVERLAY_TRIPLETS=./triplets \
-            -DVCPKG_INSTALLED_DIR=./build-ci-plugin/vcpkg_installed \
-            -DMILKDAWP_BUILD_PLUGIN=ON \
-            -DBUILD_TESTING=OFF \
-            -DMILKDAWP_WITH_PROJECTM=ON
+      - name: Configure
+        run: cmake --preset release-linux
 
       - name: Build VST3
-        run: cmake --build build-ci-plugin --target MilkDAWp_VST3 --parallel
+        run: cmake --build --preset release-linux-Release --target MilkDAWp_VST3 --parallel
 
       - name: Package (zip)
         shell: bash

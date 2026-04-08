@@ -351,7 +351,15 @@ if(MILKDAWP_BUILD_PLUGIN)
           COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/../Frameworks"
           COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${_PROJECTM_TARGET}> "$<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/../Frameworks/"
           VERBATIM)
-        # Note: Codesigning steps are not added here to keep Phase 3 minimal and cross-platform-safe.
+        # Bundle ALL vcpkg dynamic libraries so transitive deps (freetype, libpng, zlib, brotli…) are present
+        add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
+          COMMAND ${CMAKE_COMMAND}
+            -D SRC_DIR=${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib
+            -D DEST_DIR=$<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/../Frameworks
+            -D PATTERNS=*.dylib
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/copy_runtime_deps.cmake
+          VERBATIM)
+        # Note: install_name_tool fixup (embedded dylib IDs/rpaths) is done in the release workflow.
       endif()
     elseif(UNIX)
       # Linux: place libprojectM.so under .../YourPlugin.vst3/Contents/Resources/lib and add rpath
@@ -360,6 +368,15 @@ if(MILKDAWP_BUILD_PLUGIN)
         add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
           COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/../Resources/lib"
           COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${_PROJECTM_TARGET}> "$<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/../Resources/lib/"
+          VERBATIM)
+        # Bundle ALL vcpkg shared libraries so transitive deps (freetype, libpng, zlib, brotli…) are present
+        add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
+          COMMAND ${CMAKE_COMMAND}
+            -D SRC_DIR=${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib
+            -D DEST_DIR=$<TARGET_FILE_DIR:${PROJECT_NAME}_VST3>/../Resources/lib
+            -D PATTERNS=*.so;*.so.*
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/copy_runtime_deps.cmake
+          COMMAND_EXPAND_LISTS
           VERBATIM)
       endif()
     endif()

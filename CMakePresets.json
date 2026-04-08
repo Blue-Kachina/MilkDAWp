@@ -35,7 +35,7 @@
         "VCPKG_TARGET_TRIPLET": "x64-osx-dynamic",
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets",
         "VCPKG_INSTALLED_DIR": "${sourceDir}/build-mac/vcpkg_installed",
-        "CMAKE_OSX_ARCHITECTURES": "x86_64;arm64",
+        "CMAKE_OSX_ARCHITECTURES": "x86_64",
         "CMAKE_OSX_DEPLOYMENT_TARGET": "11.0",
         "MILKDAWP_BUILD_PLUGIN": "ON",
         "BUILD_TESTING": "OFF",
@@ -56,6 +56,23 @@
         "MILKDAWP_BUILD_PLUGIN": "OFF",
         "BUILD_TESTING": "ON"
       }
+    },
+    {
+      "name": "release-linux",
+      "displayName": "Release (Linux, plugin)",
+      "description": "Plugin-only build for Linux releases and CI; no tests",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-ci-plugin",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-linux-dynamic",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/build-ci-plugin/vcpkg_installed",
+        "CMAKE_BUILD_TYPE": "Release",
+        "MILKDAWP_BUILD_PLUGIN": "ON",
+        "BUILD_TESTING": "OFF",
+        "MILKDAWP_WITH_PROJECTM": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -64,7 +81,8 @@
     { "name": "dev-mac-Release", "configurePreset": "dev-mac", "configuration": "Release" },
     { "name": "dev-mac-Debug",   "configurePreset": "dev-mac", "configuration": "Debug" },
     { "name": "ci-linux-RelWithDebInfo", "configurePreset": "ci-linux", "configuration": "RelWithDebInfo" },
-    { "name": "ci-linux-Debug", "configurePreset": "ci-linux", "configuration": "Debug" }
+    { "name": "ci-linux-Debug", "configurePreset": "ci-linux", "configuration": "Debug" },
+    { "name": "release-linux-Release", "configurePreset": "release-linux", "configuration": "Release" }
   ],
   "testPresets": [
     {

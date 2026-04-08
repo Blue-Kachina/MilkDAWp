@@ -17,6 +17,8 @@
   #define NOMINMAX
   #include <windows.h>
   #include <dwmapi.h> // For DWMWA_WINDOW_CORNER_PREFERENCE (Windows 11+); we will load dynamically at runtime
+#else
+  #include <dlfcn.h>  // dlopen / dlsym / dladdr for POSIX runtime loading
 #endif
 
 // Some asset bundles expose gear-six as a direct BinaryData symbol without getNamedResource table entries.
@@ -117,26 +119,30 @@ namespace {
 #include <projectM-4/projectM.h>
 #endif
 
-#if MILKDAWP_HAS_PROJECTM && defined(_WIN32)
+#if MILKDAWP_HAS_PROJECTM
 namespace {
-    // Runtime-resolved projectM API set to avoid linker delay-load crashes and allow both debug/release DLL names.
-    typedef projectm_handle (__cdecl *PFN_PM_CREATE)();
-    typedef void (__cdecl *PFN_PM_DESTROY)(projectm_handle);
-    typedef void (__cdecl *PFN_PM_SET_WINDOW_SIZE)(projectm_handle, size_t, size_t);
-    typedef void (__cdecl *PFN_PM_SET_FPS)(projectm_handle, int);
-    typedef void (__cdecl *PFN_PM_SET_ASPECT)(projectm_handle, bool);
-    typedef void (__cdecl *PFN_PM_LOAD_PRESET_FILE)(projectm_handle, const char*, bool);
-    typedef void (__cdecl *PFN_PM_OPENGL_RENDER_FRAME)(projectm_handle);
-    // Beat detection and preset transition API
-    typedef void (__cdecl *PFN_PM_SET_BEAT_SENSITIVITY)(projectm_handle, float);
-    typedef void (__cdecl *PFN_PM_SET_HARD_CUT_ENABLED)(projectm_handle, bool);
-    typedef void (__cdecl *PFN_PM_SET_HARD_CUT_DURATION)(projectm_handle, double);
-    typedef void (__cdecl *PFN_PM_SET_HARD_CUT_SENSITIVITY)(projectm_handle, float);
-    typedef void (__cdecl *PFN_PM_SET_PRESET_DURATION)(projectm_handle, double);
-    typedef void (__cdecl *PFN_PM_SET_SOFT_CUT_DURATION)(projectm_handle, double);
-    typedef void (__cdecl *PFN_PM_SET_PRESET_SWITCH_CB)(projectm_handle, void(*)(bool, void*), void*);
+    // Runtime-resolved projectM API — platform-independent function pointers.
+    // Windows uses LoadLibrary/GetProcAddress; macOS/Linux use dlopen/dlsym.
+    typedef projectm_handle (*PFN_PM_CREATE)();
+    typedef void (*PFN_PM_DESTROY)(projectm_handle);
+    typedef void (*PFN_PM_SET_WINDOW_SIZE)(projectm_handle, size_t, size_t);
+    typedef void (*PFN_PM_SET_FPS)(projectm_handle, int);
+    typedef void (*PFN_PM_SET_ASPECT)(projectm_handle, bool);
+    typedef void (*PFN_PM_LOAD_PRESET_FILE)(projectm_handle, const char*, bool);
+    typedef void (*PFN_PM_OPENGL_RENDER_FRAME)(projectm_handle);
+    typedef void (*PFN_PM_SET_BEAT_SENSITIVITY)(projectm_handle, float);
+    typedef void (*PFN_PM_SET_HARD_CUT_ENABLED)(projectm_handle, bool);
+    typedef void (*PFN_PM_SET_HARD_CUT_DURATION)(projectm_handle, double);
+    typedef void (*PFN_PM_SET_HARD_CUT_SENSITIVITY)(projectm_handle, float);
+    typedef void (*PFN_PM_SET_PRESET_DURATION)(projectm_handle, double);
+    typedef void (*PFN_PM_SET_SOFT_CUT_DURATION)(projectm_handle, double);
+    typedef void (*PFN_PM_SET_PRESET_SWITCH_CB)(projectm_handle, void(*)(bool, void*), void*);
 
+   #ifdef _WIN32
     static HMODULE g_pmModule = nullptr;
+   #else
+    static void* g_pmModule = nullptr;
+   #endif
     static PFN_PM_CREATE                g_pm_create = nullptr;
     static PFN_PM_DESTROY               g_pm_destroy = nullptr;
     static PFN_PM_SET_WINDOW_SIZE       g_pm_set_window_size = nullptr;
@@ -154,10 +160,8 @@ namespace {
 }
 #endif
 
-// Local anchor to resolve this module's HMODULE at runtime (Windows)
-#ifdef _WIN32
+// Local anchor for resolving this module's path at runtime (GetModuleHandleEx on Windows, dladdr on POSIX)
 extern "C" void mdw_module_anchor() {}
-#endif
 
 class MilkDAWpAudioProcessor : public juce::AudioProcessor, public juce::AudioProcessorValueTreeState::Listener {
 public:
@@ -2910,8 +2914,80 @@ private:
             } else {
                 MDW_LOG_INFO("projectM: C API resolved successfully (runtime)");
             }
-           #endif
-           #endif
+           #endif // Windows symbol resolution
+
+           #elif defined(__APPLE__) || defined(__linux__)
+           {
+               // POSIX runtime loading of projectM via dlopen/dlsym (mirrors Windows LoadLibrary path)
+              #if defined(__APPLE__)
+               const char* pmCandidates[] = { "libprojectM-4.dylib", nullptr };
+              #else
+               const char* pmCandidates[] = { "libprojectM-4.so", "libprojectM-4.so.4", nullptr };
+              #endif
+
+               // First try rpath-relative loading — rpath set by linker resolves from the bundle
+               void* hPMProbe = nullptr;
+               for (int i = 0; pmCandidates[i] != nullptr && !hPMProbe; ++i) {
+                   hPMProbe = dlopen(pmCandidates[i], RTLD_LAZY | RTLD_GLOBAL);
+                   if (hPMProbe)
+                       MDW_LOG_INFO(juce::String("projectM loaded via rpath: ") + pmCandidates[i]);
+               }
+
+               // Fallback: absolute path relative to this shared library's location via dladdr
+               if (!hPMProbe) {
+                   Dl_info dlinfo{};
+                   if (dladdr((void*)&mdw_module_anchor, &dlinfo) && dlinfo.dli_fname != nullptr) {
+                       juce::File selfLib(juce::String::fromUTF8(dlinfo.dli_fname));
+                      #if defined(__APPLE__)
+                       // Bundle layout: Contents/MacOS/<binary> → sibling Frameworks dir
+                       juce::File libDir = selfLib.getParentDirectory().getSiblingFile("Frameworks");
+                      #else
+                       // Bundle layout: Contents/x86_64-linux-so/<binary> → sibling Resources/lib dir
+                       juce::File libDir = selfLib.getParentDirectory().getSiblingFile("Resources").getChildFile("lib");
+                      #endif
+                       for (int i = 0; pmCandidates[i] != nullptr && !hPMProbe; ++i) {
+                           auto fullPath = libDir.getChildFile(pmCandidates[i]).getFullPathName();
+                           hPMProbe = dlopen(fullPath.toRawUTF8(), RTLD_LAZY | RTLD_GLOBAL);
+                           if (hPMProbe)
+                               MDW_LOG_INFO(juce::String("projectM loaded from bundle: ") + fullPath);
+                           else
+                               MDW_LOG_INFO(juce::String("projectM not found at: ") + fullPath);
+                       }
+                   }
+               }
+
+               if (!hPMProbe) {
+                   MDW_LOG_ERROR("projectM shared library not found; visualization unavailable");
+                   return;
+               }
+
+               g_pmModule = hPMProbe;
+               auto gp = [&](const char* name) -> void* {
+                   void* p = dlsym(g_pmModule, name);
+                   if (!p) MDW_LOG_INFO(juce::String("projectM symbol not found: ") + name);
+                   return p;
+               };
+               g_pm_create              = (PFN_PM_CREATE) gp("projectm_create");
+               g_pm_destroy             = (PFN_PM_DESTROY) gp("projectm_destroy");
+               g_pm_set_window_size     = (PFN_PM_SET_WINDOW_SIZE) gp("projectm_set_window_size");
+               g_pm_set_fps             = (PFN_PM_SET_FPS) gp("projectm_set_fps");
+               g_pm_set_aspect          = (PFN_PM_SET_ASPECT) gp("projectm_set_aspect_correction");
+               g_pm_load_preset_file    = (PFN_PM_LOAD_PRESET_FILE) gp("projectm_load_preset_file");
+               g_pm_opengl_render_frame = (PFN_PM_OPENGL_RENDER_FRAME) gp("projectm_opengl_render_frame");
+               g_pm_set_beat_sensitivity     = (PFN_PM_SET_BEAT_SENSITIVITY)     gp("projectm_set_beat_sensitivity");
+               g_pm_set_hard_cut_enabled     = (PFN_PM_SET_HARD_CUT_ENABLED)     gp("projectm_set_hard_cut_enabled");
+               g_pm_set_hard_cut_duration    = (PFN_PM_SET_HARD_CUT_DURATION)    gp("projectm_set_hard_cut_duration");
+               g_pm_set_hard_cut_sensitivity = (PFN_PM_SET_HARD_CUT_SENSITIVITY) gp("projectm_set_hard_cut_sensitivity");
+               g_pm_set_preset_duration      = (PFN_PM_SET_PRESET_DURATION)      gp("projectm_set_preset_duration");
+               g_pm_set_soft_cut_duration    = (PFN_PM_SET_SOFT_CUT_DURATION)    gp("projectm_set_soft_cut_duration");
+               g_pm_set_preset_switch_cb     = (PFN_PM_SET_PRESET_SWITCH_CB)     gp("projectm_set_preset_switch_requested_event_callback");
+               if (!g_pm_create || !g_pm_destroy || !g_pm_set_window_size || !g_pm_set_fps || !g_pm_set_aspect || !g_pm_load_preset_file || !g_pm_opengl_render_frame) {
+                   MDW_LOG_ERROR("projectM: one or more required API symbols missing; visualization unavailable");
+               } else {
+                   MDW_LOG_INFO("projectM: C API resolved successfully (runtime, POSIX)");
+               }
+           }
+           #endif // Windows / POSIX branch
             // Create a projectM instance bound to this GL context
             // Defer creating projectM until we have a preset path to load (avoids upstream Debug asserts on idle preset)
             MDW_LOG_INFO("projectM: deferring instance creation until a preset is selected");
@@ -3067,29 +3143,29 @@ private:
                                     pcm.assign((size_t)512 * 2, 0.0f);
                                     if (sr <= 0.0) sr = 44100.0;
                                 }
-                               #ifdef _WIN32
-                                // Runtime resolve projectM audio input APIs to avoid hard coupling to headers/symbol variants
-                                typedef void (__cdecl *PFN_PM_PCM_ADD_FLOAT)(projectm_handle, const float*, size_t, int);
-                                typedef void (__cdecl *PFN_PM_PCM_ADD_INT16)(projectm_handle, const int16_t*, size_t, int);
+                                // Runtime resolve projectM audio input APIs (cross-platform via g_pmModule)
+                                typedef void (*PFN_PM_PCM_ADD_FLOAT)(projectm_handle, const float*, size_t, int);
+                                typedef void (*PFN_PM_PCM_ADD_INT16)(projectm_handle, const int16_t*, size_t, int);
                                 static PFN_PM_PCM_ADD_FLOAT s_pmAddFloat = nullptr;
                                 static PFN_PM_PCM_ADD_INT16 s_pmAddI16 = nullptr;
                                 static bool s_triedResolve = false;
-                                if (!s_triedResolve) {
+                                if (!s_triedResolve && g_pmModule != nullptr) {
                                     s_triedResolve = true;
-                                    HMODULE hPM = GetModuleHandleW(L"projectM-4d.dll");
-                                    if (!hPM) hPM = GetModuleHandleW(L"projectM-4.dll");
-                                    if (hPM) {
-                                        s_pmAddFloat = (PFN_PM_PCM_ADD_FLOAT) GetProcAddress(hPM, "projectm_pcm_add_float");
-                                        if (!s_pmAddFloat) s_pmAddFloat = (PFN_PM_PCM_ADD_FLOAT) GetProcAddress(hPM, "projectm_pcm_add_f32");
-                                        s_pmAddI16 = (PFN_PM_PCM_ADD_INT16) GetProcAddress(hPM, "projectm_pcm_add_int16");
-                                        if (!s_pmAddI16) s_pmAddI16 = (PFN_PM_PCM_ADD_INT16) GetProcAddress(hPM, "projectm_pcm_add_s16");
-                                        if (!s_pmAddFloat && !s_pmAddI16) {
-                                            MDW_LOG_ERROR("projectM: no compatible PCM feed API found (float/int16)");
-                                        } else {
-                                            MDW_LOG_INFO("projectM: PCM feed API resolved");
-                                        }
+                                    auto resolve = [](const char* name) -> void* {
+                                       #ifdef _WIN32
+                                        return (void*) GetProcAddress(g_pmModule, name);
+                                       #else
+                                        return dlsym(g_pmModule, name);
+                                       #endif
+                                    };
+                                    s_pmAddFloat = (PFN_PM_PCM_ADD_FLOAT) resolve("projectm_pcm_add_float");
+                                    if (!s_pmAddFloat) s_pmAddFloat = (PFN_PM_PCM_ADD_FLOAT) resolve("projectm_pcm_add_f32");
+                                    s_pmAddI16 = (PFN_PM_PCM_ADD_INT16) resolve("projectm_pcm_add_int16");
+                                    if (!s_pmAddI16) s_pmAddI16 = (PFN_PM_PCM_ADD_INT16) resolve("projectm_pcm_add_s16");
+                                    if (!s_pmAddFloat && !s_pmAddI16) {
+                                        MDW_LOG_ERROR("projectM: no compatible PCM feed API found (float/int16)");
                                     } else {
-                                        MDW_LOG_ERROR("projectM: module handle not found for dynamic PCM API resolve");
+                                        MDW_LOG_INFO("projectM: PCM feed API resolved");
                                     }
                                 }
                                 const size_t frames = pcm.size() / 2;
@@ -3108,7 +3184,6 @@ private:
                                         s_pmAddI16(pmHandle, tmpI16.data(), frames, 2);
                                     }
                                 }
-                                // Throttled responsiveness log
                                #if defined(_DEBUG)
                                 static double lastPcmLogMs = 0.0;
                                 const double nowDbg = juce::Time::getMillisecondCounterHiRes();
@@ -3118,7 +3193,6 @@ private:
                                     lastPcmLogMs = nowDbg;
                                 }
                                #endif
-                               #endif // _WIN32
                             }
                         }
                         // Live-sync parameters to projectM when APVTS values change

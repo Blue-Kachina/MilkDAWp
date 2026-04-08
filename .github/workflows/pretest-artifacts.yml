@@ -54,7 +54,10 @@ jobs:
       - name: Install deps (Ubuntu)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config zip
+          sudo apt-get install -y \
+            ninja-build pkg-config zip \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libfreetype-dev libgl1-mesa-dev libasound2-dev
 
       - name: Setup CMake
         uses: jwlawson/actions-setup-cmake@v2
@@ -65,20 +68,11 @@ jobs:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
           vcpkgJsonGlob: 'vcpkg.json'
 
-      - name: Configure (plugin-enabled linux)
-        run: |
-          cmake -S . -B build-ci-plugin \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_TARGET_TRIPLET=x64-linux-dynamic \
-            -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/triplets \
-            -DMILKDAWP_BUILD_PLUGIN=ON \
-            -DBUILD_TESTING=OFF \
-            -DMILKDAWP_WITH_PROJECTM=ON
+      - name: Configure
+        run: cmake --preset release-linux
 
       - name: Build VST3
-        run: cmake --build build-ci-plugin --target MilkDAWp_VST3
+        run: cmake --build --preset release-linux-Release --target MilkDAWp_VST3
 
       - name: Package artifact (zip)
         run: |
