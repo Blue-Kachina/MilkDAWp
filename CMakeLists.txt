@@ -303,16 +303,16 @@ if(MILKDAWP_BUILD_PLUGIN)
         endif()
 
         # Copy additional common projectM runtime dependencies from vcpkg bin into the bundle (if present)
-        set(_VCPKG_BIN_DIR "$<IF:$<CONFIG:Debug>,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/debug/bin,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/bin>")
-        set(_MDW_EXTRA_DLLS "freetyped.dll;freetype.dll;libpng16d.dll;libpng16.dll;zlib1d.dll;zlibd1.dll;zlib1.dll;brotlicommon.dll;brotlidec.dll;brotlienc.dll;bz2d.dll;bzip2.dll;glew32d.dll;glew32.dll")
+        # Uses VCPKG_TARGET_TRIPLET so the path works for any triplet (e.g. x64-windows-dynamic, not hardcoded x64-windows)
+        set(_MDW_EXTRA_DLLS "projectM-4.dll;projectM-4d.dll;freetyped.dll;freetype.dll;libpng16d.dll;libpng16.dll;zlib1d.dll;zlibd1.dll;zlib1.dll;brotlicommon.dll;brotlidec.dll;brotlienc.dll;bz2d.dll;bzip2.dll;glew32d.dll;glew32.dll")
         add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
-          COMMAND ${CMAKE_COMMAND} -D SRC_DIR=$<IF:$<CONFIG:Debug>,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/debug/bin,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/bin> -D DEST_DIR=$<TARGET_FILE_DIR:${PROJECT_NAME}_VST3> -D NAMES=${_MDW_EXTRA_DLLS} -D PATTERNS="libpng16*.dll;zlib*.dll;brotli*.dll;bzip2*.dll;bz2*.dll"
+          COMMAND ${CMAKE_COMMAND} -D SRC_DIR=$<IF:$<CONFIG:Debug>,${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/debug/bin,${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin> -D DEST_DIR=$<TARGET_FILE_DIR:${PROJECT_NAME}_VST3> -D NAMES=${_MDW_EXTRA_DLLS} -D PATTERNS="projectM*.dll;libpng16*.dll;zlib*.dll;brotli*.dll;bzip2*.dll;bz2*.dll"
                   -P ${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/copy_runtime_deps.cmake
           COMMAND_EXPAND_LISTS
           VERBATIM)
         if(_JUCE_VST3_COPY_DIR)
           add_custom_command(TARGET ${PROJECT_NAME}_VST3 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -D SRC_DIR=$<IF:$<CONFIG:Debug>,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/debug/bin,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/bin> -D DEST_DIR=${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win -D NAMES=${_MDW_EXTRA_DLLS} -D PATTERNS="libpng16*.dll;zlib*.dll;brotli*.dll;bzip2*.dll;bz2*.dll"
+            COMMAND ${CMAKE_COMMAND} -D SRC_DIR=$<IF:$<CONFIG:Debug>,${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/debug/bin,${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin> -D DEST_DIR=${_JUCE_VST3_COPY_DIR}/${PRODUCT_NAME}.vst3/Contents/x86_64-win -D NAMES=${_MDW_EXTRA_DLLS} -D PATTERNS="projectM*.dll;libpng16*.dll;zlib*.dll;brotli*.dll;bzip2*.dll;bz2*.dll"
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/copy_runtime_deps.cmake
             COMMAND_EXPAND_LISTS
             VERBATIM)
