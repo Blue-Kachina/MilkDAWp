@@ -40,12 +40,12 @@ jobs:
         shell: cmd
         run: scripts\bootstrap.bat
 
-      - name: Configure (dev-win Release)
-        run: cmake --preset dev-win-Release
+      - name: Configure
+        run: cmake --preset dev-win
         shell: pwsh
 
       - name: Build VST3
-        run: cmake --build build-win --config Release --target MilkDAWp_VST3 --parallel
+        run: cmake --build --preset dev-win-Release --target MilkDAWp_VST3 --parallel
         shell: pwsh
 
       - name: Package (zip)
@@ -95,11 +95,11 @@ jobs:
             echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
           fi
 
-      - name: Configure (dev-mac Release)
-        run: cmake --preset dev-mac-Release
+      - name: Configure
+        run: cmake --preset dev-mac
 
       - name: Build VST3
-        run: cmake --build build-mac --config Release --target MilkDAWp_VST3 --parallel
+        run: cmake --build --preset dev-mac-Release --target MilkDAWp_VST3 --parallel
 
       - name: Package (zip)
         shell: bash
