@@ -195,6 +195,8 @@ public:
         if (path == currentPresetPath)
             return; // no change
         currentPresetPath = path;
+        presetLoadedAtPos_.store(lastKnownSongPos_.load());
+        playheadTargetDur_.store(getEffectiveTransitionDuration());
     #if MILKDAWP_ENABLE_VIZ_THREAD
         if (vizThread)
             vizThread->postLoadPreset(path);
@@ -216,6 +218,18 @@ public:
         // clamped to current playlist size wherever applied.
         params.emplace_back(std::make_unique<juce::AudioParameterInt>(
             "presetIndex", "Preset Index", 0, 4095, 0));
+        params.emplace_back(std::make_unique<juce::AudioParameterBool>(
+            "triggerNext", "Next Preset", false));
+        params.emplace_back(std::make_unique<juce::AudioParameterBool>(
+            "triggerPrev", "Previous Preset", false));
+        params.emplace_back(std::make_unique<juce::AudioParameterBool>(
+            "transitionJitterEnabled", "Transition Jitter", false));
+        params.emplace_back(std::make_unique<juce::AudioParameterFloat>(
+            "transitionDurationMin", "Transition Duration Min (s)",
+            juce::NormalisableRange<float>(0.1f, 30.0f, 0.0f, 1.0f), 3.0f));
+        params.emplace_back(std::make_unique<juce::AudioParameterFloat>(
+            "transitionDurationMax", "Transition Duration Max (s)",
+            juce::NormalisableRange<float>(0.1f, 30.0f, 0.0f, 1.0f), 15.0f));
         params.emplace_back(std::make_unique<juce::AudioParameterBool>(
             "hardCutEnabled", "Hard Cuts", false));
         params.emplace_back(std::make_unique<juce::AudioParameterFloat>(
@@ -301,6 +315,11 @@ public:
         apvts.addParameterListener("softCutDuration", this);
         apvts.addParameterListener("hardCutDuration", this);
         apvts.addParameterListener("qualityOverride", this);
+        apvts.addParameterListener("triggerNext", this);
+        apvts.addParameterListener("triggerPrev", this);
+        apvts.addParameterListener("transitionJitterEnabled", this);
+        apvts.addParameterListener("transitionDurationMin", this);
+        apvts.addParameterListener("transitionDurationMax", this);
     }
 
     ~MilkDAWpAudioProcessor() override {
@@ -420,6 +439,59 @@ public:
        #endif
 
         runningSamplePos += static_cast<uint64_t>(N);
+
+        // DAW playhead sync: drive auto-advance from host transport position when available.
+        // Falls back to wall-clock timer (restartAutoAdvanceTimer) when no playhead is present.
+        if (auto* ph = getPlayHead())
+        {
+            juce::AudioPlayHead::CurrentPositionInfo pos;
+            if (ph->getCurrentPosition(pos))
+            {
+                const bool nowPlaying = pos.isPlaying;
+                const bool wasPlaying = playheadWasPlaying_.exchange(nowPlaying);
+
+                if (nowPlaying)
+                {
+                    const double songSecs = pos.timeInSeconds;
+                    const double prevSongSecs = lastKnownSongPos_.load();
+
+                    // Detect transport restart or loop-back (position jumped backward)
+                    if (!wasPlaying || songSecs < prevSongSecs - 0.5)
+                    {
+                        presetLoadedAtPos_.store(songSecs);
+                        pendingAutoAdvance_.store(false);
+                    }
+                    lastKnownSongPos_.store(songSecs);
+
+                    const bool locked = [&] {
+                        auto* lp = apvts.getRawParameterValue("lockCurrentPreset");
+                        return lp && lp->load() >= 0.5f;
+                    }();
+
+                    if (!locked && hasActivePlaylist())
+                    {
+                        const float dur = playheadTargetDur_.load();
+                        if ((songSecs - presetLoadedAtPos_.load()) >= static_cast<double>(dur))
+                        {
+                            // Fire once per threshold crossing; message thread resets the flag
+                            if (!pendingAutoAdvance_.exchange(true))
+                            {
+                                juce::MessageManager::callAsync([this] {
+                                    nextPresetInPlaylist();
+                                    pendingAutoAdvance_.store(false);
+                                    stopAutoAdvanceTimer();
+                                });
+                            }
+                        }
+                    }
+                }
+                else if (wasPlaying)
+                {
+                    // Transport just stopped — pause the wall-clock timer too
+                    juce::MessageManager::callAsync([this] { stopAutoAdvanceTimer(); });
+                }
+            }
+        }
     }
 
     // Editor
@@ -432,15 +504,35 @@ public:
         if (vizThread)
             vizThread->postParameterChange(parameterID, newValue);
 #endif
-        if (parameterID == "shuffle") {
+        if (parameterID == "triggerNext" && newValue >= 0.5f)
+        {
+            juce::MessageManager::callAsync([this] {
+                nextPresetInPlaylist();
+                if (auto* p = apvts.getParameter("triggerNext"))
+                    p->setValueNotifyingHost(0.0f);
+            });
+        }
+        else if (parameterID == "triggerPrev" && newValue >= 0.5f)
+        {
+            juce::MessageManager::callAsync([this] {
+                prevPresetInPlaylist();
+                if (auto* p = apvts.getParameter("triggerPrev"))
+                    p->setValueNotifyingHost(0.0f);
+            });
+        }
+        else if (parameterID == "shuffle") {
             if (!playlistFiles.isEmpty()) {
                 rebuildPlaylistOrder();
                 // Reload current selection based on new order
                 goToPlaylistRelative(0);
                 restartAutoAdvanceTimer();
             }
-        } else if (parameterID == "transitionDurationSeconds") {
-            // Restart timer with new interval if applicable
+        } else if (parameterID == "transitionDurationSeconds"
+                || parameterID == "transitionJitterEnabled"
+                || parameterID == "transitionDurationMin"
+                || parameterID == "transitionDurationMax") {
+            // Restart timer with new interval if applicable; also refresh playhead target
+            playheadTargetDur_.store(getEffectiveTransitionDuration());
             restartAutoAdvanceTimer();
         } else if (parameterID == "lockCurrentPreset") {
             const bool locked = newValue >= 0.5f;
@@ -574,15 +666,34 @@ private:
     std::unique_ptr<AutoAdvanceTimer> autoTimer; 
     bool ignorePresetIndexParamChange = false;
 
+    // Returns the effective transition duration in seconds, respecting jitter mode.
+    float getEffectiveTransitionDuration()
+    {
+        auto* jitterP = apvts.getRawParameterValue("transitionJitterEnabled");
+        if (jitterP && jitterP->load() >= 0.5f)
+        {
+            auto* minP = apvts.getRawParameterValue("transitionDurationMin");
+            auto* maxP = apvts.getRawParameterValue("transitionDurationMax");
+            float mn = minP ? minP->load() : 3.0f;
+            float mx = maxP ? maxP->load() : 15.0f;
+            if (mn > mx) std::swap(mn, mx);
+            if (mn == mx) return mn;
+            return mn + juce::Random::getSystemRandom().nextFloat() * (mx - mn);
+        }
+        auto* p = apvts.getRawParameterValue("transitionDurationSeconds");
+        return p ? p->load() : 5.0f;
+    }
+
     void stopAutoAdvanceTimer() {
         if (autoTimer) autoTimer->stopTimer();
     }
     void restartAutoAdvanceTimer() {
+        // Playhead is driving timing — don't start wall-clock timer
+        if (playheadWasPlaying_.load()) return;
         // Only if playlist active and not locked
         const bool locked = (apvts.getRawParameterValue("lockCurrentPreset") && apvts.getRawParameterValue("lockCurrentPreset")->load() >= 0.5f);
         if (!hasActivePlaylist() || locked) { stopAutoAdvanceTimer(); return; }
-        float secs = 5.0f;
-        if (auto* p = apvts.getRawParameterValue("transitionDurationSeconds")) secs = p->load();
+        float secs = getEffectiveTransitionDuration();
         int ms = juce::jlimit(100, 10 * 60 * 1000, (int) juce::roundToInt(secs * 1000.0f));
         if (!autoTimer) autoTimer = std::make_unique<AutoAdvanceTimer>(*this);
         autoTimer->stopTimer();
@@ -852,6 +963,13 @@ private:
     int beatCooldown = 0;
 
     uint64_t runningSamplePos = 0;
+
+    // DAW playhead sync
+    std::atomic<bool>   playheadWasPlaying_ { false };
+    std::atomic<double> lastKnownSongPos_   { 0.0 };  // updated every block by audio thread
+    std::atomic<double> presetLoadedAtPos_  { 0.0 };  // song-position when current preset loaded
+    std::atomic<float>  playheadTargetDur_  { 5.0f }; // sampled once per preset, used by audio thread
+    std::atomic<bool>   pendingAutoAdvance_ { false }; // prevents double-fire per threshold crossing
 
     milkdawp::AudioAnalysisQueue<64> analysisQueue;
     std::unique_ptr<milkdawp::VisualizationThread> vizThread;
@@ -1672,16 +1790,27 @@ public:
                 juce::ToggleButton hardCutToggle { "Hard Cuts" };
                 juce::Label cutSensLbl { {}, "Cut Sensitivity" };
                 juce::Slider cutSensKnob;
+                juce::Label hardCutDurLbl { {}, "Min. Interval" };
+                juce::Slider hardCutDurKnob;
+                // Fixed-duration controls
                 juce::Label durationLbl { {}, "Duration" };
                 juce::Slider durationKnob;
+                // Jitter-mode controls
+                juce::ToggleButton jitterToggle { "Jitter" };
+                juce::Label minDurLbl { {}, "Min" };
+                juce::Slider minDurKnob;
+                juce::Label maxDurLbl { {}, "Max" };
+                juce::Slider maxDurKnob;
+                // Shared
                 juce::Label blendTimeLbl { {}, "Blend Time" };
                 juce::Slider blendTimeKnob;
                 std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> hardCutAttach;
                 std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> cutSensAttach;
-                juce::Label hardCutDurLbl { {}, "Min. Interval" };
-                juce::Slider hardCutDurKnob;
                 std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> hardCutDurAttach;
                 std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> durationAttach;
+                std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> jitterAttach;
+                std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> minDurAttach;
+                std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> maxDurAttach;
                 std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> blendTimeAttach;
 
                 ~TransitionPopover() { setLookAndFeel(nullptr); }
@@ -1731,21 +1860,53 @@ public:
                     hardCutToggle.onStateChange = updateSensVis;
                     updateSensVis();
 
+                    // Fixed-duration knob
                     makeLbl(durationLbl);
                     makeKnob(durationKnob, "How long each preset plays before switching (seconds)");
                     durationAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
                         vts, "transitionDurationSeconds", durationKnob);
+
+                    // Jitter toggle + min/max knobs
+                    addAndMakeVisible(jitterToggle);
+                    jitterToggle.setTooltip("Randomise transition duration within a min/max range");
+                    jitterAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+                        vts, "transitionJitterEnabled", jitterToggle);
+
+                    makeLbl(minDurLbl);
+                    makeKnob(minDurKnob, "Minimum transition duration when jitter is enabled (seconds)");
+                    minDurAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+                        vts, "transitionDurationMin", minDurKnob);
+
+                    makeLbl(maxDurLbl);
+                    makeKnob(maxDurKnob, "Maximum transition duration when jitter is enabled (seconds)");
+                    maxDurAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+                        vts, "transitionDurationMax", maxDurKnob);
+
+                    // Show/hide jitter vs fixed controls
+                    auto updateJitterVis = [this]{
+                        const bool jitter = jitterToggle.getToggleState();
+                        durationLbl.setVisible(!jitter);
+                        durationKnob.setVisible(!jitter);
+                        minDurLbl.setVisible(jitter);
+                        minDurKnob.setVisible(jitter);
+                        maxDurLbl.setVisible(jitter);
+                        maxDurKnob.setVisible(jitter);
+                        resized();
+                    };
+                    jitterToggle.onStateChange = updateJitterVis;
+                    updateJitterVis();
 
                     makeLbl(blendTimeLbl);
                     makeKnob(blendTimeKnob, "Crossfade blend time between presets (seconds)");
                     blendTimeAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
                         vts, "softCutDuration", blendTimeKnob);
 
-                    setSize(280, 240);
+                    setSize(280, 268);
                 }
 
                 void resized() override {
                     const bool showHC = hardCutToggle.getToggleState();
+                    const bool showJitter = jitterToggle.getToggleState();
                     const int ksz = 48;
                     auto r = getLocalBounds().reduced(12);
                     title.setBounds(r.removeFromTop(18));
@@ -1764,15 +1925,31 @@ public:
                         hardCutDurKnob.setBounds(juce::Rectangle<int>(0,0,ksz,ksz).withCentre(durCol.getCentre()));
                         r.removeFromTop(4);
                     }
-                    // Duration + Blend Time side by side
+                    // Jitter toggle row
+                    jitterToggle.setBounds(r.removeFromTop(22));
+                    r.removeFromTop(6);
+                    // Bottom row: [Duration | Blend] or [Min | Max | Blend]
                     auto row = r;
-                    const int half = row.getWidth() / 2;
-                    auto leftCol  = row.removeFromLeft(half);
-                    auto rightCol = row;
-                    durationLbl.setBounds(leftCol.removeFromTop(14));
-                    durationKnob.setBounds(juce::Rectangle<int>(0,0,ksz,ksz).withCentre(leftCol.getCentre()));
-                    blendTimeLbl.setBounds(rightCol.removeFromTop(14));
-                    blendTimeKnob.setBounds(juce::Rectangle<int>(0,0,ksz,ksz).withCentre(rightCol.getCentre()));
+                    if (!showJitter) {
+                        const int half = row.getWidth() / 2;
+                        auto leftCol  = row.removeFromLeft(half);
+                        auto rightCol = row;
+                        durationLbl.setBounds(leftCol.removeFromTop(14));
+                        durationKnob.setBounds(juce::Rectangle<int>(0,0,ksz,ksz).withCentre(leftCol.getCentre()));
+                        blendTimeLbl.setBounds(rightCol.removeFromTop(14));
+                        blendTimeKnob.setBounds(juce::Rectangle<int>(0,0,ksz,ksz).withCentre(rightCol.getCentre()));
+                    } else {
+                        const int third = row.getWidth() / 3;
+                        auto minCol   = row.removeFromLeft(third);
+                        auto maxCol   = row.removeFromLeft(third);
+                        auto blendCol = row;
+                        minDurLbl.setBounds(minCol.removeFromTop(14));
+                        minDurKnob.setBounds(juce::Rectangle<int>(0,0,ksz,ksz).withCentre(minCol.getCentre()));
+                        maxDurLbl.setBounds(maxCol.removeFromTop(14));
+                        maxDurKnob.setBounds(juce::Rectangle<int>(0,0,ksz,ksz).withCentre(maxCol.getCentre()));
+                        blendTimeLbl.setBounds(blendCol.removeFromTop(14));
+                        blendTimeKnob.setBounds(juce::Rectangle<int>(0,0,ksz,ksz).withCentre(blendCol.getCentre()));
+                    }
                 }
             };
             auto* comp = new TransitionPopover(processor);
@@ -1984,7 +2161,11 @@ public:
                 prevButton.setImages(wN.get(), wO.get(), wD.get(), nullptr, nullptr, nullptr, nullptr);
             }
         }
-        prevButton.onClick = [this]{ processor.prevPresetInPlaylist(); presetNameLabel.setText(currentDisplayName(), juce::dontSendNotification); };
+        prevButton.onClick = [this]{
+            if (auto* p = processor.getValueTreeState().getParameter("triggerPrev"))
+                p->setValueNotifyingHost(1.0f);
+            presetNameLabel.setText(currentDisplayName(), juce::dontSendNotification);
+        };
         addAndMakeVisible(nextButton);
         nextButton.setTooltip("Next Preset");
         {
@@ -2018,7 +2199,11 @@ public:
                 nextButton.setImages(wN.get(), wO.get(), wD.get(), nullptr, nullptr, nullptr, nullptr);
             }
         }
-        nextButton.onClick = [this]{ processor.nextPresetInPlaylist(); presetNameLabel.setText(currentDisplayName(), juce::dontSendNotification); };
+        nextButton.onClick = [this]{
+            if (auto* p = processor.getValueTreeState().getParameter("triggerNext"))
+                p->setValueNotifyingHost(1.0f);
+            presetNameLabel.setText(currentDisplayName(), juce::dontSendNotification);
+        };
         // Phase 6.6: Hide transport buttons in compact layout
         prevButton.setVisible(false);
         nextButton.setVisible(false);
@@ -2537,8 +2722,18 @@ private:
             removeChildComponent(&vizCanvas);
             if (auto* content = externalWindow->getContent()) {
                 content->attachCanvas(&vizCanvas);
-                content->onPrev = [this]{ this->processor.prevPresetInPlaylist(); this->presetNameLabel.setText(this->currentDisplayName(), juce::dontSendNotification); if (this->externalWindow) { if (auto* ec = this->externalWindow->getContent()) { ec->setPresetName(this->currentDisplayName()); ec->setTransportEnabled(this->processor.hasActivePlaylistPublic()); } } };
-                content->onNext = [this]{ this->processor.nextPresetInPlaylist(); this->presetNameLabel.setText(this->currentDisplayName(), juce::dontSendNotification); if (this->externalWindow) { if (auto* ec = this->externalWindow->getContent()) { ec->setPresetName(this->currentDisplayName()); ec->setTransportEnabled(this->processor.hasActivePlaylistPublic()); } } };
+                content->onPrev = [this]{
+                    if (auto* p = this->processor.getValueTreeState().getParameter("triggerPrev"))
+                        p->setValueNotifyingHost(1.0f);
+                    this->presetNameLabel.setText(this->currentDisplayName(), juce::dontSendNotification);
+                    if (this->externalWindow) { if (auto* ec = this->externalWindow->getContent()) { ec->setPresetName(this->currentDisplayName()); ec->setTransportEnabled(this->processor.hasActivePlaylistPublic()); } }
+                };
+                content->onNext = [this]{
+                    if (auto* p = this->processor.getValueTreeState().getParameter("triggerNext"))
+                        p->setValueNotifyingHost(1.0f);
+                    this->presetNameLabel.setText(this->currentDisplayName(), juce::dontSendNotification);
+                    if (this->externalWindow) { if (auto* ec = this->externalWindow->getContent()) { ec->setPresetName(this->currentDisplayName()); ec->setTransportEnabled(this->processor.hasActivePlaylistPublic()); } }
+                };
                 content->setPresetName(this->currentDisplayName());
                 content->setTransportEnabled(this->processor.hasActivePlaylistPublic());
             }
