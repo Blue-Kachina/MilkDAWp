@@ -572,12 +572,24 @@ public:
     const juce::String getProgramName(int) override { return {}; }
     void changeProgramName(int, const juce::String&) override {}
 
+    // Editor window size (saved/restored so hosts that don't reliably call IPlugView::onSize on reload
+    // still open the plugin at the right dimensions).
+    int savedEditorW_ = 0;
+    int savedEditorH_ = 0;
+    void saveEditorSize(int w, int h) { savedEditorW_ = w; savedEditorH_ = h; }
+
     // State info
     void getStateInformation(juce::MemoryBlock& destData) override {
         juce::ValueTree root { juce::Identifier("MilkDAWpState") };
         root.setProperty("version", juce::String(MILKDAWP_VERSION_STRING), nullptr);
         root.setProperty("presetPath", currentPresetPath, nullptr);
         root.setProperty("playlistFolderPath", currentPlaylistFolderPath, nullptr);
+        MDW_LOG_INFO(juce::String("getStateInformation: saving editorW=") + juce::String(savedEditorW_)
+                     + " editorH=" + juce::String(savedEditorH_));
+        if (savedEditorW_ > 0 && savedEditorH_ > 0) {
+            root.setProperty("editorW", savedEditorW_, nullptr);
+            root.setProperty("editorH", savedEditorH_, nullptr);
+        }
 
         // Embed parameter state
         auto paramsState = apvts.copyState();
@@ -598,6 +610,10 @@ public:
         if (root.hasType(juce::Identifier("MilkDAWpState"))) {
             currentPresetPath = root.getProperty("presetPath").toString();
             currentPlaylistFolderPath = root.getProperty("playlistFolderPath").toString();
+            savedEditorW_ = (int) root.getProperty("editorW", 0);
+            savedEditorH_ = (int) root.getProperty("editorH", 0);
+            MDW_LOG_INFO(juce::String("setStateInformation: loaded editorW=") + juce::String(savedEditorW_)
+                         + " editorH=" + juce::String(savedEditorH_));
 
             // Find APVTS child by type
             const auto paramsType = apvts.state.getType();
@@ -611,6 +627,43 @@ public:
             // Re-scan playlist if path present
             if (currentPlaylistFolderPath.isNotEmpty())
                 setPlaylistFolderAndScan(currentPlaylistFolderPath);
+
+            // Cubase (and some other hosts) create the editor BEFORE calling setState,
+            // so the constructor falls back to the default size. Apply the saved size now.
+            // IMPORTANT: only resize if the host hasn't already set a different size via
+            // IPlugView::onSize -> parentSizeChanged. If the parent has its own opinion we
+            // must not override it (doing so causes the plugin contents to shrink inside the
+            // host's correctly-sized window frame).
+            const int w = savedEditorW_;
+            const int h = savedEditorH_;
+            if (w > 0 && h > 0) {
+                MDW_LOG_INFO(juce::String("setStateInformation: queuing callAsync resize to ") + juce::String(w) + "x" + juce::String(h));
+                juce::MessageManager::callAsync([this, w, h] {
+                    auto* ed = getActiveEditor();
+                    if (ed == nullptr) {
+                        MDW_LOG_INFO("setStateInformation callAsync fired: no active editor, skipping");
+                        return;
+                    }
+                    // If the host has already established a specific size for the parent
+                    // component (e.g. via IPlugView::onSize in Cubase), respect that size
+                    // rather than overriding it with our stale saved value.
+                    if (auto* parent = ed->getParentComponent()) {
+                        const int pw = parent->getWidth();
+                        const int ph = parent->getHeight();
+                        if (pw > 0 && ph > 0 && (pw != w || ph != h)) {
+                            MDW_LOG_INFO(juce::String("setStateInformation callAsync: host parent is ")
+                                         + juce::String(pw) + "x" + juce::String(ph)
+                                         + ", not overriding with saved " + juce::String(w) + "x" + juce::String(h));
+                            return;
+                        }
+                    }
+                    MDW_LOG_INFO(juce::String("setStateInformation callAsync: applying setSize ")
+                                 + juce::String(w) + "x" + juce::String(h));
+                    ed->setSize(w, h);
+                });
+            } else {
+                MDW_LOG_INFO("setStateInformation: no saved editor size (w=0 or h=0), skipping resize");
+            }
         }
     }
 
@@ -1472,12 +1525,23 @@ public:
         // file logger so early startup messages are captured; here we honour the user's choice.
         milkdawp::Logging::setEnabled(getSettings().getBoolValue("loggingEnabled", true));
 
+        // Capture the state-restored size BEFORE setResizeLimits, because setResizeLimits
+        // clamps the component from 0x0 to the minimum size, which fires resized() and
+        // overwrites savedEditorW_/savedEditorH_ before we can read them.
+        const int savedW = processor.savedEditorW_;
+        const int savedH = processor.savedEditorH_;
+
         // Enable resizing with sensible minimum size constraints
         setResizable(true, true);
         #if JUCE_MAJOR_VERSION >= 6
         setResizeLimits(900, 520, 3840, 2160);
         #endif
-        setSize(1200, 650); // per README default window size
+        // Restore saved editor size if available; otherwise fall back to default
+        {
+            MDW_LOG_INFO(juce::String("Editor ctor: savedW=") + juce::String(savedW) + " savedH=" + juce::String(savedH)
+                         + " -> setSize " + juce::String(savedW > 0 ? savedW : 1200) + "x" + juce::String(savedH > 0 ? savedH : 650));
+            setSize((savedW > 0 ? savedW : 1200), (savedH > 0 ? savedH : 650));
+        }
         // Ensure tooltips are enabled for this editor by creating a TooltipWindow attached to it
         tooltipWindow = std::make_unique<juce::TooltipWindow>(this, 700);
 
@@ -1629,11 +1693,15 @@ public:
         }
         settingsButton.onClick = [this]{ this->openSettingsPanel(); };
  
-         // Visualization canvas (embedded OpenGL)
-         addAndMakeVisible(vizCanvas);
+        // Visualization canvas (embedded OpenGL)
+        addAndMakeVisible(vizCanvas);
         vizCanvas.setOwner(&processor);
         // Ensure visualization thread runs even when host hasn't prepared audio yet
         processor.ensureVizThreadStartedForUI();
+        // resized() fired (from setSize above) before owner/vizThread were ready, so
+        // setSurfaceSize was skipped. Sync the surface size explicitly now.
+        if (auto* vt = processor.getVizThread())
+            vt->setSurfaceSize(vizCanvas.getWidth(), vizCanvas.getHeight());
 
         // Knobs and toggles (Phase 4.2)
         addAndMakeVisible(beatLabel);
@@ -2222,6 +2290,9 @@ public:
         startTimerHz(10);
         if (logoLoaded)
             logoImage.toFront(false);
+
+        // Final layout pass with all children in the hierarchy.
+        resized();
     }
 
     ~MilkDAWpAudioProcessorEditor() override {
@@ -2256,7 +2327,26 @@ public:
         }
     }
 
+    // Called by JUCE when the parent component (the VST3 wrapper's host view) changes size.
+    // In some hosts (e.g. Cubase) the wrapper is resized via IPlugView::onSize but the editor
+    // component itself is not automatically resized — this fills the parent so we always match it.
+    void parentSizeChanged() override
+    {
+        if (auto* parent = getParentComponent())
+        {
+            const int pw = parent->getWidth();
+            const int ph = parent->getHeight();
+            MDW_LOG_INFO(juce::String("parentSizeChanged: parent=") + juce::String(pw) + "x" + juce::String(ph)
+                         + " editor=" + juce::String(getWidth()) + "x" + juce::String(getHeight()));
+            if (pw > 0 && ph > 0 && (pw != getWidth() || ph != getHeight()))
+                setSize(pw, ph);
+        }
+    }
+
     void resized() override {
+        processor.saveEditorSize(getWidth(), getHeight());
+        MDW_LOG_INFO(juce::String("Editor resized: ") + juce::String(getWidth()) + "x" + juce::String(getHeight()));
+
         auto bounds = getLocalBounds();
         auto top = bounds.removeFromTop(topHeight);
         auto innerTop = top.reduced(16);
@@ -2392,7 +2482,10 @@ public:
         }
         else
         {
-            vizCanvas.setBounds(bounds.reduced(12));
+            auto cb = bounds.reduced(12);
+            MDW_LOG_INFO(juce::String("vizCanvas bounds: ") + juce::String(cb.getX()) + "," + juce::String(cb.getY())
+                         + " " + juce::String(cb.getWidth()) + "x" + juce::String(cb.getHeight()));
+            vizCanvas.setBounds(cb);
         }
     }
 
@@ -3193,13 +3286,26 @@ private:
             const double nowMs = juce::Time::getMillisecondCounterHiRes();
             lastGLFrameMs.store((uint64_t) nowMs, std::memory_order_relaxed);
             juce::OpenGLHelpers::clear(juce::Colours::transparentBlack);
-            // Ensure viewport matches the component size each frame
+            // Ensure viewport matches the physical drawable size each frame.
+            // cachedDisplayScale_ is updated on the message thread in resized(); fall back to
+            // context.getRenderingScale() if the cache hasn't been populated yet.
             {
-                const int w = juce::jmax(1, getWidth());
-                const int h = juce::jmax(1, getHeight());
-                // Use JUCE's OpenGL function table
+                float scale = cachedDisplayScale_.load(std::memory_order_relaxed);
+                if (scale <= 0.0f) scale = (float) context.getRenderingScale();
+                const int w = juce::jmax(1, juce::roundToInt(getWidth()  * scale));
+                const int h = juce::jmax(1, juce::roundToInt(getHeight() * scale));
+
+                // Log once per GL context creation so we can diagnose sizing issues.
+                static bool s_viewportLogged = false;
+                if (!s_viewportLogged) {
+                    MDW_LOG_INFO(juce::String("GL viewport: ") + juce::String(w) + "x" + juce::String(h)
+                                 + " (logical " + juce::String(getWidth()) + "x" + juce::String(getHeight())
+                                 + " scale=" + juce::String(scale, 2) + ")");
+                    s_viewportLogged = true;
+                }
+
                 juce::gl::glViewport(0, 0, w, h);
-                
+
                 // Keep projectM informed of the current drawable size (prevents asserts and wrong aspect)
                #if MILKDAWP_HAS_PROJECTM
                 if (pmHandle != nullptr) {
@@ -3221,8 +3327,10 @@ private:
                         // Note: projectM v4 C API may not expose set_preset_directory; we proceed to explicit file load below.
                         if (g_pm_set_fps) g_pm_set_fps(pmHandle, 60);
                         if (g_pm_set_aspect) g_pm_set_aspect(pmHandle, true);
-                        const int w0 = juce::jmax(2, getWidth());
-                        const int h0 = juce::jmax(2, getHeight());
+                        float sc0 = cachedDisplayScale_.load(std::memory_order_relaxed);
+                        if (sc0 <= 0.0f) sc0 = (float) context.getRenderingScale();
+                        const int w0 = juce::jmax(2, juce::roundToInt(getWidth()  * sc0));
+                        const int h0 = juce::jmax(2, juce::roundToInt(getHeight() * sc0));
                         if (g_pm_set_window_size) g_pm_set_window_size(pmHandle, (size_t) w0, (size_t) h0);
                         pmReady = true;
                         pmCanRender = false;
@@ -3492,6 +3600,13 @@ private:
         }
         void resized() override
         {
+            // Cache display scale for the GL thread (getRenderingScale() unreliable in hosted contexts).
+            if (auto* peer = getTopLevelComponent()->getPeer())
+                cachedDisplayScale_.store((float) peer->getPlatformScaleFactor(), std::memory_order_relaxed);
+
+            MDW_LOG_INFO(juce::String("VizCanvas resized: ") + juce::String(getWidth()) + "x" + juce::String(getHeight())
+                         + " scale=" + juce::String(cachedDisplayScale_.load(), 2));
+
             if (owner != nullptr) {
                 if (auto* vt = owner->getVizThread()) {
                     vt->setSurfaceSize(getWidth(), getHeight());
@@ -3499,6 +3614,7 @@ private:
             }
         }
         void setOwner(MilkDAWpAudioProcessor* p) { owner = p; }
+        std::atomic<float> cachedDisplayScale_ { 1.0f };
         juce::OpenGLContext context;
         double startTimeMs { 0.0 };
         std::atomic<bool> glContextCreated { false };
