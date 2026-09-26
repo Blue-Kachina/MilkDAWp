@@ -1,0 +1,17 @@
+[preset00]
+// MilkDAWp test preset (AGPL-3.0-or-later, written for this repo).
+// A thick circular waveform driven by the audio, on a black background.
+fDecay=0.5
+warp=0
+nWaveMode=0
+bMaximizeWaveColor=1
+bAdditiveWaves=1
+fWaveScale=2.0
+fWaveSmoothing=0.3
+wave_r=1.0
+wave_g=0.8
+wave_b=0.2
+wave_a=1.0
+wave_x=0.5
+wave_y=0.5
+per_frame_1=wave_g = 0.5 + 0.5*sin(time*1.9);

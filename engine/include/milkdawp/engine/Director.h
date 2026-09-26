@@ -1,0 +1,138 @@
+// SPDX-FileCopyrightText: 2026 The MilkDAWp contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+#pragma once
+
+#include <atomic>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "milkdawp/core/AudioRing.h"
+#include "milkdawp/core/HostTransport.h"
+#include "milkdawp/core/Messages.h"
+#include "milkdawp/core/Playlist.h"
+#include "milkdawp/core/SeqlockSnapshot.h"
+#include "milkdawp/core/TransitionScheduler.h"
+#include "milkdawp/engine/RenderEngine.h"
+
+namespace milkdawp::engine {
+
+/// What the shell wants the engine to do, published as one plain snapshot
+/// (the plugin fills it from its parameters every audio block; the app and
+/// mdw-view from their own controls). Trivially copyable, so it crosses
+/// threads through a SeqlockSnapshot.
+struct EngineControls {
+  core::TransitionMode transitionMode = core::TransitionMode::BeatQuantized;
+  std::uint32_t transitionBars = 4;
+  float timedDurationSeconds = 5.0f;
+  bool jitterEnabled = false;
+  float jitterMinSeconds = 3.0f;
+  float jitterMaxSeconds = 15.0f;
+  core::CutStyle cutStyle = core::CutStyle::Soft;
+  float blendSeconds = 3.0f;
+  bool locked = false;
+  core::PlaylistPolicy policy = core::PlaylistPolicy::Sequential;
+  /// Jump to this playlist index whenever the value changes (host
+  /// automation, the UI, or state restore).
+  std::int32_t presetIndex = 0;
+  float beatSensitivity = 1.0f;
+  float qualityScale = 1.0f;
+};
+
+enum class BeatSource : std::uint8_t { None, Detected, Host };
+
+/// The director's view for the UI, published once per loop.
+struct DirectorStatus {
+  float bpm = 0.0f;
+  float beatConfidence = 0.0f;
+  BeatSource beatSource = BeatSource::None;
+  bool transportPlaying = false;
+  std::int32_t currentIndex = -1;  // -1: no playlist loaded
+  std::uint32_t playlistSize = 0;
+  std::uint32_t transitionsIssued = 0;
+  std::uint32_t presetsSkipped = 0; // failed pre-validation, read, or projectM load
+  std::uint64_t playlistGeneration = 0; // bumps on every (re)scan
+};
+
+/// The engine's analysis thread (§4.2, Phase 2.6). Consumes the audio ring in
+/// 512-frame hops and runs the core pipeline (Analyzer, OnsetDetector,
+/// TempoTracker, BeatClock, or HostTransport when the host is playing, then
+/// TransitionScheduler); owns the Playlist and PresetLibrary; reads the
+/// chosen preset through PresetLoader (pre-validation, blacklist) and hands
+/// its text plus a TransitionRequestMessage to the RenderEngine, which loads
+/// it on the render thread when due.
+///
+/// Preset files are read on this thread, when a transition fires. They are
+/// small, and the scheduler decides on the hop a beat is crossed, so there is
+/// no earlier moment to prefetch into; the render thread never touches the
+/// filesystem either way (§4.2).
+///
+/// Threading: setControls() from one producer thread; publishHostTransport()
+/// from the audio thread only (never blocks); requestNext()/
+/// requestPrevious() from any thread; the folder and name accessors from the
+/// message thread (they take a mutex, never held by the audio thread).
+class Director {
+public:
+  /// `ring` and `render` must outlive the director. `followHostTransport`:
+  /// the plugin's host transport drives the beat clock while playing (§4.3).
+  Director(core::AudioRing& ring, RenderEngine& render, bool followHostTransport);
+  ~Director();
+  Director(const Director&) = delete;
+  Director& operator=(const Director&) = delete;
+
+  void setSampleRate(double sampleRate) noexcept;
+  void setControls(const EngineControls& controls) noexcept { controls_.publish(controls); }
+  /// Audio thread. `info.samplePos` must be in AudioRing frame numbers.
+  void publishHostTransport(const core::TransportInfo& info) noexcept { transport_.publish(info); }
+
+  void requestNext() noexcept { nextRequests_.fetch_add(1); }
+  void requestPrevious() noexcept { previousRequests_.fetch_add(1); }
+
+  /// Scans `folder` recursively for .milk presets (on the director thread)
+  /// and starts playing: `preferredPresetPath` if it is in the folder,
+  /// otherwise the `presetIndex` control.
+  void setPresetFolder(const std::string& folder, const std::string& preferredPresetPath = {});
+  void rescan();
+  [[nodiscard]] std::string presetFolder() const;
+  [[nodiscard]] std::string currentPresetPath() const;
+  /// Display name (path relative to the folder, without ".milk"), or empty.
+  [[nodiscard]] std::string presetName(std::int32_t index) const;
+
+  [[nodiscard]] DirectorStatus status() const noexcept { return status_.read(); }
+
+private:
+  struct Pipeline;
+  struct FolderRequest {
+    std::string folder;
+    std::string preferredPresetPath;
+    std::uint64_t serial = 0;
+  };
+
+  void run();
+
+  core::AudioRing& ring_;
+  RenderEngine& render_;
+  const bool followHostTransport_;
+
+  std::atomic<double> sampleRate_{48000.0};
+  std::atomic<bool> stopRequested_{false};
+  std::atomic<std::uint32_t> nextRequests_{0};
+  std::atomic<std::uint32_t> previousRequests_{0};
+  core::SeqlockSnapshot<EngineControls> controls_;
+  core::SeqlockSnapshot<core::TransportInfo> transport_;
+  core::SeqlockSnapshot<DirectorStatus> status_;
+
+  mutable std::mutex mutex_; // guards everything below
+  FolderRequest folderRequest_;
+  std::string currentFolder_;
+  std::string currentPresetPath_;
+  std::vector<std::string> presetNames_;
+
+  std::thread thread_;
+};
+
+} // namespace milkdawp::engine

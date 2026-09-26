@@ -1,0 +1,30 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+// MilkDAWp test preset (AGPL-3.0-or-later, written for this repo).
+// A thick outer border whose colour cycles with time: visible even with
+// silent audio, and different on every frame.
+// It is a MilkDrop 2 preset with a plain composite shader on purpose: the
+// MilkDrop 1 composite path always applies a hue shading whose offsets are
+// random per load (projectM's VideoEcho), so only with this shader does the
+// border colour depend on time alone (the 2.7 timing test).
+fDecay=0.9
+zoom=1.0
+rot=0.0
+warp=0
+nWaveMode=0
+wave_a=0
+ob_size=0.2
+ob_r=1
+ob_g=0
+ob_b=0
+ob_a=1
+per_frame_1=ob_r = 0.5 + 0.5*sin(time*2.0);
+per_frame_2=ob_g = 0.5 + 0.5*sin(time*2.7 + 1.0);
+per_frame_3=ob_b = 0.5 + 0.5*sin(time*3.1 + 2.0);
+comp_1=`shader_body
+comp_2=`{
+comp_3=`ret = tex2D(sampler_main, uv).xyz;
+comp_4=`}

@@ -1,0 +1,22 @@
+[preset00]
+// MilkDAWp test preset (AGPL-3.0-or-later, written for this repo).
+// A zooming, rotating feedback trail fed by a waveform and a thin border.
+fDecay=0.97
+zoom=1.03
+rot=0.02
+warp=0.2
+nWaveMode=2
+bAdditiveWaves=1
+fWaveScale=1.5
+wave_r=0.2
+wave_g=0.6
+wave_b=1.0
+wave_a=1.0
+ob_size=0.02
+ob_r=0.2
+ob_g=0.2
+ob_b=1.0
+ob_a=0.8
+per_frame_1=rot = 0.03*sin(time*0.7);
+per_frame_2=zoom = 1.02 + 0.02*sin(time*1.3);
+per_frame_3=wave_r = 0.5 + 0.5*sin(time*2.3);
