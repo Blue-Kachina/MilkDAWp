@@ -15,7 +15,10 @@ OutputSurface::OutputSurface(RenderEngine& engine) : engine_(engine) {
 
 OutputSurface::~OutputSurface() { engine_.glContext().detach(); }
 
-void OutputSurface::newOpenGLContextCreated() { engine_.notifyGlContextCreated(); }
+void OutputSurface::newOpenGLContextCreated() {
+  engine_.notifyGlContextCreated();
+  engine_.ensureInstanceCreated();
+}
 
 void OutputSurface::renderOpenGL() {
   using namespace ::juce::gl;
@@ -30,6 +33,6 @@ void OutputSurface::renderOpenGL() {
   glClear(GL_COLOR_BUFFER_BIT);
 }
 
-void OutputSurface::openGLContextClosing() {}
+void OutputSurface::openGLContextClosing() { engine_.releaseInstance(); }
 
 } // namespace milkdawp::engine

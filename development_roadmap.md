@@ -84,6 +84,10 @@ noted.
   workarounds stacked on a detector we do not control.
 - **v2:** own the analysis (§4.3). Feed PCM to projectM for its visuals, but drive transitions
   from our onset detector, tempo tracker, and, in the plugin, the host's transport.
+- The `set_preset_duration(86400)` / hard-cut-disable workaround does **not** carry forward:
+  projectM 4's core never switches presets by itself. Its timer and hard-cut detector only
+  fire `projectm_preset_switch_requested_event`, and v2 never registers that callback (audit
+  of the 4.1.7 and 4.2 sources, 2026-09-26; see ADR-0008).
 
 ### 2.2 Transitions have three competing clocks
 
@@ -208,6 +212,7 @@ validator runs.
 | Setlists and cues | | | ✔ |
 | OSC / web remote | | | ✔ |
 | Out-of-process renderer ("Link mode") | | | ✔ |
+| Layers: multiple inputs → multiple projectM instances composited on one canvas | | | ✔ |
 
 ---
 
@@ -318,6 +323,15 @@ thread as soon as the *next* preset is chosen, which happens one transition ahea
 - `ProjectMLibrary`: RAII wrapper around the projectM 4 C API. Loads the shared library at
   runtime on all platforms with one code path, exposes typed functions, and reports a clear
   `Unavailable{reason}` state. Uses `projectm_opengl_render_frame_fbo` so we control the target.
+  That function exists only from projectM **4.2**. In 4.1.7, `projectm_opengl_render_frame`
+  always draws its final composite to framebuffer 0, whatever FBO is bound. projectM is
+  therefore pinned to an upstream 4.2 commit (ADR-0008, D15), and 4.2 is the minimum
+  supported version.
+- projectM's other responsibilities, so we don't rebuild them: soft-cut blends (built-in
+  transition shaders, length set by `projectm_set_soft_cut_duration`), loading a preset from
+  memory (`projectm_load_preset_data`), preset-time control from our clock
+  (`projectm_set_frame_time`, 4.2), and the bass/mid/treb levels presets read (scaled by
+  `projectm_set_beat_sensitivity`). We own *when* to cut; projectM owns *how* it looks.
 - `RenderEngine`: owns exactly one GL context and one projectM instance for the lifetime of
   the processor or app. Renders into an FBO at the *output* resolution (the largest attached
   surface, times the adaptive-quality scale), then presents to each `OutputSurface`.
@@ -472,7 +486,7 @@ v2 targets **JUCE 9.x** from the start rather than porting later. What it change
 | Redesigned macOS CoreAudio implementation using aggregate devices, lower latency, better drift compensation | Directly improves the standalone app's audio input path (4.2). |
 | Multi-touch improved on Linux; **off by default on Windows** | Drawer tap-reveal needs `usesWindowsMultiTouch()` returning true in the plugin editor and `setUsingWindowsMultiTouch(true)` in the app. |
 | Variable fonts | Optional; one weight axis for the drawer typography if it earns its place. |
-| Bundled zlib/libpng/libflac now compiled as C, not wrapped in C++ namespaces | ODR/link-conflict risk with the zlib and libpng that vcpkg pulls in for projectM/freetype. Phase 0 decides: either `JUCE_INCLUDE_ZLIB_CODE=0` / `JUCE_INCLUDE_PNGLIB_CODE=0` pointing JUCE at the vcpkg copies, or keep JUCE's copies and verify no duplicates are linked. Checked by a CI link step. |
+| Bundled zlib/libpng/libflac now compiled as C, not wrapped in C++ namespaces | ODR/link-conflict risk **if** vcpkg's zlib/libpng were also linked into the same binary. **Resolved 2026-09-26, the other way than Phase 0 originally picked:** the vcpkg-copies path (`JUCE_INCLUDE_ZLIB_CODE=0`/`JUCE_INCLUDE_PNGLIB_CODE=0` + external `ZLIB::ZLIB`/`PNG::PNG`) was live for weeks and passed pluginval and the Standalone build every single time, but silently broke loading in real, independent VST3 hosts (REAPER, Cubase both rejected it with no exception/crash/hang -- see the Phase 2.1 note below for the full investigation). Root cause: the "ODR risk" this row describes never actually existed in practice -- projectM is loaded entirely at runtime (`ProjectMLibrary`, 2.1) and was never linked at build time despite `engine/CMakeLists.txt` doing so anyway (dead code, now removed), and Windows uses DirectWrite rather than FreeType, so nothing ever pulled a second zlib/libpng copy in. Reverted to JUCE's own bundled copies (the CI link-step check this row already called for -- `cmake/scripts/check_single_zlib_libpng.cmake` -- stays in place and now reports `zlib=0, libpng=0`, i.e. no separate copy at all, on every build). `MILKDAWP_JUCE_ZLIB_LIBPNG_FROM_VCPKG` remains available as a manual opt-in if a future dependency genuinely needs to link its own zlib/libpng at build time. |
 | `OpenGLContext::setImageCacheSize` now takes bytes | Irrelevant unless we set it; noted so nobody copies a JUCE 8 value. |
 | Minimums: C++17, CMake 3.22, VS 2019, Xcode 12.4, GCC 7 / Clang 6; deploy to macOS 10.11+, Windows 1607+ | All well below our D5/D9 floors. |
 | Plugin formats: `Standalone Unity VST3 AU AUv3 AAX VST LV2` | LV2 stays available for post-1.0; CLAP still needs `clap-juce-extensions`. |
@@ -480,8 +494,10 @@ v2 targets **JUCE 9.x** from the start rather than porting later. What it change
 How we get it: **the vcpkg `juce` port is still at 8.0.7**, so JUCE 9 cannot come from vcpkg
 without maintaining an overlay port. JUCE upstream is designed for `add_subdirectory`, so v2
 vendors JUCE via CMake `FetchContent` pinned to a release tag **and** commit hash, with the
-source cached in the devcontainer image and in CI. vcpkg keeps supplying projectM (port
-currently 4.1.7) and every other native dependency. Upgrades of JUCE happen by bumping the tag
+source cached in the devcontainer image and in CI. vcpkg keeps supplying projectM and every
+other native dependency. projectM comes from a repo-local **overlay port** pinned to an
+upstream 4.2 commit hash, because the registry port (4.1.7) cannot render to an FBO
+(ADR-0008). Upgrades of JUCE happen by bumping the tag
 on a branch and running the full matrix, same as a vcpkg baseline bump.
 
 Licensing: JUCE 9 remains dual-licensed, AGPLv3 or the commercial JUCE 9 EULA. MilkDAWp is
@@ -512,6 +528,7 @@ call from Matthew before the phase that depends on them.
 | D12 | Bundled presets | **Open** (needed before Phase 6) | Curate a licence-clean subset of the projectM community packs; confirm per-pack licences before bundling. |
 | D13 | Window model | Decided | Video-first primary window with a hover/tap/pinned control drawer; a separately owned Output window for fullscreen on another display; detached-controls window as a secondary feature (§4.9). Replaces v1's control-strip-plus-pop-out-video layout. |
 | D14 | Development environment | Decided | Single container image (devcontainer + CI + agent sessions) covering core, CLI, headless render, and lint; CI as the Windows/macOS build farm; idempotent native bootstrap with a doctor mode for those who want local builds (§4.10). No Nix. |
+| D15 | projectM version | Recommended | Minimum projectM **4.2**, built from a pinned upstream `master` commit through a vcpkg overlay port until 4.2.0 is tagged. 4.1.7 draws its final image to framebuffer 0 whatever FBO is bound, which breaks §4.5. It also uses GLEW without initializing it, and times presets only by the wall clock. 4.2 adds `render_frame_fbo`, a GL-loader create call (no GLEW) and `set_frame_time`. Amends D4. See ADR-0008. |
 
 ---
 
@@ -785,6 +802,64 @@ file with beat-aligned transitions.
       needs a real run against the devcontainer's actual projectM 4.1.7 install to confirm the
       "available" branch (version check, all 14 symbols resolving) actually works, not just the
       "missing" branch this box could exercise.
+      Update: `VCPKG_ROOT` is now set on this box (vcpkg installed to `C:\vcpkg`) and
+      `MILKDAWP_WITH_PROJECTM=ON` builds for real -- and doing so surfaced two real bugs the
+      `Unavailable`-only testing above couldn't catch. First, `kLibraryFileName` was a single
+      hardcoded `"projectM-4.dll"`, but this vcpkg port applies a `d` debug postfix
+      (`projectM-4d.dll`), so a Debug MilkDAWp build could never find a Debug vcpkg install by
+      that name -- fixed by trying both names (`kLibraryFileNames[]`), same reasoning extended
+      un-verified to the mac/Linux names. Second, and more fundamental: because this class
+      deliberately never links `MILKDAWP_PROJECTM_TARGET` at build time (loads it by name at
+      runtime instead, per this class's own design), vcpkg's automatic runtime-DLL deployment
+      (`VCPKG_APPLOCAL_DEPS`) never copies projectM's shared library next to the plugin/app
+      binary the way it copies zlib/libpng -- so even with the right name, the file was never
+      there to find. Fixed with a new `milkdawp_deploy_projectm_runtime(<target>)` CMake
+      function (`cmake/ProjectMDependency.cmake`) that POST_BUILD-copies
+      `$<TARGET_FILE:${MILKDAWP_PROJECTM_TARGET}>` next to `milkdawp_plugin_VST3`/
+      `milkdawp_plugin_Standalone` (no `bundleDirectoryHint` needed --
+      `currentModuleDirectory()` alone finds it once the file is actually there).
+      That got the DLL loading, but surfaced the real prize: every one of the 14 hand-declared
+      symbol names/signatures in `ProjectMFunctions` — "from memory of the public C API, not
+      checked against the real vcpkg-installed header," per this item's original note — could
+      finally be checked against that header for the first time. 13/14 were exactly right.
+      One wasn't: `projectm_opengl_render_frame_fbo` does not exist in the real API
+      (`render_opengl.h` has `projectm_opengl_render_frame(instance)`, no FBO parameter --
+      it renders into whatever framebuffer is currently bound), so `require()` failed it and
+      *the entire load failed* (all-or-nothing symbol resolution), reporting `unavailable` with
+      that symbol named as missing. Renamed the function pointer to `openglRenderFrame` to match
+      the real API's name/signature; `RenderEngine::renderFrame()` (2.2 below) now wraps the call
+      in a `glBindFramebuffer`/restore scope guard instead of passing the FBO as an argument.
+      That got the library reporting `available` -- and immediately crashed the Standalone build
+      within a couple seconds of launch (see 2.2's update below for why and the fix). The engine/
+      plugin test binaries still don't get the DLL deployed (only plugin/Standalone do), so the
+      test suite still only exercises the `Unavailable` branch.
+      Update (2026-09-26): once 2.2's crash was fixed, a *new*, much longer investigation started
+      -- the plugin loaded and ran perfectly in the Standalone build and in `pluginval
+      --strictness-level 5` (scan, editor, audio processing at every sample rate/block size,
+      state save/restore, automation -- full `SUCCESS`, repeatedly, across a week of rebuilds --
+      but **silently failed to load in REAPER and Cubase**, independently, with no exception, no
+      crash, no hang, and the module cleanly unloading afterward. Root-caused by building a
+      vanilla JUCE 9 example plugin from the same JUCE checkout and adding this project's real
+      features to it one at a time (GL context owned by the processor not the editor, APVTS,
+      resizable+constrainer, keyboard focus, a full FlexBox drawer with real
+      `ButtonAttachment`/`ComboBoxAttachment`s, the `VST3_CATEGORIES "Analyzer"` tag) -- every one
+      of them loaded fine in REAPER. The one change that reproduced the failure: disabling JUCE's
+      bundled zlib/libpng and linking vcpkg's copies instead (`JUCE_INCLUDE_ZLIB_CODE=0`/
+      `JUCE_INCLUDE_PNGLIB_CODE=0`, §4.11's original Phase-0 decision). That, in turn, traced back
+      to `engine/CMakeLists.txt` statically linking `MILKDAWP_PROJECTM_TARGET` into
+      `milkdawp_engine` -- dead code contradicting this very class's "loads at runtime only"
+      design (nothing in `engine/` includes a real projectM header or calls a linked symbol) --
+      which pulled vcpkg's zlib/libpng in transitively and, with them, real `z.dll`/`libpng16.dll`
+      files sitting next to the plugin binary that some *other* already-loaded plugin in REAPER's
+      session most likely collides with by bare DLL name. Fixed by deleting that stale
+      `target_link_libraries` call and reverting `MILKDAWP_JUCE_ZLIB_LIBPNG_FROM_VCPKG`'s default
+      to OFF (see §4.11's own updated row for the full before/after). Confirmed fixed for real:
+      the actual `MilkDAWp2 Dev.vst3` now loads and runs in REAPER. `ProjectMLibrary` itself still
+      reports `unavailable` there specifically (`could not locate or load 'projectM-4.dll'`) even
+      though the DLL is confirmed present next to the binary -- a separate, much lower-severity
+      loose end, not yet root-caused, tracked as a follow-up rather than blocking further work
+      (real projectM rendering isn't wired into `OutputSurface` yet regardless, per 2.4/2.6, so
+      nothing currently active depends on this).
 - [x] 2.2 (M) `RenderEngine` skeleton: owns GL context + projectM instance; FBO render via
       `projectm_opengl_render_frame_fbo`; per-frame PCM feed from `AudioRing`; parameter
       application from queue (no string lookups on the render thread).
@@ -807,12 +882,24 @@ file with beat-aligned transitions.
       on this Windows box with no projectM installed, so only the `Unavailable` branch is
       exercised here (97/97 total, up from 93/93) -- the "instance actually created and rendered
       a frame" branch still needs a devcontainer run with real projectM present.
+      Update (2026-09-26, projectM API audit, ADR-0008): two defects found by reading the real
+      4.1.7 source, both fixed in 2.12, not here. (1) `ScopedFramebufferBinding` has no effect.
+      4.1.7's `RenderFrame()` calls `glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0)` before its final
+      composite, so the frame always lands on framebuffer 0 whatever `targetFbo` is. It only
+      appears to work because JUCE's embedded-surface target is framebuffer 0. (2) The PCM feed
+      pushes the latest fixed `pcmFrameCount` (512) frames every render call. At 48 kHz / 60 fps
+      a frame spans 800 samples, so about a third of the audio never reaches projectM. Above
+      ~94 fps the same samples are fed twice. projectM keeps its own sample buffer, so the
+      correct feed is "every frame written since the last render call", tracked with a
+      render-side cursor and capped at `projectm_pcm_get_max_samples()`.
 - [~] 2.3 (L) **Spike:** presentation to multiple surfaces per platform. Try shared contexts
       (`setNativeSharedContext`) on Win/macOS/Linux; measure; fall back to PBO readback for the
       preview. Also verify the JUCE-painted `ControlDrawer` composites over the GL surface on
       each platform under JUCE 9 (Direct2D on Windows, EGL on Linux), as a child of the GL
       component. Write an ADR with the result and the per-platform strategy (ADR-0007 went to an
-      unrelated dev-tooling decision that came up mid-spike; this one will be ADR-0008).
+      unrelated dev-tooling decision that came up mid-spike, and ADR-0008 to the projectM 4.2
+      pin this spike depends on; this one will be ADR-0009). **Depends on 2.12:** the
+      two-surface half needs real render-to-FBO, which projectM 4.1.7 cannot do.
       Note: two real findings from Matthew's REAPER/Windows testing (2026-09-19), not guesses:
       (1) **A JUCE-painted component must be a child of the GL-attached component, not a
       sibling, to render on top of it.** First cut had the diagnostics label as an editor-level
@@ -840,6 +927,37 @@ file with beat-aligned transitions.
       "fixing" a problem that may not exist in projectM's actual API. Flagged here rather than
       guessed at. Still need: the `setNativeSharedContext` two-surface test (this only covers
       one surface so far), and macOS/Linux entirely (no hardware available for either).
+      Update (2026-09-20): the assumption above is now confirmed, the hard way -- with a real
+      projectM install actually loadable (2.1/2.2's DLL-deployment fixes), the plugin crashed
+      instantly on insertion in Reaper (red/failed slot, editor never shown), because
+      `RenderEngine`'s constructor called `projectm_create()` at processor-construction time,
+      before any GL context existed at all. Fixed exactly as flagged: `RenderEngine::
+      ensureInstanceCreated()`/`releaseInstance()` now do the create/destroy, called from
+      `OutputSurface::newOpenGLContextCreated()`/`openGLContextClosing()` respectively (the
+      latter guarantees a context still current for the destroy, same as the former does for the
+      create). `isAvailable()` already meant `instance_ != nullptr` rather than "library loaded",
+      so no caller-visible contract changed -- callers just now correctly see `isAvailable() ==
+      false` for the brief, normal window before any surface has attached, instead of a
+      false-positive followed by a crash. (Standalone staying up right after this specific fix
+      wasn't actually a confirmation of it -- at that point `ProjectMLibrary::load()` was still
+      failing on the `projectm_opengl_render_frame_fbo` symbol-name bug 2.1 describes, so
+      `ensureInstanceCreated()`'s `!library_` guard meant `projectm_create()` never actually ran
+      yet either. Once 2.1's symbol fix landed and the library genuinely loaded, `projectm_create()`
+      ran for the first time and crashed Standalone within a couple seconds -- see below.)
+      Update 2: that crash's real cause -- confirmed via `dumpbin /dependents` on the real
+      `projectM-4d.dll` and a check of projectM's own vcpkg buildtrees source -- is GLEW.
+      projectM links GLEW internally (dumpbin shows a static import on `glew32d.dll`) but never
+      calls `glewInit()` itself (grepped projectM's source: `glewInit` appears only in its
+      unrelated SDL example app, never in the library). JUCE loads its own OpenGL extension
+      bindings independently and does nothing for GLEW's separate global function-pointer table,
+      so any extension call inside `projectm_create()` jumped through a null pointer. Fixed with
+      a small `ensureGlewInitialized()` helper in `RenderEngine.cpp` (Windows-only for now, same
+      no-hardware caveat as everywhere else in this item): opens `glew32(d).dll` by name --
+      already resident in the process since projectM's own DLL statically imports it, so this
+      just gets a handle to the same loaded module and its global state -- and calls `glewInit()`
+      once before the first `projectm_create()`. Confirmed for real this time: Standalone stayed
+      up and responsive for 6+ seconds (past the crash window) with `projectM: available`.
+      Reaper re-verification is still Matthew's next hand-test.
 - [~] 2.4 (M) `OutputSurface` implementations: embedded component (primary window) and
       `OutputWindow` (owned top-level window, borderless fullscreen on a chosen display,
       remembers its display). Attach/detach without engine restart; both surfaces show the
@@ -851,7 +969,7 @@ file with beat-aligned transitions.
       context-lifecycle question is separately testable from "does projectM rendering work".
       `OutputWindow` (the owned top-level, borderless-fullscreen half) is not started; it is
       exactly what needs 2.3's shared-context answer first, since it's the actual two-surface
-      case that spike is about.
+      case that spike is about (and, through 2.3, needs 2.12's render-to-FBO).
 - [x] 2.5 (M) `PresetLoader` on the Preset I/O thread: read file, cheap syntax pre-validation,
       blacklist on failure (`projectm_set_preset_switch_failed_event_callback`), prefetch of the
       next preset, load-time measurement and logging.
@@ -870,6 +988,12 @@ file with beat-aligned transitions.
       yet (only `Playlist`, 1.11, exists) -- deferred honestly rather than faking an ID. 8 new
       tests (14/14 in `milkdawp_engine_tests`, all pass regardless of projectM presence since
       this is pure file I/O). 104/104 total, up from 97/97.
+      Scope note (2026-09-26, ADR-0008 audit): the prefetched bytes should be loaded with
+      `projectm_load_preset_data` (in the API since 4.0, not yet in `ProjectMLibrary`) so the
+      render thread never touches the filesystem. Prefetch hides only the file read, though.
+      The visible hitch is preset **shader compilation**, which projectM does synchronously on
+      the GL thread inside the load call, in 4.1.7 and 4.2 alike. Measuring and working around
+      that cost is 5.4's job, and 5.4 is the primary hitch mitigation, not this item.
 - [~] 2.6 (S) Execute `TransitionRequest`s on the render thread at `dueAtSample`; early-issue
       for soft cuts. Log actual vs intended landing error in samples.
       Note: `TransitionExecutor` (`engine/include/milkdawp/engine/TransitionExecutor.h`) does the
@@ -890,7 +1014,9 @@ file with beat-aligned transitions.
       113/113 (7 new tests from this item).
 - [ ] 2.7 (M) Headless render test harness: offscreen GL context on Linux (EGL surfaceless
       first, since JUCE 9 uses EGL natively; Xvfb + Mesa as fallback), render N frames of
-      fixture presets, assert non-black + frame-to-frame delta, run under ASan.
+      fixture presets, assert non-black + frame-to-frame delta, run under ASan. Needs 2.12:
+      renders to an FBO via `projectm_opengl_render_frame_fbo` and drives preset time with
+      `projectm_set_frame_time` from the fixture's sample position, so frame N is reproducible.
 - [ ] 2.8 (S) Frame timing and GPU time metrics (`GL_TIMESTAMP` queries where available);
       status snapshot for the UI.
 - [ ] 2.9 (M) `mdw-view` dev tool: WAV → engine → primary window with the `ControlDrawer`
@@ -898,7 +1024,7 @@ file with beat-aligned transitions.
       devcontainer with GPU passthrough on Linux hosts.
 - [ ] 2.10 (S) Engine behaviour with zero surfaces: pause GPU work, keep logical state, resume.
       Test: attach, detach, attach again; preset and playlist position unchanged.
-- [~] 2.11 (M) `milkdawp_ui` drawer components: `ControlDrawer` (hidden / revealed / pinned
+- [x] 2.11 (M) `milkdawp_ui` drawer components: `ControlDrawer` (hidden / revealed / pinned
       states, hover and tap reveal, auto-hide timer, first-run reveal), `DrawerScrim`
       (translucent band, optional blur), slot layout that collapses to icons at small widths.
       Unit-testable state machine for the reveal/hide logic.
@@ -912,12 +1038,49 @@ file with beat-aligned transitions.
       tests in a new `milkdawp_ui_tests` target (wired into CTest like core/engine) -- these are
       fully environment-independent (no JUCE types involved), unlike the engine tests' honest
       "only the Unavailable branch is exercised here" caveat. 113/113 total, up from 104/104.
-      **Not done yet:** the actual `ControlDrawer`/`DrawerScrim` JUCE components (painting,
-      hover/tap event wiring, the icon-collapsing slot layout) -- those need a live JUCE
-      `Component` tree to render and are naturally Phase 3.3's job (the plugin editor is the
-      first real place this gets composed and looked at), so building the widgets here without
-      anything to mount them in would be unverifiable busywork. This checkbox stays `[~]` until
-      that half lands.
+      The JUCE half now exists too (Phase 3.3): `ui::DrawerScrim` (flat translucent fill --
+      optional blur explicitly not implemented, a separate per-platform investigation) and
+      `ui::ControlDrawer` (`ui/include/milkdawp/ui/ControlDrawer.h`), a `Component` composing
+      the row from §4.9's mockup (prev/next, lock, shuffle, transition-mode combo, BPM label,
+      output/settings/pin) over the scrim, ticking `DrawerStateMachine` from its own `Timer` and
+      staying at a fixed bottom footprint with `alpha 0` while hidden so the hover-to-reveal
+      gesture keeps working even when visually gone. Deliberately owns no
+      `AudioProcessorValueTreeState` (keeps `milkdawp_ui` decoupled from the plugin layer, §4.1)
+      -- Phase 3.3's `PluginEditor` attaches the public widgets to real parameters. Icon-
+      collapsing at small widths is **not implemented**: every control that isn't a combo box is
+      already icon-only (matches the mockup), so the one remaining case (the two combo boxes
+      shrinking their text at narrow widths) was judged not worth a bespoke breakpoint mechanism
+      yet. Checkbox now `[x]`: the class exists and is composed for real in Phase 3.3, which was
+      this item's own stated blocker.
+- [ ] 2.12 (S) projectM 4.2 overlay port (ADR-0008, D15): `vcpkg-overlays/projectm/` building
+      upstream `master` at a pinned commit hash (start from `1e7ef78`, 2026-09-10, re-check
+      for newer commits first) with a `SHA512`; register it under `overlay-ports` in
+      `vcpkg-configuration.json`; move `vcpkg.json`'s `projectm` override to the overlay version.
+      Confirm the installed library is still `projectM-4(d).dll` / `libprojectM-4.so` /
+      `.dylib` (SO version 4 on master), so `ProjectMLibrary`'s names and
+      `milkdawp_deploy_projectm_runtime` keep working, and that `glew32*.dll` no longer
+      appears among its dependencies (`dumpbin /dependents`). Update the devcontainer image
+      and `THIRD_PARTY_NOTICES.md` (the source offer names the commit, not a version).
+      **Blocks 2.3, 2.4, 2.7, 2.13.**
+- [ ] 2.13 (M) Adopt the 4.2 API in the engine. `ProjectMLibrary`: require
+      `projectm_opengl_render_frame_fbo`, `projectm_create_with_opengl_load_proc` and
+      `projectm_set_frame_time`. A 4.1.x library then reports `Unavailable` and names the
+      missing symbol; no 4.1 fallback path. Also add the setters the scheduler needs and
+      nothing currently wires: `projectm_set_soft_cut_duration`, `projectm_set_hard_cut_enabled`,
+      `projectm_set_preset_locked`, `projectm_load_preset_data`, plus
+      `projectm_set_log_callback` for 5.9. `RenderEngine`: delete `ScopedFramebufferBinding` and
+      `ensureGlewInitialized()`, render with `render_frame_fbo`, and create instances through
+      the load-proc variant. Try `juce::OpenGLHelpers::getExtensionFunction` versus `nullptr`
+      (projectM's own resolver) per platform and record which one works. Keep per-instance
+      state (handle, PCM cursor, FBO) in a struct rather than loose `RenderEngine` members.
+      That costs nothing now and keeps post-1.0 layers open (ADR-0008, Consequences). Tests:
+      the `Unavailable` branch names the missing 4.2 symbol; the available branch on a box with
+      the overlay installed.
+- [ ] 2.14 (S) Correct PCM feed to projectM: replace the fixed `copyLatest(pcmFrameCount)`
+      per render call with a render-side read cursor that feeds exactly the frames written
+      since the last call, capped at `projectm_pcm_get_max_samples()` (keep the newest if
+      over). No drops at low frame rates, no duplicates at high ones (see 2.2's update).
+      Deterministic unit test with a fake ring and several simulated frame rates.
 
 Hand test: `mdw-view` with a folder of presets and a track with a clear drop. Transitions
 should land on downbeats in Beat-quantized mode; no hitch longer than one frame on most presets.
@@ -968,10 +1131,50 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       shape without one would be unverifiable, so `setStateInformation` only handles v2-native
       state for now; wiring v1 detection + migration in is a clearly-scoped follow-up for whenever
       those fixtures arrive.
-- [ ] 3.3 (M) Video-first editor (§4.9): the whole editor is an embedded `OutputSurface`
+- [~] 3.3 (M) Video-first editor (§4.9): the whole editor is an embedded `OutputSurface`
       with the `ControlDrawer` over it, pinned by default. Drawer row: preset combo, picker,
       prev/next, lock, shuffle, transition mode, BPM/sync badge, output, settings, pin. Status
       from engine snapshots, not timers polling the processor. Resizable down to 480×270.
+      Note: `PluginEditor` now composes `ui::ControlDrawer` as a child of `OutputSurface`
+      (`Config{.startPinned = true}`, §4.9's plugin-editor default) and attaches its widgets to
+      real `apvts` parameters: `lockCurrentPreset`/`shuffle` via `ButtonAttachment`,
+      `transitionMode` via `ComboBoxAttachment` (combo items sourced from
+      `core::ParameterModel`'s own choices list, so they can't drift), prev/next buttons pulse
+      `triggerPrev`/`triggerNext` 0->1->0 in one host gesture (momentary commands, not
+      persistent toggles -- state save/restore never captures a "stuck on" trigger). The BPM
+      label and the preset-index label read `processorRef.currentBeatClock()` and the raw
+      `presetIndex` parameter from the existing 10Hz UI timer -- "engine snapshots, not
+      processor polling" per this item's own text, the same pattern the diagnostics label
+      already used. `setResizeLimits`-equivalent minimum is 480x270 via the editor's
+      constrainer. **Left honestly incomplete, hence `[~]` not `[x]`:** the "picker" (a real
+      preset browser with names) needs the `PresetLibrary` gap 2.2/2.5/2.6 already flag and
+      doesn't exist; `presetLabel` shows a bare index for now. The output (⛶) and settings (⚙)
+      buttons are present in the row per the mockup but disabled with a tooltip, since Phase
+      2.4/3.12 (Output window) and Phase 3.4 (settings popover) don't exist yet -- a disabled
+      button with an honest tooltip beats one that silently does nothing. None of
+      `presetIndex`/`triggerPrev`/`triggerNext`/`lockCurrentPreset`/`shuffle`/`transitionMode`
+      are consumed by the engine yet to actually change what's rendering -- they are real,
+      automatable, host-visible parameters now, but wiring their effect is the same
+      `PresetLibrary`-shaped follow-up 2.6 already names. Visually confirmed for real in the
+      Standalone build on this Windows box (`MILKDAWP_WITH_PROJECTM=ON` for the first time --
+      see 2.1/2.2's notes on that changing), not just unit-tested: Matthew ran it and caught a
+      real bug the unit tests couldn't -- the drawer's `FlexBox` row (`AlignItems::center`, no
+      explicit `.withHeight()` on any item) computed every button/combo/label at zero height,
+      since JUCE's `computePreferredSize` falls back to `minHeight` (0.0f) for an unset cross-
+      axis size under anything but `AlignItems::stretch`; only the scrim (positioned directly,
+      not through the FlexBox) rendered. Fixed by giving every item an explicit height equal to
+      the row's own height. Now run in Reaper for real too, which caught a second bug the
+      Standalone testing hadn't: `lockButton`/`shuffleButton`/`outputButton`/`settingsButton`/
+      `pinButton` originally used emoji glyphs (padlock/shuffle/pin are supplementary-plane
+      codepoints, U+1F000+), and JUCE's font fallback did not reliably resolve them on this
+      Windows box -- they rendered as nothing, easily mistaken for a missing button, while the
+      BMP symbols already in the row (the output surface's ⛶ candidate, ♩ on the BPM badge)
+      were fine. Replaced all five with plain text (`Lock`/`Shuf`/`Out`/`Set`/`Pin`) rather than
+      mix reliable and unreliable glyphs. A real icon set (drawn `Path`s or an SVG font, not
+      relying on the system font's emoji coverage) is the correct long-term fix and folds into
+      2.11's already-deferred "collapse to icons at small widths" work. Still not run in any
+      other host (Live/FL/Cubase/Logic) -- that is Phase 3.11's DAW checklist, hand-testing work
+      Matthew still needs to do per host.
 - [ ] 3.4 (S) Transition settings popover: mode selector, bars (N), blend, energy threshold,
       jitter, with sensible defaults (Beat-quantized, 4 bars, soft 2 beats).
 - [ ] 3.5 (S) Beat/tempo badge in the drawer (BPM, confidence, host-sync indicator), useful
@@ -995,10 +1198,31 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       itself, since a host-framed editor can't), so that routing stays each window's own job.
       Encodes every rule in §4.9's table, including Space being app-shell-only and the
       unmodified-letters-only rule for L/S/H/P. 7 new tests, all environment-independent (no
-      window, no host, just `KeyPress` values in and `ShortcutAction` values out). **Stays `[~]`:**
-      nothing attaches this to the editor/Output window/detached controls yet (none of those
-      exist as real components -- 3.3/3.12/3.13 are still blocked on rendering), and the
-      per-host verification this item explicitly asks for needs real DAWs, same caveat as 3.6.
+      window, no host, just `KeyPress` values in and `ShortcutAction` values out). Now attached
+      to the editor too (Phase 3.3): `PluginEditor::keyPressed` calls `mapKeyPress(key,
+      isAppShell=false)` and handles `ExitFullscreenOrRevealDrawer`/arrows/`L`/`S`/`H`/`P`;
+      `ToggleFullscreen` is deliberately left unhandled (returns `false`, so the host still sees
+      it) since it needs the Output window (2.4/3.12) this editor can't open yet -- never
+      consuming a key it can't act on, per §4.9's own rule.
+      Update (2026-09-26): first real per-host verification, in Reaper, once a real VST3 build
+      actually loaded there (§4.11's zlib/libpng fix). Initial result: L/S/P worked but H and the
+      arrows didn't -- `setWantsKeyboardFocus(true)` alone only makes the editor *eligible* for
+      focus, it doesn't *claim* it, so Reaper's own host-provided preset-selector combo (part of
+      its FX chain UI, not ours) kept initial focus and our `keyPressed()` never fired for
+      anything routed through it. Fixed by actually calling `grabKeyboardFocus()` (once at
+      construction, and again from a new `visibilityChanged()` override for when the editor is
+      hidden/reshown without being reconstructed, e.g. switching FX chain tabs and back) --
+      exactly the "if a target host drops keys" contingency this item's own text names, just a
+      focus-claiming bug rather than needing the `EDITOR_WANTS_KEYBOARD_FOCUS TRUE` escalation.
+      After that fix: **F11, Esc(reveal), L, S, H, P all confirmed working in Reaper** (H
+      specifically confirmed correct once the drawer was actually unpinned first -- it's
+      documented as a no-op while pinned, §4.9/2.11, and briefly looked broken before that was
+      accounted for). Arrows correctly do nothing yet, as expected -- they pulse
+      `triggerPrev`/`triggerNext`, which nothing on the engine side consumes until `PresetLibrary`
+      exists (2.6). F11 correctly falls through to Reaper's own fullscreen (never consumed, since
+      there's no Output window yet). **Stays `[~]`:** only Reaper tested so far (Live/FL/Cubase
+      still needed for the DAW checklist), and the Output window/detached-controls windows still
+      don't exist (3.12/3.13) for F11 to have anything real to do.
 - [~] 3.6 (S) Host transport integration: `AudioPlayHead` → `HostTransport`; verify stop,
       loop, relocate behaviour in two DAWs.
       Note: the wiring is done and unit-tested -- `processBlock` extracts a `core::TransportInfo`
@@ -1088,11 +1312,21 @@ energy mode demonstrably cuts on drops in the fixture set; adaptive quality keep
 - [ ] 5.3 (M) Adaptive quality on the real FBO with GPU-time-driven hysteresis and a manual
       override; visible current-scale indicator.
 - [ ] 5.4 (S) Preset load hitch mitigation: measure per-preset compile time, cache it, and
-      prefer cheap presets when the scheduler needs a hard cut on the next beat.
+      prefer cheap presets when the scheduler needs a hard cut on the next beat. This is the
+      **primary** hitch fix. projectM compiles preset shaders synchronously on the GL thread in
+      every version (4.1.7 and 4.2 alike, no async load API), so 2.5's file prefetch can't hide
+      that cost. If measurements show it's still bad, consider contributing async or
+      parallel shader compilation upstream (§10).
 - [ ] 5.5 (S) Beat sensitivity semantics: one knob that scales both our detector's threshold
-      and `projectm_set_beat_sensitivity`, documented.
+      and `projectm_set_beat_sensitivity`, documented. The two are different things:
+      projectM's value only rescales the bass/mid/treb levels presets animate from (clamped
+      0–2). It detects no beats and triggers no transitions. Document the knob as "how hard
+      visuals react + how easily we cut", or split it into two parameters if the coupling feels
+      wrong in hand tests.
 - [ ] 5.6 (M) Multi-instance behaviour in a DAW: shared library handle, per-instance engine,
-      GPU budget awareness (lower FPS for instances without visible surfaces).
+      GPU budget awareness (lower FPS for instances without visible surfaces). With 4.2 (D15),
+      every `projectm_handle` in the process shares one GL function resolver (the first
+      create call's load proc wins), so all plugin instances must pass the same resolver.
 - [ ] 5.7 (M) Soak and stress tests: 4-hour run script for the app; rapid parameter
       automation; preset folder of 2,000 files; hot-unplugging the audio device.
 - [ ] 5.8 (S) Accessibility and UX pass: keyboard navigation in both shells, tooltips, high-DPI on
@@ -1137,7 +1371,21 @@ docs live; v1 repo archived with a pointer.
 - Out-of-process renderer / "Link mode" between plugin and app (§4.6).
 - CLAP and LV2 formats.
 - Linux native loopback capture module.
-- Offline high-resolution render to video.
+- Offline high-resolution render to video (`projectm_set_frame_time` from the file's sample
+  clock makes this a straight loop, D15).
+- **Layers: several inputs, several visuals, one canvas.** N projectM instances in the
+  engine's one GL context, each fed its own audio input and rendering to its own FBO
+  (`render_frame_fbo`, D15), mixed onto the output by our own compositor pass. Mix options:
+  split, alpha/luma key, add/screen, animated masks (MilkDrop3-style blend patterns, but
+  driven by `BeatClock`). Optional cross-feed via `projectm_opengl_burn_texture`: one layer's
+  output drawn into another's feedback buffer so the visuals bleed into each other. Input
+  routing: sidechain buses on one plugin instance; "send" instances feeding a "hub" instance
+  through an in-process registry (breaks in hosts that sandbox plugins into separate
+  processes); multiple input channel pairs or devices in the app. Background: MilkDrop3's
+  `.milk2` "double preset" is *not* multi-projectM. It is MilkDrop 2's own old/new preset
+  transition held at a fixed blend progress: one engine, one audio input, two preset states
+  under a per-vertex blend mask. Layers generalizes that to independent inputs. The 1.0
+  guardrail lives in 2.13 (per-instance state in a struct).
 
 ---
 
@@ -1192,6 +1440,7 @@ smoke tests and validators rather than a percentage.
 | macOS system audio capture APIs require newer OS and permissions | standalone loopback on older macOS | feature-gate at runtime; document BlackHole fallback; MVP ships without native loopback |
 | Beat tracking on non-electronic or rubato material | wrong-feeling transitions | confidence-gated fallback to Timed mode; host transport wins in the DAW; fixtures include hard cases so the gate is honest |
 | Signing/notarization accounts and costs | blocks 1.0 installers | decide D11 early (Phase 4 at the latest); unsigned dev builds continue via CI artifacts |
+| projectM pinned to an untagged upstream `master` commit (D15) has a regression 4.1.7 did not | broken or different preset rendering, found late | pin a hash, never float; 2.7 headless render over real presets on every push; DAW checklist before each beta; bump on a branch; move to the 4.2.0 tag as soon as it exists |
 | vcpkg baseline drift breaking projectM builds | CI red for reasons unrelated to our code | pinned baseline; bump on a branch with the full matrix; binary cache |
 | JUCE 9 is two months old; 9.0.x point releases may change behaviour we depend on (EGL, Direct2D compositing, CoreAudio rewrite) | surprise breakage on upgrade, or a platform bug we cannot fix | JUCE pinned by tag + hash; upgrades on a branch with the full matrix and the DAW checklist; keep `BREAKING_CHANGES.md` review as a step in the upgrade PR template; report upstream with a minimal repro |
 | Duplicate zlib/libpng between JUCE 9's C-mode bundled copies and vcpkg's | ODR violations, odd crashes on one platform only | single-copy rule decided in 0.1 and checked at link time in CI |
@@ -1245,7 +1494,9 @@ item (`[1.6]`) in the subject.
 ## 12. References
 
 - v1 source: https://github.com/Blue-Kachina/MilkDAWp (tag `v0.7.5`)
-- projectM 4 C API: https://github.com/projectM-visualizer/projectm (`src/api/include/projectM-4/`)
+- projectM 4 C API: https://github.com/projectM-visualizer/projectm (`src/api/include/projectM-4/`);
+  4.2 additions are on `master`, marked `@since 4.2.0` (ADR-0008)
+- MilkDrop3 (MilkDrop 2 fork, `.milk2` double presets): https://github.com/milkdrop2077/MilkDrop3
 - JUCE 9 releases: https://github.com/juce-framework/JUCE/releases (9.0.0 on 2026-07-21,
   9.0.2 on 2026-09-07)
 - JUCE breaking changes: https://github.com/juce-framework/JUCE/blob/master/BREAKING_CHANGES.md

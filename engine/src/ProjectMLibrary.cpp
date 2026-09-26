@@ -9,12 +9,19 @@ namespace milkdawp::engine {
 
 namespace {
 
+// vcpkg builds this port with a "d" debug postfix on Windows (a CMake
+// DEBUG_POSTFIX convention this specific port applies, not universal), so a
+// Debug MilkDAWp build sitting next to a Debug vcpkg install needs the
+// "-4d" name; a Release build needs the plain name. Rather than hard-code
+// one and break the other config, try both -- same reasoning extended to
+// mac/Linux on the (untested, no hardware to confirm) assumption that any
+// debug postfix convention there would follow the same pattern.
 #if JUCE_WINDOWS
-constexpr const char* kLibraryFileName = "projectM-4.dll";
+constexpr const char* kLibraryFileNames[] = {"projectM-4.dll", "projectM-4d.dll"};
 #elif JUCE_MAC
-constexpr const char* kLibraryFileName = "libprojectM-4.dylib";
+constexpr const char* kLibraryFileNames[] = {"libprojectM-4.dylib", "libprojectM-4d.dylib"};
 #else
-constexpr const char* kLibraryFileName = "libprojectM-4.so";
+constexpr const char* kLibraryFileNames[] = {"libprojectM-4.so", "libprojectM-4d.so"};
 #endif
 
 template <typename Fn>
@@ -30,10 +37,20 @@ juce::File currentModuleDirectory() {
 bool tryOpen(juce::DynamicLibrary& lib, const juce::File& directory) {
   if (!directory.isDirectory())
     return false;
-  const auto candidate = directory.getChildFile(kLibraryFileName);
-  if (!candidate.existsAsFile())
-    return false;
-  return lib.open(candidate.getFullPathName());
+  for (const char* name : kLibraryFileNames) {
+    const auto candidate = directory.getChildFile(name);
+    if (candidate.existsAsFile() && lib.open(candidate.getFullPathName()))
+      return true;
+  }
+  return false;
+}
+
+bool tryOpenBareName(juce::DynamicLibrary& lib) {
+  for (const char* name : kLibraryFileNames) {
+    if (lib.open(name))
+      return true;
+  }
+  return false;
 }
 
 } // namespace
@@ -50,10 +67,10 @@ ProjectMLibrary::LoadResult ProjectMLibrary::load(const juce::File& bundleDirect
   if (!opened)
     opened = tryOpen(instance->library_, currentModuleDirectory());
   if (!opened)
-    opened = instance->library_.open(kLibraryFileName);
+    opened = tryOpenBareName(instance->library_);
 
   if (!opened) {
-    result.unavailableReason = std::string("could not locate or load '") + kLibraryFileName +
+    result.unavailableReason = std::string("could not locate or load '") + kLibraryFileNames[0] +
                                 "' (checked the bundle directory, the current module's directory, "
                                 "and the platform's default library search path)";
     return result;
@@ -81,13 +98,13 @@ ProjectMLibrary::LoadResult ProjectMLibrary::load(const juce::File& bundleDirect
   require("projectm_set_beat_sensitivity", fn.setBeatSensitivity);
   require("projectm_get_beat_sensitivity", fn.getBeatSensitivity);
   require("projectm_pcm_add_float", fn.pcmAddFloat);
-  require("projectm_opengl_render_frame_fbo", fn.openglRenderFrameFbo);
+  require("projectm_opengl_render_frame", fn.openglRenderFrame);
   require("projectm_set_preset_switch_failed_event_callback", fn.setPresetSwitchFailedEventCallback);
   require("projectm_get_version_string", fn.getVersionString);
   require("projectm_free_string", fn.freeString);
 
   if (!allResolved) {
-    result.unavailableReason = "loaded '" + std::string(kLibraryFileName) +
+    result.unavailableReason = "loaded '" + std::string(kLibraryFileNames[0]) +
                                 "' but it is missing expected symbol(s): " + missing +
                                 " (likely an incompatible projectM version)";
     return result;

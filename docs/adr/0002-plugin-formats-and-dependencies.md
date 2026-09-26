@@ -1,6 +1,7 @@
 # ADR-0002: Plugin formats and dependency management
 
-Status: Accepted (D4) / Recommended (D2)
+Status: Accepted (D4) / Recommended (D2). D4 amended by ADR-0008: projectM now comes from a
+repo-local vcpkg overlay port pinned to an upstream 4.2 commit, not the registry port.
 
 ## Context
 

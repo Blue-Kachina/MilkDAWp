@@ -75,11 +75,15 @@ public:
 
   using PresetSwitchFailedCallback = std::function<void(std::string_view filename, std::string_view message)>;
 
-  /// Loads projectM (see ProjectMLibrary::load()) and, if available, creates
-  /// one instance configured from `config`. Never returns null: an
-  /// unavailable projectM is a valid RenderEngine in a permanently-inert
-  /// state (isAvailable() == false), not a construction failure -- callers
-  /// keep their engine object and query the reason to show the user (§2.6).
+  /// Loads projectM (see ProjectMLibrary::load()) but does *not* create an
+  /// instance yet -- that needs a current GL context (see
+  /// ensureInstanceCreated()), which does not exist at this point (this
+  /// factory typically runs from the processor's constructor, before any
+  /// OutputSurface/context exists). Never returns null: an unavailable
+  /// projectM (library not found) is a valid RenderEngine in a
+  /// permanently-inert state (isAvailable() == false until a surface
+  /// attaches), not a construction failure -- callers keep their engine
+  /// object and query the reason to show the user (§2.6).
   [[nodiscard]] static std::unique_ptr<RenderEngine> create(const Config& config = {},
                                                              const juce::File& bundleDirectoryHint = {});
 
@@ -132,6 +136,23 @@ public:
   /// or a hidden context-owner window (§4.5) is needed instead.
   void notifyGlContextCreated() noexcept { ++glContextCreationCount_; }
   [[nodiscard]] int glContextCreationCount() const noexcept { return glContextCreationCount_; }
+
+  /// Call from a renderer's newOpenGLContextCreated(), i.e. with a GL
+  /// context actually current. Creates the projectm instance if the library
+  /// loaded and no instance exists yet; a no-op otherwise (idempotent).
+  /// Deliberately not done in the constructor: real projectM (confirmed
+  /// empirically now that one is actually loadable, not just guessed at per
+  /// the Phase 2.3 note this replaces) allocates GL resources inside
+  /// projectm_create(), which crashes with no current context -- exactly
+  /// what calling this eagerly at processor-construction time did.
+  void ensureInstanceCreated();
+
+  /// Call from a renderer's openGLContextClosing(), i.e. with the same GL
+  /// context that was current for the matching ensureInstanceCreated() still
+  /// current -- destroying GL resources needs a current context too. A
+  /// no-op if there is no instance. Leaves the RenderEngine in the same
+  /// permanently-valid, isAvailable()==false state a load failure would.
+  void releaseInstance();
 
 private:
   RenderEngine(std::unique_ptr<ProjectMLibrary> library, std::string unavailableReason, Config config);

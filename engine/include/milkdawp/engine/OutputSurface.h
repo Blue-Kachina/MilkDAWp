@@ -20,12 +20,19 @@ namespace milkdawp::engine {
 /// editor-owned canvas did (§2.4).
 ///
 /// Currently renders a simple time-based colour cycle rather than a real
-/// projectM frame: there is no build with projectM actually present to test
-/// against yet on any machine this has run on, so wiring `RenderEngine::
-/// renderFrame()` in here is a follow-up once that's available. The colour
-/// cycle exists purely so there is something visibly alive on screen -- the
-/// concrete, human-checkable signal for "does the context survive editor
-/// close/reopen" that this spike needs.
+/// projectM frame: wiring `RenderEngine::renderFrame()` in here (PCM feed +
+/// preset loading) is still a follow-up, now that a real projectM install is
+/// actually available to build and test against on this Windows box. The
+/// colour cycle exists purely so there is something visibly alive on screen
+/// -- the concrete, human-checkable signal for "does the context survive
+/// editor close/reopen" that this spike needs.
+///
+/// Also the only place `RenderEngine::ensureInstanceCreated()`/
+/// `releaseInstance()` get called (from `newOpenGLContextCreated()`/
+/// `openGLContextClosing()`): projectM's instance allocates real GL
+/// resources at creation, confirmed by a crash the first time this ran
+/// against a real install with the instance created eagerly in
+/// RenderEngine's constructor, before any GL context existed.
 class OutputSurface final : public juce::Component, private juce::OpenGLRenderer {
 public:
   explicit OutputSurface(RenderEngine& engine);

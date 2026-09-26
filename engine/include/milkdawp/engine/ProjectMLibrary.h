@@ -45,9 +45,14 @@ struct ProjectMFunctions {
   void (*pcmAddFloat)(ProjectMHandle instance, const float* samples, std::uint32_t count, std::int32_t channels) =
       nullptr;
 
-  // fboTexture: caller-owned FBO/renderbuffer object; we render into it and
-  // never bind the default framebuffer (§4.5).
-  void (*openglRenderFrameFbo)(ProjectMHandle instance, unsigned int fboTexture) = nullptr;
+  // The real projectM 4 C API (checked against the real vcpkg-installed
+  // header, render_opengl.h -- the hand-declared name this replaced,
+  // "projectm_opengl_render_frame_fbo", does not exist in the real API and
+  // made every load fail at symbol resolution) has no FBO parameter at all:
+  // it renders into whatever framebuffer is currently bound. The caller
+  // must glBindFramebuffer() the target FBO before calling this (§4.5:
+  // never bind the default framebuffer).
+  void (*openglRenderFrame)(ProjectMHandle instance) = nullptr;
 
   void (*setPresetSwitchFailedEventCallback)(ProjectMHandle instance,
                                               ProjectMPresetSwitchFailedCallback callback,

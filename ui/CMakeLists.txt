@@ -3,6 +3,10 @@ add_library(milkdawp_ui STATIC
   src/UiInfo.cpp
   include/milkdawp/ui/DrawerState.h
   src/DrawerState.cpp
+  include/milkdawp/ui/DrawerScrim.h
+  src/DrawerScrim.cpp
+  include/milkdawp/ui/ControlDrawer.h
+  src/ControlDrawer.cpp
   include/milkdawp/ui/Shortcuts.h
   src/Shortcuts.cpp
 )

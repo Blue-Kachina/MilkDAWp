@@ -69,6 +69,11 @@ milkdawp_link_external_zlib_libpng(milkdawp_plugin)
 milkdawp_check_single_zlib_libpng(milkdawp_plugin_VST3)
 milkdawp_check_single_zlib_libpng(milkdawp_plugin_Standalone)
 
+if(MILKDAWP_WITH_PROJECTM)
+  milkdawp_deploy_projectm_runtime(milkdawp_plugin_VST3)
+  milkdawp_deploy_projectm_runtime(milkdawp_plugin_Standalone)
+endif()
+
 if(BUILD_TESTING)
   add_subdirectory(tests)
 endif()

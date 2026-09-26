@@ -28,10 +28,17 @@ target_link_libraries(milkdawp_engine
 )
 milkdawp_link_external_zlib_libpng(milkdawp_engine)
 
-# projectM linkage lands in Phase 2 (RenderEngine, ProjectMLibrary); the
-# skeleton target only records whether it was available at configure time.
+# ProjectMLibrary (Phase 2.1) deliberately never links MILKDAWP_PROJECTM_TARGET
+# -- it resolves every symbol at runtime via juce::DynamicLibrary/GetProcAddress
+# (see that class's header comment) specifically so a build compiles and loads
+# cleanly with no projectM SDK present at all. This target check only records
+# whether the SDK was available at configure time for EngineInfo::hasProjectM();
+# it must NOT actually link the target -- doing so used to pull vcpkg's
+# zlib/libpng in transitively (the whole reason SingleZlibLibpngCheck.cmake's
+# external-zlib/libpng path existed), which broke loading in real, independent
+# VST3 hosts (REAPER, Cubase) even though it passed pluginval and Standalone --
+# see development_roadmap.md §4.11 for the full investigation.
 if(MILKDAWP_WITH_PROJECTM AND MILKDAWP_PROJECTM_TARGET AND TARGET ${MILKDAWP_PROJECTM_TARGET})
-  target_link_libraries(milkdawp_engine PRIVATE ${MILKDAWP_PROJECTM_TARGET})
   target_compile_definitions(milkdawp_engine PRIVATE MILKDAWP_HAS_PROJECTM=1)
 else()
   target_compile_definitions(milkdawp_engine PRIVATE MILKDAWP_HAS_PROJECTM=0)

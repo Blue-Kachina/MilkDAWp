@@ -2,19 +2,25 @@
 #
 # JUCE 9 compiles its bundled zlib/libpng as C, not wrapped in a C++ namespace
 # (§4.11 of development_roadmap.md), which risks an ODR violation if vcpkg's
-# zlib/libpng -- pulled in transitively by projectM and freetype -- also link
-# into the same binary.
+# zlib/libpng also link into the same binary.
 #
-# Decision (D4/§4.11): when projectM is linked in (it and freetype pull in
-# vcpkg's zlib/libpng), use vcpkg's copies everywhere and disable JUCE's
-# bundled ones, so only one copy of each can ever link into a MilkDAWp binary.
-# When projectM isn't linked (e.g. a core/engine-skeleton build with no vcpkg
-# available, as in Phase 0), there is no second copy to conflict with, so
-# JUCE's own bundled zlib/libpng are left enabled -- forcing them off without
-# an external zlib/libpng target to link would just fail the build.
+# History (D4/§4.11, revised 2026-09-26): this used to default ON whenever
+# projectM was enabled, on the assumption that projectM/freetype pulled
+# vcpkg's zlib/libpng in transitively. That assumption was wrong: projectM is
+# never actually linked (ProjectMLibrary loads it entirely at runtime via
+# juce::DynamicLibrary), so there was never a second copy to conflict with.
+# Worse, forcing external zlib/libpng introduced real, separate DLLs
+# (z.dll/libpng16.dll) next to the plugin binary, and that broke loading in
+# real, independent VST3 hosts (REAPER, Cubase both silently rejected it)
+# even though it passed pluginval and the Standalone build every time --
+# see development_roadmap.md §4.11 for the full investigation. Defaulting
+# this OFF restores JUCE's own bundled (statically-compiled, no separate DLL)
+# zlib/libpng, which real hosts load fine. Left as a manual option rather
+# than deleted in case a future dependency genuinely needs to link its own
+# zlib/libpng at build time.
 option(MILKDAWP_JUCE_ZLIB_LIBPNG_FROM_VCPKG
-  "Disable JUCE's bundled zlib/libpng and rely on vcpkg's copies instead (avoids ODR conflicts, §4.11)"
-  ${MILKDAWP_WITH_PROJECTM})
+  "Disable JUCE's bundled zlib/libpng and rely on vcpkg's copies instead (only needed if something else genuinely links its own zlib/libpng at build time, §4.11)"
+  OFF)
 
 if(MILKDAWP_JUCE_ZLIB_LIBPNG_FROM_VCPKG)
   add_compile_definitions(JUCE_INCLUDE_ZLIB_CODE=0 JUCE_INCLUDE_PNGLIB_CODE=0)

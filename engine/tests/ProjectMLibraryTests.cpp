@@ -19,7 +19,7 @@ TEST_CASE("ProjectMFunctions defaults to an all-null table", "[engine][ProjectML
   CHECK(fn.setBeatSensitivity == nullptr);
   CHECK(fn.getBeatSensitivity == nullptr);
   CHECK(fn.pcmAddFloat == nullptr);
-  CHECK(fn.openglRenderFrameFbo == nullptr);
+  CHECK(fn.openglRenderFrame == nullptr);
   CHECK(fn.setPresetSwitchFailedEventCallback == nullptr);
   CHECK(fn.getVersionString == nullptr);
   CHECK(fn.freeString == nullptr);
@@ -44,7 +44,7 @@ TEST_CASE("ProjectMLibrary::load with a bogus bundle hint never crashes and hono
     const auto& fn = result.library->functions();
     CHECK(fn.create != nullptr);
     CHECK(fn.destroy != nullptr);
-    CHECK(fn.openglRenderFrameFbo != nullptr);
+    CHECK(fn.openglRenderFrame != nullptr);
     CHECK_FALSE(result.library->versionString().empty());
   } else {
     CHECK(result.library == nullptr);
