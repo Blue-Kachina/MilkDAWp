@@ -57,9 +57,9 @@ message(STATUS "MilkDAWp: using projectM target ${MILKDAWP_PROJECTM_TARGET}")
 # copy (VCPKG_APPLOCAL_DEPS) only copies DLLs for things a target actually
 # links against, so projectM's own shared library is never placed next to
 # the plugin/app binary on its own -- and neither is anything *projectM
-# itself* dynamically links against (confirmed via `dumpbin /dependents`:
-# projectM-4d.dll pulls in glew32d.dll, which is equally undeployed, since
-# GLEW is projectM's dependency, not ours). Rather than hand-track projectM's
+# itself* dynamically links against (4.1.7 pulled in glew32d.dll this way;
+# the 4.2 overlay port, ADR-0008, has no third-party DLL dependencies per
+# `dumpbin /dependents`, but that can change between pins). Rather than hand-track projectM's
 # transitive DLLs one at a time as they change across versions/platforms,
 # this copies the whole vcpkg-installed bin directory for the active config,
 # then deletes the specific files we know we don't want: zlib/libpng are

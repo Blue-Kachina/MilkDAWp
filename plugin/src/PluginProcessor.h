@@ -10,7 +10,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "milkdawp/core/AudioRing.h"
-#include "milkdawp/core/DoubleBufferedSnapshot.h"
+#include "milkdawp/core/SeqlockSnapshot.h"
 #include "milkdawp/core/HostTransport.h"
 #include "milkdawp/engine/RenderEngine.h"
 
@@ -107,9 +107,9 @@ private:
   std::unique_ptr<milkdawp::engine::RenderEngine> renderEngine_;
   std::unique_ptr<core::AudioRing> audioRing_;
   std::vector<float> interleaveScratch_;
-  core::DoubleBufferedSnapshot<core::TransportInfo> transportSnapshot_;
+  core::SeqlockSnapshot<core::TransportInfo> transportSnapshot_;
   std::unique_ptr<core::HostTransport> hostTransport_;
-  core::DoubleBufferedSnapshot<core::BeatClockState> beatClockSnapshot_;
+  core::SeqlockSnapshot<core::BeatClockState> beatClockSnapshot_;
 
   std::atomic<float>* beatSensitivityParam_ = nullptr;
   std::atomic<float>* transitionDurationParam_ = nullptr;

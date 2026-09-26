@@ -9,43 +9,6 @@ namespace milkdawp::engine {
 
 namespace {
 
-// projectM links GLEW internally (confirmed via `dumpbin /dependents` on the
-// real vcpkg-built projectM-4d.dll: it statically imports glew32d.dll) but
-// never calls glewInit() itself -- checked against projectM's own source
-// (vcpkg's buildtrees), glewInit() only appears in its unrelated SDL example
-// app, never inside the library. JUCE loads its own OpenGL extension
-// bindings independently (the juce::gl namespace) which does nothing for
-// GLEW's separate global function-pointer table, so without this, any
-// extension call projectm_create() makes internally jumps through a null
-// pointer -- confirmed by a real crash the first time this ran against an
-// actual projectM install. Windows only for now: mac/Linux GL loader
-// behaviour here is unverified, no hardware to test against (same caveat
-// Phase 2.1/2.3 already carry elsewhere in this file).
-bool ensureGlewInitialized() {
-#if JUCE_WINDOWS
-  static const bool initialized = [] {
-    // glew32(d).dll is already resident in the process by this point --
-    // projectM's own DLL statically imports it, so Windows loaded it as
-    // part of loading that DLL. Opening it again by name just returns a
-    // handle to the same loaded module (and bumps its refcount), which is
-    // exactly what's needed: glewInit() must populate the *same* global
-    // function-pointer table that projectM's statically-linked calls read.
-    static juce::DynamicLibrary glewLib; // kept alive: GLEW's populated
-                                          // pointers must outlive this call
-    for (const char* name : {"glew32.dll", "glew32d.dll"}) {
-      if (glewLib.open(name))
-        break;
-    }
-    using GlewInitFn = unsigned int (*)();
-    auto* glewInit = reinterpret_cast<GlewInitFn>(glewLib.getFunction("glewInit"));
-    return glewInit != nullptr && glewInit() == 0; // GLEW_OK == 0
-  }();
-  return initialized;
-#else
-  return true;
-#endif
-}
-
 // projectm_opengl_render_frame() (real API, render_opengl.h) has no FBO
 // parameter -- it renders into whatever framebuffer is currently bound.
 // This binds targetFbo for the call and restores whatever was bound before,
@@ -105,12 +68,9 @@ void RenderEngine::ensureInstanceCreated() {
     return;
   }
 
-  if (!ensureGlewInitialized()) {
-    unavailableReason_ = "glewInit() failed or glewInit symbol not found (projectM's GL extension "
-                          "entry points would be null pointers)";
-    return;
-  }
-
+  // projectM 4.2 (D15) resolves its own GL entry points (vendored glad) on
+  // the first create call, from the context current right now. 4.1.7
+  // needed a GLEW workaround here; that version is no longer supported.
   instance_ = library_->functions().create();
   if (instance_ == nullptr) {
     unavailableReason_ = "projectm_create() returned null";

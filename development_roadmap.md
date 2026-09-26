@@ -1052,7 +1052,7 @@ file with beat-aligned transitions.
       shrinking their text at narrow widths) was judged not worth a bespoke breakpoint mechanism
       yet. Checkbox now `[x]`: the class exists and is composed for real in Phase 3.3, which was
       this item's own stated blocker.
-- [ ] 2.12 (S) projectM 4.2 overlay port (ADR-0008, D15): `vcpkg-overlays/projectm/` building
+- [~] 2.12 (S) projectM 4.2 overlay port (ADR-0008, D15): `vcpkg-overlays/projectm/` building
       upstream `master` at a pinned commit hash (start from `1e7ef78`, 2026-09-10, re-check
       for newer commits first) with a `SHA512`; register it under `overlay-ports` in
       `vcpkg-configuration.json`; move `vcpkg.json`'s `projectm` override to the overlay version.
@@ -1062,14 +1062,38 @@ file with beat-aligned transitions.
       appears among its dependencies (`dumpbin /dependents`). Update the devcontainer image
       and `THIRD_PARTY_NOTICES.md` (the source offer names the commit, not a version).
       **Blocks 2.3, 2.4, 2.7, 2.13.**
+      Note (2026-09-26): done and built on Windows. `vcpkg-overlays/projectm/` pins
+      `1e7ef7803b69024d1e0656705670adda2ffac817` (still master's head and no 4.2.0 tag upstream
+      on this date), adapted from the registry's 4.1.7 port. GLEW dependency dropped, and
+      `macos-pkgconfig.patch` dropped because master no longer emits the `opengl` pkg-config
+      requirement it removed. The SHA512 matched on first install. The bundled
+      `vendor/projectm-eval` submodule is at projectm-eval v1.0.7, the same version as the
+      baseline's port, so no other bump was needed. Installed result verified: `projectM-4.dll`
+      and `projectM-4d.dll` (names unchanged); `version.h` reports 4.2.0;
+      `render_frame_fbo`, `create_with_opengl_load_proc` and `set_frame_time` are exported;
+      `dumpbin /dependents` shows only system/CRT DLLs (plus `OPENGL32.dll` in Debug), no
+      GLEW. Because 4.2 has no GLEW at all, `RenderEngine`'s `ensureGlewInitialized()` would
+      have reported projectM unavailable, so it was **deleted here** rather than in 2.13.
+      `projectm_opengl_render_frame` in 4.2 still targets framebuffer 0, so rendering
+      behaviour is unchanged until 2.13 switches to `render_frame_fbo`. Stale
+      `glew32(d).dll`/`.pdb` copies from 4.1.7 builds were deleted from
+      `build-win`'s plugin artefact folders (`milkdawp_deploy_projectm_runtime` only ever
+      adds files). `dev-win` configure + Debug build clean; `ctest` 135/136. The one
+      failure was the pre-existing `DoubleBufferedSnapshot` race noted under 3.1, not this
+      change (fixed right after as `SeqlockSnapshot`; 138/138 since). Hand-tested
+      2026-09-26: the Debug VST3 loads in REAPER without crashing and reports projectM
+      available. Dockerfile copies `vcpkg-overlays/` before `vcpkg install`, and the
+      devcontainer-image workflow triggers on it. **Stays `[~]`:** not yet run in the
+      devcontainer/Linux or macOS, and not hand-tested with a live projectM instance
+      (REAPER/Standalone diagnostics should read `projectM: available`, version 4.2.0).
 - [ ] 2.13 (M) Adopt the 4.2 API in the engine. `ProjectMLibrary`: require
       `projectm_opengl_render_frame_fbo`, `projectm_create_with_opengl_load_proc` and
       `projectm_set_frame_time`. A 4.1.x library then reports `Unavailable` and names the
       missing symbol; no 4.1 fallback path. Also add the setters the scheduler needs and
       nothing currently wires: `projectm_set_soft_cut_duration`, `projectm_set_hard_cut_enabled`,
       `projectm_set_preset_locked`, `projectm_load_preset_data`, plus
-      `projectm_set_log_callback` for 5.9. `RenderEngine`: delete `ScopedFramebufferBinding` and
-      `ensureGlewInitialized()`, render with `render_frame_fbo`, and create instances through
+      `projectm_set_log_callback` for 5.9. `RenderEngine`: delete `ScopedFramebufferBinding` (`ensureGlewInitialized()` was
+      already removed in 2.12), render with `render_frame_fbo`, and create instances through
       the load-proc variant. Try `juce::OpenGLHelpers::getExtensionFunction` versus `nullptr`
       (projectM's own resolver) per platform and record which one works. Keep per-instance
       state (handle, PCM cursor, FBO) in a struct rather than loose `RenderEngine` members.
@@ -1114,6 +1138,21 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       nonblocking]]` is applied via a `__has_cpp_attribute`-guarded macro (no-op on MSVC/GCC);
       the RTSan job itself (0.4) still hasn't run for real anywhere (no Clang in any sandbox
       used so far). 129/129 total (6 new plugin tests + 3 for the new `DoubleBufferedSnapshot`).
+      **Bug found and fixed (2026-09-26, during 2.12):** the `DoubleBufferedSnapshot` concurrent
+      "never torn" test failed about half the time (16 of 30 reruns, Windows Debug build). The
+      design had a real race, not a flaky test. If the writer published twice while a reader
+      was still copying buffer *k*, the second publish overwrote *k* mid-copy, and one index
+      over two buffers cannot exclude that. Replaced by `core::SeqlockSnapshot<T>`
+      (`core/include/milkdawp/core/SeqlockSnapshot.h`), same `publish()`/`read()` interface.
+      A sequence counter goes odd during a write and even after it, and a reader retries if a
+      publish overlapped its copy. The writer (audio thread) stays wait-free; only UI/render
+      readers can retry. The payload is held as relaxed `std::atomic<uint64_t>` words, so
+      concurrent access is not a C++ data race (TSan-clean by construction). The constructor
+      publishes `T{}`, so non-zero member defaults (`TransportInfo::timeSigNumerator = 4`)
+      survive before the first publish. Tests renamed to `SeqlockSnapshotTests.cpp`, with two
+      new cases: an eight-word payload tearing test, and non-zero defaults before the first
+      publish. Result: 138/138 in `ctest` (Windows Debug), and the concurrency tests passed
+      50/50 reruns. The `ci-linux-tsan` job still hasn't run for real anywhere (0.4).
 - [x] 3.2 (S) State save/restore with schema v2 and v1 migration; editor size persistence with
       the Cubase ordering fix.
       Note: the v2-native half is done and tested -- `getStateInformation`/`setStateInformation`
@@ -1228,7 +1267,7 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       Note: the wiring is done and unit-tested -- `processBlock` extracts a `core::TransportInfo`
       from `AudioPlayHead::getPosition()` (landed as part of 3.1) and feeds it through
       `core::HostTransport` (Phase 1.7) every block, publishing the resulting `BeatClockState` via
-      a second `DoubleBufferedSnapshot`, exposed as `currentBeatClock()`. `HostTransport` is
+      a second `DoubleBufferedSnapshot` (now `SeqlockSnapshot`, see 3.1), exposed as `currentBeatClock()`. `HostTransport` is
       stateless by design (1.7's own note: "recomputes fresh from the host's ppq every call"), so
       stop/loop/relocate need no special-casing in this class -- that claim is unit-tested in
       core (`HostTransportTests.cpp`, 1.7) and now exercised end-to-end through the processor via

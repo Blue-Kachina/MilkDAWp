@@ -13,6 +13,7 @@ on:
       - "vcpkg.json"
       - "vcpkg-configuration.json"
       - "triplets/**"
+      - "vcpkg-overlays/**"
       - "cmake/FetchJuce.cmake"
       - ".github/workflows/devcontainer-image.yml"
   workflow_dispatch: {}

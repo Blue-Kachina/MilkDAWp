@@ -63,6 +63,7 @@ RUN mkdir -p ${VCPKG_DEFAULT_BINARY_CACHE}
 WORKDIR /opt/milkdawp-manifest
 COPY vcpkg.json vcpkg-configuration.json ./
 COPY triplets ./triplets
+COPY vcpkg-overlays ./vcpkg-overlays
 RUN ${VCPKG_ROOT}/vcpkg install --triplet x64-linux-dynamic --overlay-triplets=./triplets
 
 # ---------------------------------------------------------------------------

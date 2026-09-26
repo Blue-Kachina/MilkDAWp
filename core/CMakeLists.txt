@@ -30,7 +30,7 @@ add_library(milkdawp_core STATIC
   src/Wav.cpp
   include/milkdawp/core/Scoring.h
   src/Scoring.cpp
-  include/milkdawp/core/DoubleBufferedSnapshot.h
+  include/milkdawp/core/SeqlockSnapshot.h
 )
 
 target_include_directories(milkdawp_core PUBLIC

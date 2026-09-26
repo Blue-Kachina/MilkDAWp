@@ -9,11 +9,11 @@ file; this document is the human-curated index of what's used and why.
 | Component | License | Linkage | Source |
 |---|---|---|---|
 | [JUCE 9](https://github.com/juce-framework/JUCE) | AGPL-3.0 (open-source path) | Statically compiled in via `FetchContent` (`cmake/FetchJuce.cmake`) | Pinned tag + commit hash |
-| [projectM 4](https://github.com/projectM-visualizer/projectm) | LGPL-2.1 | **Dynamically** linked (required by LGPL; see `triplets/*.cmake` and `cmake/ProjectMDependency.cmake`) | vcpkg, pinned baseline |
+| [projectM 4](https://github.com/projectM-visualizer/projectm) | LGPL-2.1 | **Dynamically** linked (required by LGPL; see `triplets/*.cmake` and `cmake/ProjectMDependency.cmake`) | vcpkg overlay port `vcpkg-overlays/projectm`, pre-release 4.2.0 built from upstream commit `1e7ef7803b69024d1e0656705670adda2ffac817` (ADR-0008). The LGPL source offer refers to that exact commit. |
 | [Catch2 v3](https://github.com/catchorg/Catch2) | BSL-1.0 | Test-only, not shipped in any release binary | `FetchContent` (`cmake/FetchCatch2.cmake`) |
 | zlib | zlib | Dynamically linked via vcpkg when projectM is enabled (§4.11); otherwise JUCE's bundled copy | vcpkg / JUCE |
 | libpng | libpng-2.0 | Dynamically linked via vcpkg when projectM is enabled (§4.11); otherwise JUCE's bundled copy | vcpkg / JUCE |
-| freetype, GLEW, and projectM's other transitive dependencies | various (see each port) | Dynamically linked via the `*-dynamic` vcpkg triplets | vcpkg |
+| freetype and projectM's other transitive dependencies | various (see each port) | Dynamically linked via the `*-dynamic` vcpkg triplets | vcpkg |
 
 ## Why projectM must be dynamically linked
 

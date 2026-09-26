@@ -17,7 +17,7 @@ add_executable(milkdawp_core_tests
   StateSchemaTests.cpp
   WavTests.cpp
   ScoringTests.cpp
-  DoubleBufferedSnapshotTests.cpp
+  SeqlockSnapshotTests.cpp
 )
 
 target_link_libraries(milkdawp_core_tests PRIVATE
