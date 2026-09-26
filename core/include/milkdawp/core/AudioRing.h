@@ -44,6 +44,16 @@ public:
   /// consumeHop()'s cursor.
   void copyLatest(float* dest, std::size_t numFrames) const noexcept;
 
+  /// Copies frames [fromFrame, fromFrame + numFrames) by absolute position
+  /// (the same numbering as samplePosition()). Frames not written yet, or
+  /// already overwritten, come back as zero. Safe to call concurrently with
+  /// write(); does not affect consumeHop()'s cursor. This is what lets a
+  /// second reader (the render thread feeding projectM, Phase 2.14) keep
+  /// its own cursor and read exactly the frames it hasn't seen.
+  void copyRange(float* dest, std::int64_t fromFrame, std::size_t numFrames) const noexcept {
+    copyFrames(dest, fromFrame, numFrames);
+  }
+
   /// Analysis thread only. Attempts to consume the next `numFrames`
   /// interleaved frames in write order, advancing the read cursor. Returns
   /// false (and writes nothing) if fewer than `numFrames` are available yet.
@@ -51,6 +61,10 @@ public:
   /// (reader fell behind by more than the ring's capacity), the read cursor
   /// is snapped forward to the oldest frame still available.
   bool consumeHop(float* dest, std::size_t numFrames) noexcept;
+
+  /// Analysis thread only. Absolute frame number consumeHop() reads next,
+  /// i.e. one past the last frame it returned.
+  [[nodiscard]] std::uint64_t readPosition() const noexcept { return readPosition_; }
 
 private:
   void copyFrames(float* dest, std::int64_t fromFrame, std::size_t numFrames) const noexcept;

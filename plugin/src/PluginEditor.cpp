@@ -30,6 +30,14 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
 
   controlDrawer.prevButton.onClick = [this] { pulseTrigger("triggerPrev"); };
   controlDrawer.nextButton.onClick = [this] { pulseTrigger("triggerNext"); };
+  controlDrawer.outputButton.onClick = [this] {
+    if (processorRef.isOutputWindowOpen()) {
+      processorRef.closeOutputWindow();
+    } else {
+      processorRef.openOutputWindow(/*fullscreen=*/false);
+    }
+  };
+  controlDrawer.settingsButton.onClick = [this] { showSettingsMenu(); };
 
   lockAttachment_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
       processorRef.apvts, "lockCurrentPreset", controlDrawer.lockButton);
@@ -114,7 +122,11 @@ bool MilkDAWpAudioProcessorEditor::keyPressed(const juce::KeyPress& key) {
   case ShortcutAction::TogglePin:
     controlDrawer.togglePin();
     return true;
-  case ShortcutAction::ToggleFullscreen: // needs the Output window (Phase 2.4/3.12) -- not implemented yet
+  case ShortcutAction::ToggleFullscreen:
+    // A host-framed editor cannot go fullscreen itself: F11 opens (or
+    // toggles) the Output window fullscreen instead (§4.9).
+    processorRef.toggleOutputFullscreen();
+    return true;
   case ShortcutAction::None:
   default:
     return false; // never consume a key we can't act on (§4.9): the host still sees it
@@ -135,22 +147,78 @@ void MilkDAWpAudioProcessorEditor::pulseTrigger(const juce::String& parameterId)
   param->endChangeGesture();
 }
 
-void MilkDAWpAudioProcessorEditor::timerCallback() {
-  auto& engine = processorRef.renderEngine();
-  juce::String text;
-  text << "GL context created " << engine.glContextCreationCount() << " time(s) since plugin load.\n";
-  text << "projectM: " << (engine.isAvailable() ? "available" : juce::String("unavailable (" + engine.unavailableReason() + ")"));
-  diagnosticsLabel.setText(text, juce::dontSendNotification);
+void MilkDAWpAudioProcessorEditor::showSettingsMenu() {
+  auto& director = processorRef.visualizer().director();
+  const auto folder = director.presetFolder();
 
-  if (auto* presetIndexParam = processorRef.apvts.getRawParameterValue("presetIndex")) {
-    controlDrawer.presetLabel.setText(
-        "Preset " + juce::String(static_cast<int>(presetIndexParam->load(std::memory_order_relaxed))),
-        juce::dontSendNotification);
+  juce::PopupMenu menu;
+  menu.addSectionHeader(folder.empty() ? juce::String("No preset folder") : juce::String(folder));
+  menu.addItem("Choose preset folder...", [this] { choosePresetFolder(); });
+  menu.addItem("Rescan preset folder", !folder.empty(), false,
+               [this] { processorRef.visualizer().director().rescan(); });
+  menu.addSeparator();
+  menu.addItem("Output window fullscreen (F11)", [this] { processorRef.toggleOutputFullscreen(); });
+  menu.addItem("Show diagnostics", true, diagnosticsLabel.isVisible(),
+               [this] { diagnosticsLabel.setVisible(!diagnosticsLabel.isVisible()); });
+  menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&controlDrawer.settingsButton));
+}
+
+void MilkDAWpAudioProcessorEditor::choosePresetFolder() {
+  const auto current = processorRef.visualizer().director().presetFolder();
+  folderChooser_ = std::make_unique<juce::FileChooser>(
+      "Choose a folder of MilkDrop presets (.milk)",
+      current.empty() ? juce::File::getSpecialLocation(juce::File::userDocumentsDirectory) : juce::File(current));
+  folderChooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                              [this](const juce::FileChooser& chooser) {
+                                const auto result = chooser.getResult();
+                                if (result.isDirectory()) {
+                                  processorRef.visualizer().director().setPresetFolder(
+                                      result.getFullPathName().toStdString());
+                                }
+                              });
+}
+
+void MilkDAWpAudioProcessorEditor::timerCallback() {
+  auto& visualizer = processorRef.visualizer();
+  auto& engine = visualizer.renderEngine();
+  const auto stats = engine.stats();
+  const auto status = visualizer.director().status();
+
+  if (diagnosticsLabel.isVisible()) {
+    juce::String text;
+    if (engine.isAvailable()) {
+      text << "projectM " << engine.projectMVersion() << ": " << juce::String(stats.framesPerSecond, 1) << " fps, "
+           << stats.width << "x" << stats.height << ", render " << juce::String(stats.cpuFrameMs, 1) << " ms (gpu "
+           << juce::String(stats.gpuFrameMs, 1) << " ms), last preset load "
+           << juce::String(stats.lastPresetLoadMs, 1) << " ms\n";
+    } else {
+      const auto reason = engine.unavailableReason();
+      text << "projectM: "
+           << (reason.empty() ? juce::String("starting...") : juce::String("unavailable (" + reason + ")")) << "\n";
+    }
+    text << "presets: " << juce::String(status.playlistSize) << " in folder, " << juce::String(stats.presetsLoaded) << " loaded, "
+         << juce::String(status.presetsSkipped) << " skipped; surface " << (outputSurface.isSharingWorking() ? "ok" : "NOT SHARING")
+         << " (context x" << outputSurface.contextCreationCount() << ")\n";
+    text << engine.glDescription();
+    diagnosticsLabel.setText(text, juce::dontSendNotification);
   }
 
-  const auto beatClock = processorRef.currentBeatClock();
+  juce::String presetText;
+  if (status.playlistSize == 0) {
+    presetText = "No presets: Set > Choose preset folder";
+  } else if (status.currentIndex >= 0) {
+    presetText = juce::String(status.currentIndex + 1) + "/" + juce::String(status.playlistSize) + "  " +
+                 juce::String(visualizer.director().presetName(status.currentIndex));
+  }
+  controlDrawer.presetLabel.setText(presetText, juce::dontSendNotification);
+  controlDrawer.presetLabel.setTooltip(presetText);
+
   juce::String bpmText(juce::CharPointer_UTF8("\xE2\x99\xA9")); // quarter note
-  bpmText << (beatClock.confidence > 0.0f ? juce::String(beatClock.bpm, 0) : juce::String("--"));
+  if (status.beatSource == engine::BeatSource::None || status.bpm <= 0.0f) {
+    bpmText << "--";
+  } else {
+    bpmText << juce::String(status.bpm, 0) << (status.beatSource == engine::BeatSource::Host ? " host" : "");
+  }
   controlDrawer.bpmLabel.setText(bpmText, juce::dontSendNotification);
 }
 

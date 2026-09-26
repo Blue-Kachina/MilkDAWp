@@ -88,25 +88,32 @@ ProjectMLibrary::LoadResult ProjectMLibrary::load(const juce::File& bundleDirect
     }
   };
 
-  require("projectm_create", fn.create);
+  require("projectm_create_with_opengl_load_proc", fn.createWithOpenGlLoadProc);
   require("projectm_destroy", fn.destroy);
   require("projectm_load_preset_file", fn.loadPresetFile);
+  require("projectm_load_preset_data", fn.loadPresetData);
   require("projectm_set_window_size", fn.setWindowSize);
   require("projectm_set_mesh_size", fn.setMeshSize);
   require("projectm_set_fps", fn.setFps);
-  require("projectm_set_preset_duration", fn.setPresetDuration);
   require("projectm_set_beat_sensitivity", fn.setBeatSensitivity);
   require("projectm_get_beat_sensitivity", fn.getBeatSensitivity);
+  require("projectm_set_soft_cut_duration", fn.setSoftCutDuration);
+  require("projectm_set_hard_cut_enabled", fn.setHardCutEnabled);
+  require("projectm_set_preset_locked", fn.setPresetLocked);
   require("projectm_pcm_add_float", fn.pcmAddFloat);
-  require("projectm_opengl_render_frame", fn.openglRenderFrame);
+  require("projectm_pcm_get_max_samples", fn.pcmGetMaxSamples);
+  require("projectm_set_frame_time", fn.setFrameTime);
+  require("projectm_opengl_render_frame_fbo", fn.openglRenderFrameFbo);
   require("projectm_set_preset_switch_failed_event_callback", fn.setPresetSwitchFailedEventCallback);
+  require("projectm_set_log_callback", fn.setLogCallback);
+  require("projectm_set_log_level", fn.setLogLevel);
   require("projectm_get_version_string", fn.getVersionString);
   require("projectm_free_string", fn.freeString);
 
   if (!allResolved) {
     result.unavailableReason = "loaded '" + std::string(kLibraryFileNames[0]) +
                                 "' but it is missing expected symbol(s): " + missing +
-                                " (likely an incompatible projectM version)";
+                                " (projectM older than 4.2? MilkDAWp needs 4.2 or later, see ADR-0008)";
     return result;
   }
 
@@ -118,24 +125,48 @@ ProjectMLibrary::LoadResult ProjectMLibrary::load(const juce::File& bundleDirect
   instance->version_ = rawVersion;
   fn.freeString(rawVersion);
 
-  const int majorVersion = [&] {
-    const auto dot = instance->version_.find('.');
-    const auto majorStr = dot == std::string::npos ? instance->version_ : instance->version_.substr(0, dot);
-    try {
-      return std::stoi(majorStr);
-    } catch (...) {
-      return -1;
-    }
-  }();
-
-  if (majorVersion < kMinimumSupportedMajorVersion) {
+  if (!isSupportedVersion(parseVersion(instance->version_))) {
     result.unavailableReason = "projectM version " + instance->version_ + " is older than the minimum supported (" +
-                                std::to_string(kMinimumSupportedMajorVersion) + ".x)";
+                                std::to_string(kMinimumSupportedMajorVersion) + "." +
+                                std::to_string(kMinimumSupportedMinorVersion) + ")";
     return result;
   }
 
   result.library = std::move(instance);
   return result;
+}
+
+ProjectMLibrary::Version ProjectMLibrary::parseVersion(const std::string& text) {
+  Version version;
+  const auto firstDot = text.find('.');
+  if (firstDot == std::string::npos || firstDot == 0) {
+    return version;
+  }
+  const auto secondDot = text.find('.', firstDot + 1);
+  const auto minorText = text.substr(firstDot + 1, secondDot == std::string::npos ? std::string::npos
+                                                                                   : secondDot - firstDot - 1);
+  try {
+    std::size_t consumed = 0;
+    const int major = std::stoi(text.substr(0, firstDot), &consumed);
+    if (consumed != firstDot) {
+      return version;
+    }
+    const int minor = std::stoi(minorText);
+    version.major = major;
+    version.minor = minor;
+  } catch (...) {
+    return Version{};
+  }
+  return version;
+}
+
+bool ProjectMLibrary::isSupportedVersion(const Version& version) noexcept {
+  if (version.major != kMinimumSupportedMajorVersion) {
+    // A future 5.x may break the C API; treat anything but 4.x as unsupported
+    // until someone checks it.
+    return false;
+  }
+  return version.minor >= kMinimumSupportedMinorVersion;
 }
 
 } // namespace milkdawp::engine

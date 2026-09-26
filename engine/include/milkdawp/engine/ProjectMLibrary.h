@@ -21,42 +21,77 @@ using ProjectMPresetSwitchFailedCallback = void (*)(const char* presetFilename,
                                                      const char* message,
                                                      void* userData);
 
-/// Typed projectM 4 C API surface actually used by MilkDAWp (Phase 2). Every
-/// pointer is resolved at runtime by ProjectMLibrary::load() and is non-null
-/// on a successful load; nullptr otherwise. Deliberately hand-declared rather
+/// `projectm_load_proc` (4.2): resolves a GL function by name.
+using ProjectMGlLoadProc = void* (*)(const char* name, void* userData);
+
+/// `projectm_log_level` values (4.2, types.h).
+enum class ProjectMLogLevel : int { NotSet = 0, Trace = 1, Debug = 2, Info = 3, Warn = 4, Error = 5, Fatal = 6 };
+
+/// `projectm_log_callback` (4.2).
+using ProjectMLogCallback = void (*)(const char* message, int logLevel, void* userData);
+
+/// Typed projectM C API surface actually used by MilkDAWp. Every pointer is
+/// resolved at runtime by ProjectMLibrary::load() and is non-null on a
+/// successful load; nullptr otherwise. Deliberately hand-declared rather
 /// than `#include <projectM-4/projectM.h>`: that keeps this header buildable
 /// with no vcpkg/projectM SDK present at all, which is the whole point of
 /// runtime loading (see the header comment on ProjectMLibrary).
+///
+/// Signatures checked against the real 4.2 headers built by the overlay port
+/// (vcpkg-overlays/projectm, ADR-0008). projectM 4.2 is the minimum (D15):
+/// several entries below (`createWithOpenGlLoadProc`, `openglRenderFrameFbo`,
+/// `setFrameTime`, `setLogCallback`) do not exist in 4.1.x, so a 4.1 library
+/// fails load() with those symbols named as missing.
 struct ProjectMFunctions {
-  ProjectMHandle (*create)() = nullptr;
+  // 4.2: resolves GL entry points through `loadProc` (or projectM's own
+  // resolver when null) on the first create call in the process; later
+  // calls ignore it (one resolver shared by every instance).
+  ProjectMHandle (*createWithOpenGlLoadProc)(ProjectMGlLoadProc loadProc, void* userData) = nullptr;
   void (*destroy)(ProjectMHandle) = nullptr;
 
   void (*loadPresetFile)(ProjectMHandle instance, const char* filename, bool smoothTransition) = nullptr;
+  // Loads from an in-memory, NUL-terminated preset text; lets the render
+  // thread load a preset the director already read from disk (§4.2: the
+  // render thread never blocks on I/O).
+  void (*loadPresetData)(ProjectMHandle instance, const char* data, bool smoothTransition) = nullptr;
 
   void (*setWindowSize)(ProjectMHandle instance, std::size_t width, std::size_t height) = nullptr;
   void (*setMeshSize)(ProjectMHandle instance, std::size_t width, std::size_t height) = nullptr;
   void (*setFps)(ProjectMHandle instance, std::int32_t fps) = nullptr;
-  void (*setPresetDuration)(ProjectMHandle instance, double seconds) = nullptr;
 
   void (*setBeatSensitivity)(ProjectMHandle instance, float sensitivity) = nullptr;
   float (*getBeatSensitivity)(ProjectMHandle instance) = nullptr;
+  // Length of projectM's built-in blend when a preset is loaded with
+  // smoothTransition == true. We decide *when*; projectM draws the blend.
+  void (*setSoftCutDuration)(ProjectMHandle instance, double seconds) = nullptr;
+  // projectM's own volume-delta hard-cut detector only ever fires the
+  // switch-requested callback (which we never register), but it is switched
+  // off explicitly so its timers do no work either.
+  void (*setHardCutEnabled)(ProjectMHandle instance, bool enabled) = nullptr;
+  void (*setPresetLocked)(ProjectMHandle instance, bool locked) = nullptr;
 
-  // channels: 1 = mono, 2 = stereo, matching projectm_channels in the real API.
-  void (*pcmAddFloat)(ProjectMHandle instance, const float* samples, std::uint32_t count, std::int32_t channels) =
+  // `count` is samples *per channel*; channels: 1 = mono, 2 = stereo.
+  void (*pcmAddFloat)(ProjectMHandle instance, const float* samples, unsigned int count, std::int32_t channels) =
       nullptr;
+  // Largest per-channel sample count projectM keeps; feeding more than this
+  // in one call only keeps the newest.
+  unsigned int (*pcmGetMaxSamples)() = nullptr;
 
-  // The real projectM 4 C API (checked against the real vcpkg-installed
-  // header, render_opengl.h -- the hand-declared name this replaced,
-  // "projectm_opengl_render_frame_fbo", does not exist in the real API and
-  // made every load fail at symbol resolution) has no FBO parameter at all:
-  // it renders into whatever framebuffer is currently bound. The caller
-  // must glBindFramebuffer() the target FBO before calling this (§4.5:
-  // never bind the default framebuffer).
-  void (*openglRenderFrame)(ProjectMHandle instance) = nullptr;
+  // 4.2: pins preset animation time to the caller's clock (seconds since
+  // the first frame). Negative values revert to projectM's system clock.
+  void (*setFrameTime)(ProjectMHandle instance, double secondsSinceFirstFrame) = nullptr;
+
+  // 4.2: renders into the given FBO. (4.1.7's projectm_opengl_render_frame
+  // always drew its final composite to framebuffer 0; see ADR-0008.)
+  void (*openglRenderFrameFbo)(ProjectMHandle instance, std::uint32_t framebufferObjectId) = nullptr;
 
   void (*setPresetSwitchFailedEventCallback)(ProjectMHandle instance,
                                               ProjectMPresetSwitchFailedCallback callback,
                                               void* userData) = nullptr;
+
+  // 4.2: process-wide (currentThreadOnly == false) or per-thread logging.
+  void (*setLogCallback)(ProjectMLogCallback callback, bool currentThreadOnly, void* userData) = nullptr;
+  void (*setLogLevel)(int logLevel, bool currentThreadOnly) = nullptr;
 
   const char* (*getVersionString)() = nullptr;
   void (*freeString)(const char* str) = nullptr;
@@ -112,10 +147,21 @@ public:
   [[nodiscard]] const ProjectMFunctions& functions() const noexcept { return functions_; }
   [[nodiscard]] const std::string& versionString() const noexcept { return version_; }
 
-  /// Lowest projectM major version this class was written against. load()
-  /// rejects anything older via Unavailable{reason} rather than risking an
-  /// ABI mismatch on an unresolved-but-wrong-shaped symbol.
+  /// Lowest projectM version this class was written against (D15). The
+  /// required 4.2 symbols already reject 4.1.x at symbol resolution; the
+  /// version check is a second, clearer message for a library that somehow
+  /// has the symbols but reports an older version.
   static constexpr int kMinimumSupportedMajorVersion = 4;
+  static constexpr int kMinimumSupportedMinorVersion = 2;
+
+  /// Parses "major.minor[.patch...]" into {major, minor}; {-1, -1} on
+  /// garbage. Exposed for tests.
+  struct Version {
+    int major = -1;
+    int minor = -1;
+  };
+  [[nodiscard]] static Version parseVersion(const std::string& text);
+  [[nodiscard]] static bool isSupportedVersion(const Version& version) noexcept;
 
 private:
   ProjectMLibrary() = default;

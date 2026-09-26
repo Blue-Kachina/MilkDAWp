@@ -19,21 +19,16 @@ namespace milkdawp::engine {
 /// touches GL (§4.2) -- everything here is plain file I/O, safe to run on
 /// its own thread ahead of when RenderEngine actually needs the preset.
 ///
-/// The blacklist is written from two places: RenderEngine's preset-switch-
-/// failed callback (fires on the render/GL thread, on an *actual* projectM
-/// load failure this class's cheap pre-validation couldn't have caught) and
-/// this class's own validate()/prefetch() (preset-IO thread, on a pre-load
-/// failure). Failures are rare -- nowhere near the audio callback or the
+/// The blacklist is written from two places, both on the director thread
+/// (which owns the loader): this class's own validate()/prefetch() on a
+/// pre-load failure, and the director relaying an *actual* projectM load
+/// failure the render thread reported through `PresetHandoff` (one this
+/// class's cheap pre-validation couldn't have caught). Failures are rare -- nowhere near the audio callback or the
 /// steady-state per-frame render path -- so a mutex here is the honest
 /// simplification, not a violation of §4.2's real-time rules.
 ///
-/// Does not yet integrate with core::Messages' PresetLoadResultMessage: that
-/// message carries an *interned* preset ID (§4.2: "strings cross threads
-/// only as interned preset IDs, never as juce::String"), and the table that
-/// would do that interning -- the PresetLibrary named in §4.1's architecture
-/// diagram -- doesn't exist yet (only Playlist, Phase 1.11, does). This
-/// class works in plain paths for now; wiring it to PresetLoadResultMessage
-/// is deferred until PresetLibrary lands.
+/// Works in plain paths: it never crosses threads. The director interns
+/// paths as ids (`core::PresetLibrary`) before anything leaves its thread.
 class PresetLoader {
 public:
   struct ValidationResult {

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <atomic>
+
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_opengl/juce_opengl.h>
 
@@ -10,40 +12,57 @@
 
 namespace milkdawp::engine {
 
-/// The embedded primary-window half of Phase 2.4's `OutputSurface`, and the
-/// live instrument for Phase 2.3's context-persistence spike (see
-/// `RenderEngine`'s class comment). A thin `Component` that attaches
-/// `RenderEngine`'s persistent `OpenGLContext` to itself on construction and
-/// detaches -- never destroys -- it on destruction, so creating/destroying
-/// this `Component` (exactly what happens every time a plugin editor opens
-/// and closes) does not by itself tear down GL state the way v1's
-/// editor-owned canvas did (§2.4).
+/// A window's view of the visualization (§4.5, Phase 2.4): the plugin
+/// editor, the app's main window, or an `OutputWindow`. Owns its *own*
+/// `juce::OpenGLContext`, created sharing with `RenderEngine`'s offscreen
+/// context, and each frame blits the engine's latest texture into itself,
+/// cropped to fill (no letterboxing, no stretching). projectM never runs in
+/// this context, so creating, destroying, hiding or reparenting a surface
+/// never resets the visual; any number of surfaces show the same frame.
 ///
-/// Currently renders a simple time-based colour cycle rather than a real
-/// projectM frame: wiring `RenderEngine::renderFrame()` in here (PCM feed +
-/// preset loading) is still a follow-up, now that a real projectM install is
-/// actually available to build and test against on this Windows box. The
-/// colour cycle exists purely so there is something visibly alive on screen
-/// -- the concrete, human-checkable signal for "does the context survive
-/// editor close/reopen" that this spike needs.
+/// JUCE-painted children (the control drawer, diagnostics) composite over
+/// the blitted frame as long as they are children of this component, not
+/// siblings (§4.11, 2.3's finding).
 ///
-/// Also the only place `RenderEngine::ensureInstanceCreated()`/
-/// `releaseInstance()` get called (from `newOpenGLContextCreated()`/
-/// `openGLContextClosing()`): projectM's instance allocates real GL
-/// resources at creation, confirmed by a crash the first time this ran
-/// against a real install with the instance created eagerly in
-/// RenderEngine's constructor, before any GL context existed.
-class OutputSurface final : public juce::Component, private juce::OpenGLRenderer {
+/// Reports its pixel size and whether it is showing to the engine four
+/// times a second: the engine sizes its FBO to the largest visible surface
+/// and pauses when none is visible (2.10).
+class OutputSurface final : public juce::Component, private juce::OpenGLRenderer, private juce::Timer {
 public:
   explicit OutputSurface(RenderEngine& engine);
   ~OutputSurface() override;
 
+  /// False if this surface's context could not see the engine's textures
+  /// (the shared-context handshake failed on this driver). The surface then
+  /// shows black; the diagnostics say why.
+  [[nodiscard]] bool isSharingWorking() const noexcept { return sharingWorking_.load(); }
+  /// True once this surface's GL context exists.
+  [[nodiscard]] bool hasContext() const noexcept { return contextLive_.load(); }
+  /// How many times this surface's own GL context has been (re)created.
+  [[nodiscard]] int contextCreationCount() const noexcept { return contextCreations_.load(); }
+
+  void resized() override;
+
 private:
+  void timerCallback() override;
+  void attachIfReady();
+  void reportToEngine();
+
   void newOpenGLContextCreated() override;
   void renderOpenGL() override;
   void openGLContextClosing() override;
 
   RenderEngine& engine_;
+  juce::OpenGLContext context_;
+  int slot_ = -1;
+  bool attached_ = false;
+  int ticksWaitingForEngine_ = 0;
+
+  std::atomic<int> logicalWidth_{0};
+  std::atomic<int> logicalHeight_{0};
+  std::atomic<bool> sharingWorking_{true};
+  std::atomic<bool> contextLive_{false};
+  std::atomic<int> contextCreations_{0};
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OutputSurface)
 };

@@ -3,177 +3,210 @@
 
 #pragma once
 
+#include <array>
+#include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
-#include <string_view>
-#include <type_traits>
-#include <vector>
+#include <thread>
 
-#include <juce_opengl/juce_opengl.h>
+#include <juce_core/juce_core.h>
 
 #include "milkdawp/core/AudioRing.h"
 #include "milkdawp/core/Messages.h"
+#include "milkdawp/core/SeqlockSnapshot.h"
+#include "milkdawp/engine/PresetHandoff.h"
 #include "milkdawp/engine/ProjectMLibrary.h"
+#include "milkdawp/engine/TransitionExecutor.h"
 
 namespace milkdawp::engine {
 
-/// Owns exactly one projectM instance, and exactly one GL context, for the
-/// lifetime of the processor or app (§4.5, Phase 2.2/2.3). The context
-/// (glContext()) is a plain `juce::OpenGLContext` member -- constructed once
-/// with the engine, destroyed once with the engine -- that an `OutputSurface`
-/// (Phase 2.4) attaches itself to and detaches from as it is created and
-/// destroyed. This is the actual mechanism meant to fix v1's pop-out bug
-/// (§2.4: reparenting the GL component forced JUCE to recreate the context,
-/// which reset the visual): the context here does not belong to any
-/// Component, so a Component going away should not take it down too.
+class OffscreenGLContext;
+
+/// Render-thread statistics (Phase 2.8), published once per rendered frame
+/// through a lock-free snapshot for the UI and diagnostics.
+struct RenderStats {
+  bool running = false;          // the render thread has a context and a projectM instance
+  bool paused = true;            // no visible surface: no GPU work this moment (2.10)
+  std::uint64_t framesRendered = 0;
+  float framesPerSecond = 0.0f;  // measured over the last second of rendering
+  float cpuFrameMs = 0.0f;       // render call + glFinish, wall clock
+  float gpuFrameMs = -1.0f;      // GL_TIME_ELAPSED of the render call; -1 when unavailable
+  int width = 0;                 // current FBO size
+  int height = 0;
+  int surfaces = 0;              // attached surfaces (visible or not)
+  std::uint32_t currentPresetId = 0;
+  std::uint32_t presetsLoaded = 0;
+  std::uint32_t presetsFailed = 0;
+  float lastPresetLoadMs = 0.0f;  // projectM parse + shader compile, on the render thread
+  std::int64_t lastLandingErrorSamples = 0;
+};
+
+/// Owns the GL context, the render thread and the projectM instance for the
+/// lifetime of the processor or app (§4.5, Phases 2.2/2.3/2.10).
 ///
-/// Whether a fresh `attachTo()` after a `detach()` actually preserves GL
-/// state (textures, FBOs) on every platform, or whether it silently gets a
-/// new native context requiring `setNativeSharedContext()` to bridge
-/// resources, is exactly Phase 2.3's open spike question -- `OutputSurface`
-/// exposes a creation counter for measuring this empirically instead of
-/// guessing. renderFrame() assumes the caller already has this context
-/// current (the same contract juce::OpenGLContext's renderer callback
-/// gives you).
+/// The context is an `OffscreenGLContext` that belongs to no window, created
+/// on the engine's own render thread. projectM renders into a triple-buffered
+/// set of textures there; `OutputSurface`s are separate JUCE GL contexts that
+/// share with it (`sharedContextHandle()`) and draw the most recently
+/// published texture (`latestFrame()`). So opening, closing and moving
+/// windows never touches projectM's state (§2.4's v1 bug), and several
+/// windows show the same frame (the primary-window mirror + Output window).
 ///
-/// Threading (§4.2): pushParameterUpdate() and loadPreset() are for the
-/// message/preset-IO threads; renderFrame() is for the render (GL) thread
-/// only. setPresetSwitchFailedCallback() must be called during setup, before
-/// the first renderFrame() -- it is not itself synchronized against a
-/// concurrently-running render thread.
+/// Paused when no surface is visible: the thread keeps the context and the
+/// projectM instance (preset, playlist position and visual state all
+/// survive), but renders nothing until a surface becomes visible (2.10).
+///
+/// Threading (§4.2):
+///   - render thread (internal): everything GL, projectM, preset loading;
+///   - director thread: pushTransition(), presetHandoff() (single producer);
+///   - any thread: setBeatSensitivity(), setQualityScale(), stats(),
+///     surface registration and size reports, latestFrame().
 class RenderEngine {
 public:
   struct Config {
-    std::size_t windowWidth = 512;
-    std::size_t windowHeight = 512;
-    std::size_t meshWidth = 32;
-    std::size_t meshHeight = 24;
     std::int32_t fps = 60;
-    std::size_t pcmFrameCount = 512; // frames pulled from the AudioRing per renderFrame() call
+    std::size_t meshWidth = 48;
+    std::size_t meshHeight = 32;
+    int initialWidth = 1280;  // FBO size before any surface reports its size
+    int initialHeight = 720;
+    int maxDimension = 4096;  // cap on either FBO dimension
+    double sampleRate = 48000.0; // for TransitionExecutor's soft-cut early issue
   };
 
-  /// What a queued ParameterUpdate changes. Deliberately a closed enum, not a
-  /// core::ParameterModel id: RenderEngine only understands the handful of
-  /// projectM-native knobs it forwards, and plugin/app (Phase 3/4) are
-  /// responsible for translating a ParameterModel change into one of these --
-  /// that translation is a string-keyed lookup exactly once, off the render
-  /// thread, not per frame (the anti-pattern this class replaces, §2.7).
-  enum class ParameterTarget : std::uint8_t {
-    BeatSensitivity,
-    PresetDurationSeconds,
-  };
-
-  struct ParameterUpdate {
-    ParameterTarget target;
-    float value;
-  };
-
-  static constexpr std::size_t kParameterQueueCapacity = 64;
-
-  using PresetSwitchFailedCallback = std::function<void(std::string_view filename, std::string_view message)>;
-
-  /// Loads projectM (see ProjectMLibrary::load()) but does *not* create an
-  /// instance yet -- that needs a current GL context (see
-  /// ensureInstanceCreated()), which does not exist at this point (this
-  /// factory typically runs from the processor's constructor, before any
-  /// OutputSurface/context exists). Never returns null: an unavailable
-  /// projectM (library not found) is a valid RenderEngine in a
-  /// permanently-inert state (isAvailable() == false until a surface
-  /// attaches), not a construction failure -- callers keep their engine
-  /// object and query the reason to show the user (§2.6).
-  [[nodiscard]] static std::unique_ptr<RenderEngine> create(const Config& config = {},
+  /// Loads projectM and starts the render thread. Never returns null: if
+  /// projectM or a GL context is unavailable the engine stays valid and
+  /// inert, and unavailableReason() says why (§2.6). `audio` must outlive
+  /// the engine; the render thread reads it (its own cursor, PcmFeeder).
+  [[nodiscard]] static std::unique_ptr<RenderEngine> create(const core::AudioRing& audio, const Config& config = {},
                                                              const juce::File& bundleDirectoryHint = {});
 
   ~RenderEngine();
   RenderEngine(const RenderEngine&) = delete;
   RenderEngine& operator=(const RenderEngine&) = delete;
-  RenderEngine(RenderEngine&&) = delete;
-  RenderEngine& operator=(RenderEngine&&) = delete;
 
-  [[nodiscard]] bool isAvailable() const noexcept { return instance_ != nullptr; }
-  [[nodiscard]] const std::string& unavailableReason() const noexcept { return unavailableReason_; }
+  /// True once the render thread has a GL context and a projectM instance.
+  [[nodiscard]] bool isAvailable() const noexcept { return available_.load(std::memory_order_acquire); }
+  /// Empty while starting or when available.
+  [[nodiscard]] std::string unavailableReason() const;
+  /// GL vendor / renderer / version of the engine's context, once created.
+  [[nodiscard]] std::string glDescription() const;
+  [[nodiscard]] std::string projectMVersion() const;
+  [[nodiscard]] RenderStats stats() const noexcept { return stats_.read(); }
 
-  /// Message/UI thread. Never blocks; returns false (and drops the update)
-  /// if the queue is momentarily full rather than stalling the caller.
-  /// Safe to call even when !isAvailable() (the update is simply never
-  /// applied, since renderFrame() -- the only consumer -- no-ops).
-  bool pushParameterUpdate(const ParameterUpdate& update) noexcept;
+  // ---- settings (any thread) ----
+  void setBeatSensitivity(float sensitivity) noexcept { beatSensitivity_.store(sensitivity); }
+  /// FBO resolution relative to the largest visible surface (5.3 drives
+  /// this adaptively later; `qualityOverride` sets it for now). Clamped to
+  /// [0.25, 1].
+  void setQualityScale(float scale) noexcept { qualityScale_.store(scale); }
+  /// Sample rate of the audio clock `dueAtSample` values use.
+  void setSampleRate(double sampleRate) noexcept { sampleRate_.store(sampleRate); }
 
-  /// Message/preset-IO thread. Loads immediately and synchronously through
-  /// the function table. Sample-accurate scheduling against a beat/bar
-  /// boundary (dueAtSample) is TransitionScheduler's job upstream and Phase
-  /// 2.6's job on this side -- this is the direct, unscheduled entry point
-  /// that 2.6 will call at the right time. A no-op when !isAvailable().
-  void loadPreset(const std::string& filename, bool smoothTransition);
+  // ---- director thread (single producer) ----
+  bool pushTransition(const core::TransitionRequestMessage& request) noexcept {
+    return executor_.pushRequest(request);
+  }
+  [[nodiscard]] PresetHandoff& presetHandoff() noexcept { return presetHandoff_; }
 
-  /// Must be called before the first renderFrame() (see class comment).
-  /// A no-op when !isAvailable().
-  void setPresetSwitchFailedCallback(PresetSwitchFailedCallback callback);
+  // ---- surfaces (any thread) ----
+  static constexpr int kMaxSurfaces = 8;
+  /// Returns a slot id, or -1 if all slots are taken.
+  int registerSurface() noexcept;
+  void unregisterSurface(int slot) noexcept;
+  /// Pixel size the surface draws at, and whether it is on screen. The FBO
+  /// follows the largest visible surface; with none visible, the engine
+  /// pauses.
+  void reportSurfaceSize(int slot, int width, int height, bool visible) noexcept;
 
-  /// Render thread, once per video frame. Drains pending parameter updates,
-  /// feeds the latest PCM from `audioRing` into projectM via copyLatest()
-  /// (AudioRing's own doc comment: this is exactly the "safe third-thread
-  /// reader" it was designed for -- the analysis thread's consumeHop()
-  /// cursor is untouched), then renders into `targetFbo`. A no-op when
-  /// !isAvailable().
-  void renderFrame(const core::AudioRing& audioRing, unsigned int targetFbo);
+  /// Native handle of the engine's context; null until the render thread
+  /// has created it (surfaces wait for it), or if that failed.
+  [[nodiscard]] void* sharedContextHandle() const noexcept {
+    return sharedContextHandle_.load(std::memory_order_acquire);
+  }
 
-  /// The persistent GL context (see class comment). `OutputSurface`
-  /// instances call `glContext().setRenderer(...)` / `attachTo(*this)` on
-  /// construction and `glContext().detach()` on destruction; nothing here
-  /// ever destroys the `OpenGLContext` object itself except ~RenderEngine.
-  [[nodiscard]] juce::OpenGLContext& glContext() noexcept { return glContext_; }
+  /// Call from a surface's newOpenGLContextCreated(), with the surface's
+  /// fresh context current and no GL objects created in it yet. Briefly
+  /// parks the render thread with its context released, links the two
+  /// contexts (OffscreenGLContext::shareWithCurrentContext) and resumes.
+  /// Returns false if the engine has no context or the driver refused.
+  bool shareIntoCurrentContext();
 
-  /// Phase 2.3 spike instrumentation: how many times has a *new* native GL
-  /// context actually been created (i.e. `newOpenGLContextCreated()` fired)
-  /// since this engine was constructed? `OutputSurface` calls
-  /// notifyGlContextCreated() from that callback. If this only ever reaches
-  /// 1 across many editor open/close cycles, plain attach/detach preserves
-  /// the context; if it climbs with every reopen, it doesn't, and sharing
-  /// or a hidden context-owner window (§4.5) is needed instead.
-  void notifyGlContextCreated() noexcept { ++glContextCreationCount_; }
-  [[nodiscard]] int glContextCreationCount() const noexcept { return glContextCreationCount_; }
+  struct Frame {
+    std::uint32_t texture = 0; // a texture name in the shared context
+    int width = 0;
+    int height = 0;
+    std::uint64_t number = 0;  // increments per published frame
+  };
+  /// The most recently completed frame, or nullopt before the first one.
+  /// The texture stays valid (same name, possibly new contents) for the
+  /// engine's lifetime; triple buffering keeps it from being overwritten
+  /// for at least one further frame.
+  [[nodiscard]] std::optional<Frame> latestFrame() const noexcept;
 
-  /// Call from a renderer's newOpenGLContextCreated(), i.e. with a GL
-  /// context actually current. Creates the projectm instance if the library
-  /// loaded and no instance exists yet; a no-op otherwise (idempotent).
-  /// Deliberately not done in the constructor: real projectM (confirmed
-  /// empirically now that one is actually loadable, not just guessed at per
-  /// the Phase 2.3 note this replaces) allocates GL resources inside
-  /// projectm_create(), which crashes with no current context -- exactly
-  /// what calling this eagerly at processor-construction time did.
-  void ensureInstanceCreated();
-
-  /// Call from a renderer's openGLContextClosing(), i.e. with the same GL
-  /// context that was current for the matching ensureInstanceCreated() still
-  /// current -- destroying GL resources needs a current context too. A
-  /// no-op if there is no instance. Leaves the RenderEngine in the same
-  /// permanently-valid, isAvailable()==false state a load failure would.
-  void releaseInstance();
+  /// A texture name that exists in the engine's context from startup (0
+  /// before). A surface checks glIsTexture() on it right after its own
+  /// context is created to confirm the share worked.
+  [[nodiscard]] std::uint32_t probeTextureName() const noexcept {
+    return sharedContextHandle() != nullptr ? textureNames_[0].load(std::memory_order_relaxed) : 0;
+  }
 
 private:
-  RenderEngine(std::unique_ptr<ProjectMLibrary> library, std::string unavailableReason, Config config);
+  RenderEngine(const core::AudioRing& audio, const Config& config, std::unique_ptr<ProjectMLibrary> library,
+               std::string unavailableReason);
 
-  void drainParameterUpdates();
-  void applyParameterUpdate(const ParameterUpdate& update);
+  void run();
+  void setUnavailable(std::string reason);
 
-  static void presetSwitchFailedTrampoline(const char* filename, const char* message, void* userData);
+  static constexpr std::size_t kFrameCount = 3;
 
+  struct SurfaceSlot {
+    std::atomic<bool> used{false};
+    std::atomic<std::uint32_t> packedSize{0}; // width << 16 | height
+    std::atomic<bool> visible{false};
+  };
+
+  const core::AudioRing& audio_;
+  const Config config_;
   std::unique_ptr<ProjectMLibrary> library_;
+
+  mutable std::mutex textMutex_;
   std::string unavailableReason_;
-  ProjectMHandle instance_ = nullptr;
-  Config config_;
-  core::SpscQueue<ParameterUpdate, kParameterQueueCapacity> parameterQueue_;
-  std::vector<float> pcmScratch_;
-  PresetSwitchFailedCallback presetSwitchFailedCallback_;
+  std::string glDescription_;
 
-  juce::OpenGLContext glContext_;
-  int glContextCreationCount_ = 0;
+  std::atomic<bool> available_{false};
+  std::atomic<bool> stopRequested_{false};
+  std::atomic<float> beatSensitivity_{1.0f};
+  std::atomic<float> qualityScale_{1.0f};
+  std::atomic<double> sampleRate_;
+
+  TransitionExecutor executor_;
+  PresetHandoff presetHandoff_;
+
+  std::array<SurfaceSlot, kMaxSurfaces> surfaces_;
+  std::atomic<void*> sharedContextHandle_{nullptr};
+
+  // Published frame: bits 0-1 texture index, 2-17 width, 18-33 height,
+  // 34-63 frame number.
+  std::atomic<std::uint64_t> publishedFrame_{0};
+  std::array<std::atomic<std::uint32_t>, kFrameCount> textureNames_{};
+
+  // Share handshake (shareIntoCurrentContext): one requester at a time; the
+  // render thread releases its context while shareRequested_ is set.
+  void serviceShareRequest(OffscreenGLContext& context);
+  std::mutex shareCallerMutex_;
+  std::mutex shareMutex_;
+  std::condition_variable shareCondition_;
+  bool shareRequested_ = false;
+  bool contextReleased_ = false;
+  bool renderThreadExited_ = false;
+
+  core::SeqlockSnapshot<RenderStats> stats_;
+  std::thread thread_;
 };
-
-static_assert(std::is_trivially_copyable_v<RenderEngine::ParameterUpdate>);
 
 } // namespace milkdawp::engine

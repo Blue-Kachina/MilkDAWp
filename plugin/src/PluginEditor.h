@@ -22,16 +22,11 @@ namespace milkdawp::plugin {
 /// rather than inside `milkdawp_ui`, keeping that module decoupled from
 /// `juce_audio_processors` (§4.1 layering).
 ///
-/// `controlDrawer.outputButton`/`settingsButton` are wired but disabled:
-/// they are Phase 2.4/3.12 (Output window) and Phase 3.4 (transition
-/// settings popover) respectively, neither of which exists yet.
-///
-/// `presetIndex`/`triggerPrev`/`triggerNext`/`lockCurrentPreset`/`shuffle`/
-/// `transitionMode` are wired to the editor here, but nothing on the engine
-/// side consumes them yet to actually change presets -- that is Phase 2.6's
-/// still-open `PresetLibrary` gap (see the roadmap's 2.2/2.5/2.6 notes).
-/// This editor makes them real, automatable, host-visible parameters; a
-/// following pass wires the engine side once `PresetLibrary` exists.
+/// `controlDrawer.outputButton` opens/closes the processor-owned Output
+/// window (2.4/3.12); F11 opens it fullscreen. `settingsButton` shows a
+/// menu with the preset folder chooser (the transition settings popover is
+/// Phase 3.4). The preset label and BPM badge show the engine director's
+/// status: current preset name, and the beat source (host or detected).
 class MilkDAWpAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer {
 public:
   explicit MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcessor&);
@@ -44,6 +39,8 @@ public:
 private:
   void timerCallback() override;
   void pulseTrigger(const juce::String& parameterId);
+  void showSettingsMenu();
+  void choosePresetFolder();
 
   MilkDAWpAudioProcessor& processorRef;
   engine::OutputSurface outputSurface;
@@ -53,6 +50,7 @@ private:
   std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> lockAttachment_;
   std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> shuffleAttachment_;
   std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> transitionModeAttachment_;
+  std::unique_ptr<juce::FileChooser> folderChooser_;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MilkDAWpAudioProcessorEditor)
 };

@@ -22,6 +22,8 @@ add_library(milkdawp_core STATIC
   src/ParameterModel.cpp
   include/milkdawp/core/Playlist.h
   src/Playlist.cpp
+  include/milkdawp/core/PresetLibrary.h
+  src/PresetLibrary.cpp
   include/milkdawp/core/TransitionScheduler.h
   src/TransitionScheduler.cpp
   include/milkdawp/core/StateSchema.h

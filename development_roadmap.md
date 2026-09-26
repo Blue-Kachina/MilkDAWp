@@ -334,16 +334,22 @@ thread as soon as the *next* preset is chosen, which happens one transition ahea
   `projectm_set_beat_sensitivity`). We own *when* to cut; projectM owns *how* it looks.
 - `RenderEngine`: owns exactly one GL context and one projectM instance for the lifetime of
   the processor or app. Renders into an FBO at the *output* resolution (the largest attached
-  surface, times the adaptive-quality scale), then presents to each `OutputSurface`.
+  surface, times the adaptive-quality scale), then presents to each `OutputSurface`. The
+  context is an `OffscreenGLContext` that belongs to no window, on the engine's own render
+  thread (ADR-0009, the outcome of the 2.3 spike).
 - `OutputSurface`: the embedded primary-window surface (editor or app main window) or an
   owned `OutputWindow` that can go fullscreen on a chosen display (§4.9). Surfaces attach and
-  detach without affecting the engine. Presentation uses a shared GL context where the platform
-  allows (`OpenGLContext::setNativeSharedContext`) and falls back to a low-rate PBO readback +
-  CPU blit for the primary-window mirror. Phase 2 contains a spike to settle this per platform.
+  detach without affecting the engine. Each surface is its own JUCE GL context, linked to
+  the engine's at creation by a handshake the surface runs itself (`wglShareLists` with the
+  render thread parked). JUCE's `setNativeSharedContext` fails on NVIDIA, see ADR-0009. It
+  draws the engine's latest texture with JUCE's `copyTexture`. The PBO-readback fallback for
+  drivers that refuse to share is still planned, not built; a surface detects and reports a
+  failed share.
 - Context ownership when no surface is visible (plugin editor closed, no Output window): the
-  engine keeps its **logical** state (current preset, playlist position, scheduler) and pauses GPU
-  work. Rendering resumes on the next attached surface. A hidden 1×1 context-owner window to
-  keep visual trails alive is a 1.0 option, not an MVP requirement.
+  engine keeps its context, its projectM instance and all logical state (current preset,
+  playlist position, scheduler), and does no GPU work. Rendering resumes on the next visible
+  surface with the visual exactly where it was, which covers the "keep visual trails alive"
+  1.0 option without a visible context-owner window.
 - Adaptive quality scales the FBO, not a CPU image, and is driven by measured GPU frame time
   with hysteresis. The user sees the effect.
 
@@ -883,7 +889,7 @@ file with beat-aligned transitions.
       exercised here (97/97 total, up from 93/93) -- the "instance actually created and rendered
       a frame" branch still needs a devcontainer run with real projectM present.
       Update (2026-09-26, projectM API audit, ADR-0008): two defects found by reading the real
-      4.1.7 source, both fixed in 2.12, not here. (1) `ScopedFramebufferBinding` has no effect.
+      4.1.7 source, fixed in 2.13 and 2.14. (1) `ScopedFramebufferBinding` has no effect.
       4.1.7's `RenderFrame()` calls `glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0)` before its final
       composite, so the frame always lands on framebuffer 0 whatever `targetFbo` is. It only
       appears to work because JUCE's embedded-surface target is framebuffer 0. (2) The PCM feed
@@ -958,7 +964,28 @@ file with beat-aligned transitions.
       once before the first `projectm_create()`. Confirmed for real this time: Standalone stayed
       up and responsive for 6+ seconds (past the crash window) with `projectM: available`.
       Reaper re-verification is still Matthew's next hand-test.
-- [~] 2.4 (M) `OutputSurface` implementations: embedded component (primary window) and
+      Update 3 (2026-09-26): **Windows answered; ADR-0009 written.** The design changed from
+      "the engine owns a `juce::OpenGLContext` that surfaces attach" (which cannot keep a native
+      context alive, finding (2) above) to **an `OffscreenGLContext` owned by the engine's own
+      render thread** (hidden WGL window, never shown). projectM renders into triple-buffered
+      textures there, and each `OutputSurface` is its own JUCE context that shares with it.
+      Two more real findings on the way: JUCE's `setNativeSharedContext` path silently fails
+      on NVIDIA (its `wglShareLists` runs on JUCE's thread while the engine's context is
+      current), so surfaces now share themselves in `newOpenGLContextCreated()` through a
+      handshake that parks the render thread (`RenderEngine::shareIntoCurrentContext`); and
+      `glBlitFramebuffer` into a JUCE window's default framebuffer fails with
+      `GL_INVALID_OPERATION`, so surfaces draw with JUCE's `copyTexture` instead. A
+      `glIsTexture` probe per surface detects a failed share and shows it in the diagnostics.
+      Verified on this box (RTX 4070 Ti SUPER, JUCE 9.0.2): the Standalone editor shows
+      projectM at 60 fps with the drawer composited over it (answering the drawer half of this
+      item for Windows), and `mdw-view --output` shows the main window and an Output window
+      rendering the same frames at once (the two-surface test). The GLEW crash and the "context
+      recreated on every reopen" problem are gone by construction: projectM's context never
+      belongs to a window. **Stays `[~]`:** macOS (no offscreen context yet) and Linux (EGL
+      offscreen context exists for headless use, but no sharing with JUCE's windows) need
+      hardware; the PBO-readback fallback for drivers that refuse to share is designed, not
+      built (ADR-0009).
+- [x] 2.4 (M) `OutputSurface` implementations: embedded component (primary window) and
       `OutputWindow` (owned top-level window, borderless fullscreen on a chosen display,
       remembers its display). Attach/detach without engine restart; both surfaces show the
       same frame. Port v1's OBS niceties (fixed window title, transparency option).
@@ -970,6 +997,20 @@ file with beat-aligned transitions.
       `OutputWindow` (the owned top-level, borderless-fullscreen half) is not started; it is
       exactly what needs 2.3's shared-context answer first, since it's the actual two-surface
       case that spike is about (and, through 2.3, needs 2.12's render-to-FBO).
+      Update (2026-09-26): done on Windows. `OutputSurface` is now a presenter (own JUCE GL
+      context, shares with the engine, draws the latest frame scaled to cover and cropped,
+      reports its size and visibility to the engine), used by the plugin editor, the Output
+      window and `mdw-view`. `engine::OutputWindow` is a top-level window with a fixed title
+      ("MilkDAWp Output", for OBS window capture) that switches between a titled resizable
+      window and borderless fullscreen covering the display it is on (F11 or double-click;
+      Esc leaves). It never uses JUCE kiosk mode, which is process-wide and would fight a DAW.
+      The switch recreates the native window, so the surface re-shares every time, which
+      exercises the ADR-0009 path constantly. Verified with two surfaces showing the same
+      frames (`mdw-view --output`). Remaining v1 OBS nicety, **not done**: the
+      window-transparency option (deferred to 3.12, where the plugin's Output window gets its
+      settings). "Remembers its display" is in-session only: the windowed bounds live on the
+      processor and fullscreen uses the display the window is on; persisting them in the
+      plugin state is 3.12's.
 - [x] 2.5 (M) `PresetLoader` on the Preset I/O thread: read file, cheap syntax pre-validation,
       blacklist on failure (`projectm_set_preset_switch_failed_event_callback`), prefetch of the
       next preset, load-time measurement and logging.
@@ -994,7 +1035,7 @@ file with beat-aligned transitions.
       The visible hitch is preset **shader compilation**, which projectM does synchronously on
       the GL thread inside the load call, in 4.1.7 and 4.2 alike. Measuring and working around
       that cost is 5.4's job, and 5.4 is the primary hitch mitigation, not this item.
-- [~] 2.6 (S) Execute `TransitionRequest`s on the render thread at `dueAtSample`; early-issue
+- [x] 2.6 (S) Execute `TransitionRequest`s on the render thread at `dueAtSample`; early-issue
       for soft cuts. Log actual vs intended landing error in samples.
       Note: `TransitionExecutor` (`engine/include/milkdawp/engine/TransitionExecutor.h`) does the
       sample-position state machine -- SPSC-queued `TransitionRequestMessage`s, Soft cuts issued
@@ -1012,19 +1053,93 @@ file with beat-aligned transitions.
       pieces together (TransitionExecutor + PresetLoader + RenderEngine) is a natural single
       follow-up task once something owns all three (Phase 3's processor). 120/120 total, up from
       113/113 (7 new tests from this item).
-- [ ] 2.7 (M) Headless render test harness: offscreen GL context on Linux (EGL surfaceless
+      Update (2026-09-26): wired end to end, by the engine rather than the processor, so the
+      plugin, `mdw-view` and the future app share it. New pieces:
+      - `core::PresetLibrary`: interns preset paths as stable ids (never reused, 0 = none).
+      - `engine::Director`: the analysis thread. It consumes the ring in 512-frame hops and
+        runs Analyzer → bass OnsetDetector → TempoTracker → BeatClock, or `HostTransport`
+        while the plugin's host plays, into `TransitionScheduler`. It owns the Playlist,
+        PresetLibrary and PresetLoader, handles next/previous/index jumps and lock, and
+        detects host stop, loop and relocate.
+      - `engine::PresetHandoff`: moves the preset text the director read to the render thread
+        through fixed slots and SPSC queues, so nothing allocates on the render thread.
+      - The render loop: `TransitionExecutor` plus `projectm_load_preset_data`, setting the
+        soft-cut duration first when the cut is soft.
+      - projectM load failures go back to the director and into the blacklist.
+      - `engine::Visualizer`: the facade shells own (ring, render engine, director, in the
+        right construction and destruction order).
+      The processor publishes an `EngineControls` snapshot from its parameters every block,
+      and the preset folder and current preset are now saved in and restored from
+      `StateSchemaV2`. The editor's "Set" menu picks the folder; the drawer shows
+      "n/N name" and the BPM with its source.
+
+      One deliberate deviation, recorded in `Director`'s header: preset files are read on the
+      director thread when a transition fires, not prefetched a transition ahead. The
+      scheduler decides on the hop a beat is *crossed*, so there is no earlier moment, and
+      .milk files are a few KB. The same fact means `dueAtSample` is usually already past when
+      a request arrives, so soft cuts start on the beat instead of `blend/2` before it.
+      Scheduling a beat ahead is a scheduler improvement for Phase 5.
+
+      Tests: `DirectorTests` runs the real director and render threads against a folder of
+      the fixture presets plus one broken file. It covers the initial load; next, previous
+      (via history) and index jumps; skipping the broken file; lock suppressing automatic
+      transitions; and Timed mode advancing on its own. 155/155 total on Windows.
+- [~] 2.7 (M) Headless render test harness: offscreen GL context on Linux (EGL surfaceless
       first, since JUCE 9 uses EGL natively; Xvfb + Mesa as fallback), render N frames of
       fixture presets, assert non-black + frame-to-frame delta, run under ASan. Needs 2.12:
       renders to an FBO via `projectm_opengl_render_frame_fbo` and drives preset time with
       `projectm_set_frame_time` from the fixture's sample position, so frame N is reproducible.
-- [ ] 2.8 (S) Frame timing and GPU time metrics (`GL_TIMESTAMP` queries where available);
+      Note (2026-09-26): the harness exists and passes on Windows. `HeadlessRenderTests.cpp`
+      uses `OffscreenGLContext` (the same class the render thread uses; ADR-0009) with
+      `ProjectMInstance` and `GlFrameTarget`, and renders the three new fixture presets
+      (`fixtures/presets/`, written for this repo, AGPL). It feeds a sine, pins time with
+      `set_frame_time` at 60 fps, and reads back pixels. Checks: every preset is non-black and
+      changes between frames; time-driven content is reproducible from the frame time alone
+      (the border colour at frames 10/40/70 matches across two fresh instances within 2 levels
+      per channel, and does change between those frames); and a preset projectM rejects fires
+      the failure callback. Whole frames are *not* reproducible across instances: projectM
+      seeds per-load randomness, and MilkDrop 1 presets always get a random hue shading in the
+      composite (projectM's `VideoEcho`, which ignores `fShader`). So `mdw-border.milk` is a
+      MilkDrop 2 preset with a plain composite shader. This matters for any future
+      "compare against a golden image" test and for offline render-to-video (post-1.0). projectM is now deployed next to the engine test
+      binary, so these and the render-thread tests exercise the real library on a dev box;
+      without it they report why and pass. **Stays `[~]`:** the Linux EGL-surfaceless path
+      is written but has never compiled or run (no Linux box or CI run yet), and no ASan run
+      has happened anywhere.
+- [x] 2.8 (S) Frame timing and GPU time metrics (`GL_TIMESTAMP` queries where available);
       status snapshot for the UI.
-- [ ] 2.9 (M) `mdw-view` dev tool: WAV → engine → primary window with the `ControlDrawer`
+      Note (2026-09-26): `RenderStats`, published per frame through a `SeqlockSnapshot`:
+      fps measured over one second; CPU frame time (render call + `glFinish`); GPU time
+      (`GL_TIME_ELAPSED` query around the render call, read after the finish, so no stall);
+      FBO size; surfaces attached; paused flag; presets loaded and failed; last preset load
+      time (parse + shader compile on the render thread, the number 5.4 needs); last landing
+      error in samples. The director publishes `DirectorStatus` (BPM, beat confidence, beat
+      source host/detected/none, playlist size and position, transitions issued, presets
+      skipped). The plugin editor's diagnostics line and `mdw-view`'s info line show both
+      (Set > Show diagnostics toggles it in the plugin).
+- [x] 2.9 (M) `mdw-view` dev tool: WAV → engine → primary window with the `ControlDrawer`
       from 2.11. First place beat-aligned transitions are visible to a human. Runs inside the
       devcontainer with GPU passthrough on Linux hosts.
-- [ ] 2.10 (S) Engine behaviour with zero surfaces: pause GPU work, keep logical state, resume.
+      Note (2026-09-26): `tools/mdw-view` (JUCE GUI app, `MILKDAWP_BUILD_MDW_VIEW`, on by
+      default). Usage: `mdw-view [--output] [audio-file] [preset-folder]`. It plays the file
+      (looping) through the default output device while handing the same blocks to an
+      `engine::Visualizer`, exactly as a plugin block would arrive, and shows an
+      `OutputSurface` with the shared `ControlDrawer`. prev/next, lock, shuffle and the
+      transition-mode combo drive the engine directly (no APVTS), a prototype of Phase 4's
+      non-plugin wiring. "Set" opens files and folders, plays/pauses, and sets cut style and
+      bars. Out opens the Output window; `--output` opens it at startup. Space plays/pauses;
+      the §4.9 keys work. The default preset folder is `fixtures/presets`. Verified on
+      Windows: launches, loads the fixture folder, renders at 60 fps, and shows main and
+      Output windows in sync. The Linux devcontainer and GPU-passthrough half is untested (no
+      Linux display here, and 2.3 has no Linux sharing path yet).
+- [x] 2.10 (S) Engine behaviour with zero surfaces: pause GPU work, keep logical state, resume.
       Test: attach, detach, attach again; preset and playlist position unchanged.
-- [x] 2.11 (M) `milkdawp_ui` drawer components: `ControlDrawer` (hidden / revealed / pinned
+      Note (2026-09-26): with no visible surface the render thread makes no GL calls; it
+      keeps its context and projectM instance, pumps its window messages and services share
+      requests. So preset, playlist position *and* the visual itself survive; the director
+      keeps analysing and scheduling throughout. `RenderEngineTests` covers it: frames stop
+      advancing while hidden, `paused` is set, the engine stays available, and rendering
+      resumes on the same context when visible again.- [x] 2.11 (M) `milkdawp_ui` drawer components: `ControlDrawer` (hidden / revealed / pinned
       states, hover and tap reveal, auto-hide timer, first-run reveal), `DrawerScrim`
       (translucent band, optional blur), slot layout that collapses to icons at small widths.
       Unit-testable state machine for the reveal/hide logic.
@@ -1084,9 +1199,9 @@ file with beat-aligned transitions.
       2026-09-26: the Debug VST3 loads in REAPER without crashing and reports projectM
       available. Dockerfile copies `vcpkg-overlays/` before `vcpkg install`, and the
       devcontainer-image workflow triggers on it. **Stays `[~]`:** not yet run in the
-      devcontainer/Linux or macOS, and not hand-tested with a live projectM instance
-      (REAPER/Standalone diagnostics should read `projectM: available`, version 4.2.0).
-- [ ] 2.13 (M) Adopt the 4.2 API in the engine. `ProjectMLibrary`: require
+      devcontainer/Linux or macOS. (The live-instance hand test is done: REAPER, above, and
+      the Standalone and `mdw-view` now render real presets with it, see 2.3.)
+- [x] 2.13 (M) Adopt the 4.2 API in the engine. `ProjectMLibrary`: require
       `projectm_opengl_render_frame_fbo`, `projectm_create_with_opengl_load_proc` and
       `projectm_set_frame_time`. A 4.1.x library then reports `Unavailable` and names the
       missing symbol; no 4.1 fallback path. Also add the setters the scheduler needs and
@@ -1100,14 +1215,52 @@ file with beat-aligned transitions.
       That costs nothing now and keeps post-1.0 layers open (ADR-0008, Consequences). Tests:
       the `Unavailable` branch names the missing 4.2 symbol; the available branch on a box with
       the overlay installed.
-- [ ] 2.14 (S) Correct PCM feed to projectM: replace the fixed `copyLatest(pcmFrameCount)`
+      Note (2026-09-26): done. `ProjectMLibrary` resolves 21 symbols, including all three 4.2
+      ones; a 4.1 library fails with them named and a pointer to ADR-0008. A new version check
+      accepts 4.2 or later 4.x only (`parseVersion`/`isSupportedVersion`, unit-tested).
+      `ProjectMInstance` is the per-instance object; `RenderEngine` holds one rather than loose
+      members. `ScopedFramebufferBinding` is gone: frames render with `render_frame_fbo` into
+      `GlFrameTarget`s. Instances are created with the load-proc variant and a *null* proc
+      (projectM's own glad resolver), which works on Windows with our WGL context; JUCE's
+      `getExtensionFunction` was not needed, so it wasn't tried. `setLogCallback`/`setLogLevel`
+      are resolved but not registered yet (5.9 will). The bigger structural change this
+      enabled, an engine-owned offscreen context, is 2.3's update and ADR-0009.
+- [x] 2.14 (S) Correct PCM feed to projectM: replace the fixed `copyLatest(pcmFrameCount)`
       per render call with a render-side read cursor that feeds exactly the frames written
       since the last call, capped at `projectm_pcm_get_max_samples()` (keep the newest if
       over). No drops at low frame rates, no duplicates at high ones (see 2.2's update).
       Deterministic unit test with a fake ring and several simulated frame rates.
+      Note (2026-09-26): `engine::PcmFeeder` with a new `AudioRing::copyRange()`. It starts
+      from "now" rather than replaying the ring, and preallocates, so the render thread never
+      allocates. `PcmFeederTests`: 48 kHz audio at 30 fps (every frame fed exactly once), at
+      144 fps with 512-frame blocks (no repeats, total fed = total written), a long stall
+      (newest `max` frames only), and reset. Related fix: the processor's ring is now
+      created once (stereo, 2^16 frames) instead of being replaced in every `prepareToPlay`,
+      which would have raced the threads now reading it.
 
 Hand test: `mdw-view` with a folder of presets and a track with a clear drop. Transitions
 should land on downbeats in Beat-quantized mode; no hitch longer than one frame on most presets.
+
+Hand-test list for the 2026-09-26 Phase 2 pass (Windows only; macOS/Linux can't be built
+here):
+1. **REAPER, VST3 (Debug, dev identity):** insert, open the editor, Set > Choose preset
+   folder (a real pack). Presets should render with the drawer over them. Next/prev (buttons
+   and arrows), Lock, Shuffle and the mode combo should all act. Play a project: the BPM
+   badge should show the host tempo with "host".
+2. **Close and reopen the editor** several times while it plays: the visual must *not*
+   reset (same preset, trails intact). Diagnostics (Set > Show diagnostics) should keep
+   saying the surface is "ok".
+3. **Output window:** Out opens it; F11 (in it, or in the editor) toggles borderless
+   fullscreen; Esc leaves it. Drag it to the second display, F11, and check it fills that
+   display. Close the editor: the Output window keeps running. Remove the plugin: it closes.
+4. **Save the project, reopen it:** same folder, same preset.
+5. **Transport:** stop, loop and relocate in REAPER; Timed mode should pause when stopped,
+   and BeatQuantized should cut on bar lines while playing.
+6. **mdw-view** with your own track: `mdw-view path\to\track.wav path\to\presets`.
+   Transitions in BeatQuantized should land near the downbeats (they fire on the beat, not
+   ahead of it: see 2.6's note).
+7. **Two plugin instances** in one REAPER project, both editors open: both render, with
+   independent presets.
 
 ### Phase 3 — Plugin shell (VST3 / AU / Standalone wrapper)
 
@@ -1214,13 +1367,27 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       2.11's already-deferred "collapse to icons at small widths" work. Still not run in any
       other host (Live/FL/Cubase/Logic) -- that is Phase 3.11's DAW checklist, hand-testing work
       Matthew still needs to do per host.
+      Update (2026-09-26, Phase 2 pass): the preset label now shows "n/N name" from the
+      engine director (the picker itself is still open), the BPM badge shows the engine's beat
+      (host or detected, marked "host"), "Out" opens/closes the Output window (3.12) and "Set"
+      opens a menu (preset folder, rescan, Output fullscreen, diagnostics). The parameters
+      listed above now drive the engine (2.6).
 - [ ] 3.4 (S) Transition settings popover: mode selector, bars (N), blend, energy threshold,
       jitter, with sensible defaults (Beat-quantized, 4 bars, soft 2 beats).
 - [ ] 3.5 (S) Beat/tempo badge in the drawer (BPM, confidence, host-sync indicator), useful
       for trust and for debugging in the field.
-- [ ] 3.12 (S) Output window from the plugin: ⛶ opens `OutputWindow` (2.4) on the remembered
+- [~] 3.12 (S) Output window from the plugin: ⛶ opens `OutputWindow` (2.4) on the remembered
       display; editor keeps the live mirror and pinned drawer; closing the editor leaves the
-      output window running; removing the plugin closes it.
+      output window running; removing the plugin closes it. Also v1's remaining OBS nicety,
+      the window-transparency option (moved here from 2.4).
+      Note (2026-09-26, done alongside Phase 2): the processor owns the `OutputWindow`, so
+      closing the editor leaves it running, and destroying the processor (removing the
+      plugin) closes it. The drawer's "Out" toggles it windowed; F11 in the editor opens it
+      fullscreen or toggles fullscreen (§4.9: a host-framed editor never fullscreens itself);
+      the window's own close button closes it through the processor. Built and run in the
+      Standalone build only so far. **Not done:** the transparency option; persisting the
+      window bounds and fullscreen display in the plugin state (they are remembered only
+      while the processor lives); checking it in REAPER (Matthew's hand test).
 - [ ] 3.13 (S) Detached controls: "float controls" action hosts the drawer in a small owned
       window; docking returns it. Same component, no duplicated wiring.
 - [~] 3.14 (S) Shortcuts in the plugin: attach the shared `Shortcuts` table (§4.9) to the
@@ -1262,6 +1429,10 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       there's no Output window yet). **Stays `[~]`:** only Reaper tested so far (Live/FL/Cubase
       still needed for the DAW checklist), and the Output window/detached-controls windows still
       don't exist (3.12/3.13) for F11 to have anything real to do.
+      Update (2026-09-26): F11 in the editor now opens the Output window fullscreen (or
+      toggles it) and is consumed, so it no longer falls through to the host; the arrows now
+      change presets (the engine consumes triggerPrev/triggerNext through a parameter
+      listener). Needs re-checking in REAPER.
 - [~] 3.6 (S) Host transport integration: `AudioPlayHead` → `HostTransport`; verify stop,
       loop, relocate behaviour in two DAWs.
       Note: the wiring is done and unit-tested -- `processBlock` extracts a `core::TransportInfo`

@@ -21,14 +21,25 @@ namespace milkdawp::engine {
 /// of the blend lands on `dueAtSample` (§4.4: "the request is issued
 /// blend/2 early so the perceptual midpoint sits on the beat"); Hard cuts
 /// are issued exactly at `dueAtSample`. "Issued" means the callback passed
-/// to onTick() fires -- what that callback actually *does* (resolve
-/// `presetId` to a file path and call `RenderEngine::loadPreset()`) is up
-/// to the caller: nothing in the engine layer yet resolves an interned
-/// preset ID to a path (see `PresetLoader`'s Phase 2.5 note -- that's a
-/// `PresetLibrary`'s job, and no `PresetLibrary` exists yet).
+/// to onTick() fires; `RenderEngine` owns one and, in that callback, loads
+/// the preset text the director handed over for `presetId`
+/// (`PresetHandoff`).
+///
+/// The scheduler currently decides on the hop a beat is crossed, so
+/// `dueAtSample` is usually already in the past when a request arrives and
+/// it fires on the next frame; the early issue only helps once transitions
+/// are scheduled ahead of the beat.
 class TransitionExecutor {
 public:
-  explicit TransitionExecutor(double sampleRate) noexcept : sampleRate_(sampleRate) {}
+  explicit TransitionExecutor(double sampleRate) : sampleRate_(sampleRate) {
+    // Room for every queued request plus as many again already pending, so
+    // drainQueueIntoPending() never allocates on the render thread.
+    pending_.reserve(kQueueCapacity * 2);
+  }
+
+  /// Render thread. Sample rate of the clock `dueAtSample` is expressed in
+  /// (used to convert a soft cut's blend/2 early issue into samples).
+  void setSampleRate(double sampleRate) noexcept { sampleRate_ = sampleRate; }
 
   /// Analysis thread (TransitionScheduler's owner). Never blocks; returns
   /// false (and drops the request) if the queue is momentarily full.

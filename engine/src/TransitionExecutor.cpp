@@ -15,6 +15,12 @@ std::int64_t TransitionExecutor::issueSampleFor(const core::TransitionRequestMes
 
 void TransitionExecutor::drainQueueIntoPending() {
   while (const auto request = queue_.pop()) {
+    if (pending_.size() == pending_.capacity()) {
+      // Never grow on the render thread. Only reachable if transitions are
+      // queued far faster than they come due; the oldest is the least
+      // relevant one to keep.
+      pending_.erase(pending_.begin());
+    }
     pending_.push_back(*request);
   }
 }

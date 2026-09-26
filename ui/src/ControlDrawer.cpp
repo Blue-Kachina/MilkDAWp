@@ -49,18 +49,14 @@ ControlDrawer::ControlDrawer(DrawerStateMachine::Config config) : state_(config)
   bpmLabel.setInterceptsMouseClicks(false, false);
   addAndMakeVisible(bpmLabel);
 
-  // Phase 2.4/3.12 (Output window) does not exist yet -- disabled with a
-  // tooltip is the honest state, not a button that silently does nothing.
+  // The shell wires both: the Output window (§4.9) and a settings menu (the
+  // preset folder for now; the transition settings popover is Phase 3.4).
   outputButton.setButtonText("Out");
-  outputButton.setTooltip("Output window (Phase 2.4/3.12 -- not implemented yet)");
-  outputButton.setEnabled(false);
+  outputButton.setTooltip("Open or close the Output window (F11: fullscreen)");
   addAndMakeVisible(outputButton);
 
-  // Phase 3.4 (transition settings popover) does not exist yet -- same
-  // honesty as outputButton above.
   settingsButton.setButtonText("Set");
-  settingsButton.setTooltip("Transition settings (Phase 3.4 -- not implemented yet)");
-  settingsButton.setEnabled(false);
+  settingsButton.setTooltip("Settings: preset folder");
   addAndMakeVisible(settingsButton);
 
   pinButton.setButtonText("Pin");

@@ -3,6 +3,9 @@
 
 #include "PluginProcessor.h"
 
+#include <algorithm>
+#include <cmath>
+
 #include "PluginEditor.h"
 #include "milkdawp/core/ParameterModel.h"
 #include "milkdawp/core/StateSchema.h"
@@ -26,6 +29,23 @@ core::TransportInfo extractTransportInfo(juce::AudioPlayHead* playHead) {
   info.timeSigNumerator = position->getTimeSignature().orFallback(juce::AudioPlayHead::TimeSignature{}).numerator;
   info.samplePos = static_cast<std::uint64_t>(position->getTimeInSamples().orFallback(int64_t{0}));
   return info;
+}
+
+float load(const std::atomic<float>* value, float fallback) noexcept {
+  return value != nullptr ? value->load(std::memory_order_relaxed) : fallback;
+}
+
+// qualityOverride choices: Auto / Low / Medium / High. Auto is full
+// resolution until adaptive quality (5.3) drives the scale itself.
+float qualityScaleFor(int choice) noexcept {
+  switch (choice) {
+  case 1:
+    return 0.5f;
+  case 2:
+    return 0.75f;
+  default:
+    return 1.0f;
+  }
 }
 
 } // namespace
@@ -70,67 +90,97 @@ MilkDAWpAudioProcessor::MilkDAWpAudioProcessor()
                           .withInput("Input", juce::AudioChannelSet::stereo(), true)
                           .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       apvts(*this, nullptr, "PARAMETERS", createParameterLayout()) {
-  renderEngine_ = milkdawp::engine::RenderEngine::create();
-  beatSensitivityParam_ = apvts.getRawParameterValue("beatSensitivity");
-  transitionDurationParam_ = apvts.getRawParameterValue("transitionDurationSeconds");
+  engine::Visualizer::Config config;
+  // The JUCE Standalone wrapper has no play head: there, the detected beat
+  // drives everything and "transport stopped" never pauses the Timed clock.
+  config.followHostTransport = wrapperType != wrapperType_Standalone;
+  visualizer_ = std::make_unique<engine::Visualizer>(config);
+
+  raw_.beatSensitivity = apvts.getRawParameterValue("beatSensitivity");
+  raw_.transitionDurationSeconds = apvts.getRawParameterValue("transitionDurationSeconds");
+  raw_.shuffle = apvts.getRawParameterValue("shuffle");
+  raw_.lockCurrentPreset = apvts.getRawParameterValue("lockCurrentPreset");
+  raw_.presetIndex = apvts.getRawParameterValue("presetIndex");
+  raw_.transitionJitterEnabled = apvts.getRawParameterValue("transitionJitterEnabled");
+  raw_.transitionDurationMin = apvts.getRawParameterValue("transitionDurationMin");
+  raw_.transitionDurationMax = apvts.getRawParameterValue("transitionDurationMax");
+  raw_.hardCutEnabled = apvts.getRawParameterValue("hardCutEnabled");
+  raw_.softCutDuration = apvts.getRawParameterValue("softCutDuration");
+  raw_.qualityOverride = apvts.getRawParameterValue("qualityOverride");
+  raw_.transitionMode = apvts.getRawParameterValue("transitionMode");
+  raw_.transitionBars = apvts.getRawParameterValue("transitionBars");
+  raw_.presetSelectionPolicy = apvts.getRawParameterValue("presetSelectionPolicy");
+
+  // Momentary commands: react to the 0 -> 1 edge wherever it comes from
+  // (editor pulse, host automation, MIDI learn later). A per-block poll
+  // would miss a pulse that rises and falls between two blocks.
+  apvts.addParameterListener("triggerNext", this);
+  apvts.addParameterListener("triggerPrev", this);
+
+  visualizer_->setControls(readControls());
+}
+
+MilkDAWpAudioProcessor::~MilkDAWpAudioProcessor() {
+  apvts.removeParameterListener("triggerNext", this);
+  apvts.removeParameterListener("triggerPrev", this);
+  outputWindow_.reset();
+}
+
+void MilkDAWpAudioProcessor::parameterChanged(const juce::String& parameterId, float newValue) {
+  if (newValue < 0.5f) {
+    return;
+  }
+  // Any thread (including the audio thread under automation): both calls
+  // are a single atomic increment.
+  if (parameterId == "triggerNext") {
+    visualizer_->director().requestNext();
+  } else if (parameterId == "triggerPrev") {
+    visualizer_->director().requestPrevious();
+  }
+}
+
+engine::EngineControls MilkDAWpAudioProcessor::readControls() const noexcept {
+  engine::EngineControls controls;
+  controls.transitionMode = static_cast<core::TransitionMode>(
+      std::clamp(static_cast<int>(load(raw_.transitionMode, 2.0f)), 0, static_cast<int>(core::TransitionMode::Energy)));
+  controls.transitionBars = static_cast<std::uint32_t>(std::max(1.0f, load(raw_.transitionBars, 4.0f)));
+  controls.timedDurationSeconds = load(raw_.transitionDurationSeconds, 5.0f);
+  controls.jitterEnabled = load(raw_.transitionJitterEnabled, 0.0f) > 0.5f;
+  controls.jitterMinSeconds = load(raw_.transitionDurationMin, 3.0f);
+  controls.jitterMaxSeconds = load(raw_.transitionDurationMax, 15.0f);
+  controls.cutStyle = load(raw_.hardCutEnabled, 0.0f) > 0.5f ? core::CutStyle::Hard : core::CutStyle::Soft;
+  controls.blendSeconds = load(raw_.softCutDuration, 3.0f);
+  controls.locked = load(raw_.lockCurrentPreset, 0.0f) > 0.5f;
+  // v1's Shuffle toggle wins over the v2 policy choice when on.
+  controls.policy = load(raw_.shuffle, 0.0f) > 0.5f
+                        ? core::PlaylistPolicy::ShuffleNoRepeat
+                        : static_cast<core::PlaylistPolicy>(
+                              std::clamp(static_cast<int>(load(raw_.presetSelectionPolicy, 0.0f)), 0, 2));
+  controls.presetIndex = static_cast<std::int32_t>(std::lround(load(raw_.presetIndex, 0.0f)));
+  controls.beatSensitivity = load(raw_.beatSensitivity, 1.0f);
+  controls.qualityScale = qualityScaleFor(static_cast<int>(load(raw_.qualityOverride, 0.0f)));
+  return controls;
 }
 
 void MilkDAWpAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
-  const int numChannels = juce::jmax(1, getTotalNumInputChannels());
-  const std::size_t capacityFrames = static_cast<std::size_t>(juce::jmax(samplesPerBlock, 1)) * 8;
-  audioRing_ = std::make_unique<core::AudioRing>(capacityFrames, numChannels);
-  interleaveScratch_.assign(static_cast<std::size_t>(juce::jmax(samplesPerBlock, 1)) *
-                                 static_cast<std::size_t>(numChannels),
-                             0.0f);
+  visualizer_->prepare(sampleRate, samplesPerBlock);
   hostTransport_ = std::make_unique<core::HostTransport>(sampleRate);
 }
 
 void MilkDAWpAudioProcessor::releaseResources() {}
 
-void MilkDAWpAudioProcessor::pushChangedRenderParameters() {
-  if (!renderEngine_) {
-    return;
-  }
-  if (beatSensitivityParam_ != nullptr) {
-    const float value = beatSensitivityParam_->load(std::memory_order_relaxed);
-    if (value != lastPushedBeatSensitivity_) {
-      renderEngine_->pushParameterUpdate({engine::RenderEngine::ParameterTarget::BeatSensitivity, value});
-      lastPushedBeatSensitivity_ = value;
-    }
-  }
-  if (transitionDurationParam_ != nullptr) {
-    const float value = transitionDurationParam_->load(std::memory_order_relaxed);
-    if (value != lastPushedTransitionDuration_) {
-      renderEngine_->pushParameterUpdate({engine::RenderEngine::ParameterTarget::PresetDurationSeconds, value});
-      lastPushedTransitionDuration_ = value;
-    }
-  }
-}
-
 MILKDAWP_NONBLOCKING void MilkDAWpAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) {
   // Bit-exact passthrough (§4.1 goal: zero audio impact) -- buffer is only
   // ever read below, never written to.
-  const int numChannels = buffer.getNumChannels();
-  const int numSamples = buffer.getNumSamples();
-
-  if (audioRing_ && numSamples > 0 &&
-      interleaveScratch_.size() >= static_cast<std::size_t>(numSamples) * static_cast<std::size_t>(numChannels)) {
-    for (int ch = 0; ch < numChannels; ++ch) {
-      const float* src = buffer.getReadPointer(ch);
-      for (int i = 0; i < numSamples; ++i) {
-        interleaveScratch_[static_cast<std::size_t>(i) * static_cast<std::size_t>(numChannels) +
-                            static_cast<std::size_t>(ch)] = src[i];
-      }
-    }
-    audioRing_->write(interleaveScratch_.data(), static_cast<std::size_t>(numSamples));
-  }
-
   const auto transportInfo = extractTransportInfo(getPlayHead());
   transportSnapshot_.publish(transportInfo);
   if (hostTransport_) {
     beatClockSnapshot_.publish(hostTransport_->processTransport(transportInfo));
   }
-  pushChangedRenderParameters();
+
+  visualizer_->processAudio(buffer.getArrayOfReadPointers(), buffer.getNumChannels(), buffer.getNumSamples(),
+                            &transportInfo);
+  visualizer_->setControls(readControls());
 }
 
 juce::AudioProcessorEditor* MilkDAWpAudioProcessor::createEditor() {
@@ -142,10 +192,49 @@ void MilkDAWpAudioProcessor::setEditorSize(int width, int height) noexcept {
   editorHeight_ = height;
 }
 
+void MilkDAWpAudioProcessor::openOutputWindow(bool fullscreen) {
+  if (outputWindow_ != nullptr) {
+    if (fullscreen && !outputWindow_->isFullscreen()) {
+      outputWindow_->setFullscreen(true);
+    }
+    outputWindow_->toFront(true);
+    return;
+  }
+  outputWindow_ = std::make_unique<engine::OutputWindow>(visualizer_->renderEngine());
+  // Deferred: the close button fires inside the window's own event handler.
+  // The window is owned here, so while it is alive the processor is too.
+  outputWindow_->onCloseRequested = [this] {
+    juce::MessageManager::callAsync(
+        [this, window = juce::Component::SafePointer<engine::OutputWindow>(outputWindow_.get())] {
+          if (window != nullptr) {
+            closeOutputWindow();
+          }
+        });
+  };
+  outputWindow_->show(outputWindowBounds_, fullscreen);
+}
+
+void MilkDAWpAudioProcessor::closeOutputWindow() {
+  if (outputWindow_ != nullptr) {
+    outputWindowBounds_ = outputWindow_->windowedBounds();
+    outputWindow_.reset();
+  }
+}
+
+void MilkDAWpAudioProcessor::toggleOutputFullscreen() {
+  if (outputWindow_ == nullptr) {
+    openOutputWindow(true);
+  } else {
+    outputWindow_->toggleFullscreen();
+  }
+}
+
 void MilkDAWpAudioProcessor::getStateInformation(juce::MemoryBlock& destData) {
   core::StateSchemaV2 state;
   state.editorWidth = editorWidth_;
   state.editorHeight = editorHeight_;
+  state.playlistFolderPath = visualizer_->director().presetFolder();
+  state.presetAbsolutePath = visualizer_->director().currentPresetPath();
   for (const auto& spec : core::allParameters()) {
     if (auto* raw = apvts.getRawParameterValue(juce::String(spec.id))) {
       state.paramValues[spec.id] = raw->load(std::memory_order_relaxed);
@@ -174,6 +263,14 @@ void MilkDAWpAudioProcessor::setStateInformation(const void* data, int sizeInByt
 
   if (state.editorWidth > 0 && state.editorHeight > 0) {
     setEditorSize(state.editorWidth, state.editorHeight);
+  }
+
+  // Not publishing controls here: some hosts restore state while audio runs,
+  // and processBlock is the controls snapshot's one writer. The next block
+  // publishes the restored parameters; the preferred preset path below
+  // already selects the right preset on the scan.
+  if (!state.playlistFolderPath.empty()) {
+    visualizer_->director().setPresetFolder(state.playlistFolderPath, state.presetAbsolutePath);
   }
 }
 

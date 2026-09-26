@@ -13,6 +13,7 @@ add_executable(milkdawp_core_tests
   HostTransportTests.cpp
   ParameterModelTests.cpp
   PlaylistTests.cpp
+  PresetLibraryTests.cpp
   TransitionSchedulerTests.cpp
   StateSchemaTests.cpp
   WavTests.cpp
