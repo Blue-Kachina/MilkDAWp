@@ -39,6 +39,12 @@ if(NOT _mdw_result EQUAL 0)
   return()
 endif()
 
+# ldd prints "libz.so.1 => /lib/x86_64-linux-gnu/libz.so.1 (0x...)": keep only
+# the resolved path, or the one copy counts twice (soname + path).
+if(NOT MILKDAWP_CHECK_PLATFORM STREQUAL "Windows" AND NOT MILKDAWP_CHECK_PLATFORM STREQUAL "Darwin")
+  string(REGEX REPLACE "[^ \t\r\n]+ => " "" _mdw_deps "${_mdw_deps}")
+endif()
+
 string(REGEX MATCHALL "[^ \t\r\n]*lib(z|png1?6?)d?\\.(dll|dylib|so[.0-9]*)" _mdw_matches "${_mdw_deps}")
 string(REGEX MATCHALL "[^ \t\r\n]*z(lib)?1?d?\\.dll" _mdw_zlib_win_matches "${_mdw_deps}")
 list(APPEND _mdw_matches ${_mdw_zlib_win_matches})

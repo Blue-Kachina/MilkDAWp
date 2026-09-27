@@ -180,7 +180,7 @@ void MilkDAWpAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBloc
 
 void MilkDAWpAudioProcessor::releaseResources() {}
 
-MILKDAWP_NONBLOCKING void MilkDAWpAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) {
+void MilkDAWpAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) noexcept MILKDAWP_NONBLOCKING {
   // Bit-exact passthrough (§4.1 goal: zero audio impact) -- buffer is only
   // ever read below, never written to.
   const auto transportInfo = extractTransportInfo(getPlayHead());

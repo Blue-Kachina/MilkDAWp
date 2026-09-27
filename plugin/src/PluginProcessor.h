@@ -16,7 +16,9 @@
 #include "milkdawp/engine/Visualizer.h"
 
 // processBlock never allocates, locks, logs, or calls the message thread
-// (§4.2). Attribute is Clang-only (the RTSan job, 0.4, is Clang-only too);
+// (§4.2). It's a type attribute, so it goes after the parameter list and
+// `noexcept` (Clang requires noexcept with it), not before the return type.
+// Attribute is Clang-only (the RTSan job, 0.4, is Clang-only too);
 // __has_cpp_attribute degrades to 0 -- and this to nothing -- everywhere
 // else, so MSVC/GCC builds are unaffected.
 #if defined(__has_cpp_attribute)
@@ -55,7 +57,7 @@ public:
 
   void prepareToPlay(double sampleRate, int samplesPerBlock) override;
   void releaseResources() override;
-  MILKDAWP_NONBLOCKING void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
+  void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) noexcept MILKDAWP_NONBLOCKING override;
 
   juce::AudioProcessorEditor* createEditor() override;
   bool hasEditor() const override { return true; }
