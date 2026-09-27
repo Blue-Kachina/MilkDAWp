@@ -242,13 +242,44 @@ struct OffscreenGLContext::Impl {
   }
 };
 
+namespace {
+
+// The default display first: on a desktop it's the X11/Wayland display JUCE's
+// windows use, which sharing with them (2.3) will need. With no display server
+// (CI, containers, headless tests) that fails, so fall back to Mesa's
+// surfaceless platform, which needs none.
+EGLDisplay initializeDisplay() {
+  EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+  if (display != EGL_NO_DISPLAY && eglInitialize(display, nullptr, nullptr) == EGL_TRUE) {
+    return display;
+  }
+
+  const char* clientExtensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
+  if (clientExtensions == nullptr ||
+      std::string(clientExtensions).find("EGL_MESA_platform_surfaceless") == std::string::npos) {
+    return EGL_NO_DISPLAY;
+  }
+  auto* getPlatformDisplay =
+      reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(eglGetProcAddress("eglGetPlatformDisplayEXT"));
+  if (getPlatformDisplay == nullptr) {
+    return EGL_NO_DISPLAY;
+  }
+  display = getPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
+  if (display != EGL_NO_DISPLAY && eglInitialize(display, nullptr, nullptr) == EGL_TRUE) {
+    return display;
+  }
+  return EGL_NO_DISPLAY;
+}
+
+} // namespace
+
 OffscreenGLContext::CreateResult OffscreenGLContext::create() {
   CreateResult result;
   auto impl = std::make_unique<Impl>();
 
-  impl->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-  if (impl->display == EGL_NO_DISPLAY || eglInitialize(impl->display, nullptr, nullptr) != EGL_TRUE) {
-    result.error = "eglGetDisplay/eglInitialize failed";
+  impl->display = initializeDisplay();
+  if (impl->display == EGL_NO_DISPLAY) {
+    result.error = "no EGL display: the default display and Mesa's surfaceless platform both failed to initialize";
     return result;
   }
   const char* extensions = eglQueryString(impl->display, EGL_EXTENSIONS);

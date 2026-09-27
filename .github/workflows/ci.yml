@@ -16,14 +16,19 @@ env:
   # jobs get vcpkg (and a pre-warmed projectM binary cache) from the
   # devcontainer image instead (0.10).
   VCPKG_COMMIT: 319504a5326aa870edde46438c5455fa76305a56
-  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
 jobs:
   # macOS and Windows: native runners, no container (CI *is* the build farm
   # for these two per §4.10 -- there's no way to containerize a DAW-grade
-  # Windows/macOS build). vcpkg is fetched and built fresh each run, cached
-  # via vcpkg's GitHub Actions binary-cache backend.
+  # Windows/macOS build). vcpkg is fetched each run; its binary packages are
+  # cached with vcpkg's `files` provider plus actions/cache (vcpkg removed its
+  # x-gha backend, so that silently cached nothing).
   build-and-test-native:
+    # Job-level on purpose: a workflow-level `clear;...` would also wipe the
+    # devcontainer image's pre-built cache in the Linux jobs below.
+    env:
+      VCPKG_BINARY_CACHE_DIR: ${{ github.workspace }}/vcpkg-bincache
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/vcpkg-bincache,readwrite"
     strategy:
       fail-fast: false
       matrix:
@@ -51,12 +56,21 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Export GitHub Actions cache variables (for vcpkg's x-gha binary cache)
-        uses: actions/github-script@v7
+      # Exact key: same vcpkg commit, manifest, triplets and overlay ports.
+      # restore-keys falls back to the newest cache for this OS and vcpkg
+      # commit, so a manifest change only rebuilds what actually changed.
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
         with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+          path: ${{ env.VCPKG_BINARY_CACHE_DIR }}
+          key: vcpkg-bin-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'triplets/**', 'vcpkg-overlays/**') }}
+          restore-keys: |
+            vcpkg-bin-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-
+
+      - name: Create vcpkg binary cache directory
+        shell: bash
+        run: mkdir -p "$VCPKG_BINARY_CACHE_DIR"
 
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
@@ -67,6 +81,16 @@ jobs:
         run: cmake --preset ${{ matrix.preset }}
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+      # Saved straight after Configure (where vcpkg installs), and even if a
+      # later step fails, so a red build still warms the cache. Skipped on an
+      # exact hit: nothing new to store.
+      - name: Save vcpkg binary cache
+        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.VCPKG_BINARY_CACHE_DIR }}
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
@@ -119,8 +143,13 @@ jobs:
       - name: Build
         run: cmake --build --preset ci-linux
 
+      # MILKDAWP_REQUIRE_HEADLESS_RENDER: projectM and Mesa's surfaceless EGL
+      # are both in the image, so the headless render tests (2.7) must really
+      # render here; "unavailable" fails instead of quietly passing.
       - name: Test
         run: ctest --preset ci-linux
+        env:
+          MILKDAWP_REQUIRE_HEADLESS_RENDER: "1"
 
       - name: mdw-analyze fixture suite (metric gate, 1.10)
         run: |

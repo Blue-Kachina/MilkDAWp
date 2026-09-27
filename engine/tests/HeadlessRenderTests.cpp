@@ -6,7 +6,7 @@
 // Runs wherever OffscreenGLContext works (Windows WGL; Linux EGL surfaceless,
 // e.g. Mesa llvmpipe in the devcontainer) and projectM 4.2 is next to the
 // test binary; otherwise it reports why and passes, like the other engine
-// tests.
+// tests -- unless MILKDAWP_REQUIRE_HEADLESS_RENDER is set, as in Linux CI.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -122,13 +122,23 @@ struct HeadlessRig {
   }
 };
 
+// Where the render path must work (the Linux CI job sets this), "unavailable"
+// is a failure, not a pass -- otherwise a broken context silently turns these
+// tests into no-ops, as the EGL default-display bug once did.
+void reportUnavailable(const std::string& reason) {
+  if (juce::SystemStats::getEnvironmentVariable("MILKDAWP_REQUIRE_HEADLESS_RENDER", {}).isNotEmpty()) {
+    FAIL("headless render required (MILKDAWP_REQUIRE_HEADLESS_RENDER) but unavailable: " + reason);
+  }
+  SUCCEED("headless render unavailable here: " + reason);
+}
+
 } // namespace
 
 TEST_CASE("Headless render: each fixture preset draws a non-black frame that changes over time (2.7)",
           "[engine][headless]") {
   HeadlessRig rig;
   if (!rig.ready()) {
-    SUCCEED("headless render unavailable here: " + rig.skipReason);
+    reportUnavailable(rig.skipReason);
     return;
   }
 
@@ -186,7 +196,7 @@ TEST_CASE("Headless render: explicit frame time drives time-based preset content
   std::vector<std::uint32_t> second;
   const auto skip = cornerPixelsAt(frames, first);
   if (!skip.empty()) {
-    SUCCEED("headless render unavailable here: " + skip);
+    reportUnavailable(skip);
     return;
   }
   cornerPixelsAt(frames, second);
@@ -212,7 +222,7 @@ TEST_CASE("Headless render: explicit frame time drives time-based preset content
 TEST_CASE("Headless render: a preset projectM rejects fires the failure callback", "[engine][headless]") {
   HeadlessRig rig;
   if (!rig.ready()) {
-    SUCCEED("headless render unavailable here: " + rig.skipReason);
+    reportUnavailable(rig.skipReason);
     return;
   }
   bool failed = false;
