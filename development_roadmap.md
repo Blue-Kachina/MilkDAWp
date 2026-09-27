@@ -1533,10 +1533,35 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       3 randomised repeats, without GUI tests (no GPU on the runner), and uploads the log on
       failure. That CI step hasn't run yet, because the CI workflow itself hasn't run (0.3).
       **Not done:** macOS/Linux (the script is Windows-only; macOS goes with the AU in 3.8),
-      Steinberg's `validator` (pluginval skips it without `--vst3validator`), and the runtime
-      layout check, which belongs with 3.10.
-- [ ] 3.10 (S) Runtime dependency bundling per platform, ported from v1 (DLL copy, dylib
+      Steinberg's `validator` (pluginval skips it without `--vst3validator`). The runtime
+      layout check landed with 3.10, as a build step rather than a separate script.
+- [~] 3.10 (S) Runtime dependency bundling per platform, ported from v1 (DLL copy, dylib
       fix-up, rpath), now for VST3, AU, and Standalone.
+      Note (2026-09-26): `milkdawp_deploy_projectm_runtime()` now copies exactly one file,
+      projectM's library, resolved per config from `$<TARGET_FILE:libprojectM::projectM>`
+      (vcpkg maps RelWithDebInfo to its Release build) and named the way `ProjectMLibrary`
+      opens it (the versioned `.so`/`.dylib` becomes the unversioned name). It used to copy
+      vcpkg's whole `bin` directory, which shipped `projectM-4-playlist.dll` (unused) and .pdb
+      files next to the plugin, and never removed anything. The Release Standalone folder
+      still held `z.dll`/`libpng16.dll`, the exact collision from §4.11. The deploy step now
+      deletes any file from a vcpkg `bin` directory it finds next to the binary.
+      `milkdawp_check_runtime_layout()` (`cmake/scripts/check_runtime_layout.cmake`, the
+      port of v1's `check_runtime_win.ps1`) runs after it on the VST3 and Standalone and fails
+      the build unless the folder holds only the binary, its own byproducts (.pdb/.ilk) and
+      projectM's library. Because it's a build step, it runs in every local and CI build on
+      every platform. Verified on Windows: Debug and Release rebuilds removed the stale files
+      and passed the check; a planted `glew32.dll` and a missing `projectM-4.dll` each fail it;
+      177/177 tests pass, with the headless render tests actually loading projectM; the
+      Release Standalone renders with projectM 4.2.0; pluginval passes on the new VST3.
+      `dumpbin /dependents`: projectM and the plugin need only system DLLs and the MSVC runtime
+      (`MSVCP140`, `VCRUNTIME140(_1)`), with no third-party DLLs.
+      **Not done:** macOS and Linux are written for but unbuilt (dylib install names, rpath,
+      and where a signed bundle wants the dylib, `Contents/Frameworks` vs next to the binary,
+      go with 3.8 and 6.3); the AU doesn't exist yet (3.8). The MSVC runtime is deliberately
+      not bundled: Matthew decided (2026-09-26) that the Windows installer installs the VC++
+      Redistributable (6.2), rather than building with the static CRT, which would also
+      need a matching projectM triplet. Until the installer exists, a machine without the
+      Redistributable can't load the plugin.
 - [x] 3.11 (S) DAW compatibility checklist doc (`docs/daw-checklist.md`): scan, insert,
       automate every parameter, save/reload, drawer reveal/pin in each host, keyboard
       shortcuts in editor and Output window, output window on second display, close and
@@ -1635,7 +1660,9 @@ docs live; v1 repo archived with a pointer.
 - [ ] 6.1 (S) Curate and licence-check the bundled preset pack (D12); default preset chosen;
       first-run library root points at it.
 - [ ] 6.2 (M) Windows installer (Inno Setup or WiX): VST3 to `Common Files\VST3`, app to
-      Program Files, optional desktop shortcut, uninstaller; signed (D11).
+      Program Files, optional desktop shortcut, uninstaller; signed (D11). Installs the
+      Microsoft Visual C++ 2015-2022 Redistributable (x64) when it's missing: the plugin,
+      app and projectM all link the dynamic MSVC runtime (3.10, decided 2026-09-26).
 - [ ] 6.3 (M) macOS: `.pkg` with VST3 + AU + app, Developer ID signed, notarized, stapled;
       universal binary.
 - [ ] 6.4 (M) Linux: AppImage for the app, tarball for the VST3, `.deb` as stretch.

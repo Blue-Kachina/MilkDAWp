@@ -73,6 +73,8 @@ if(MILKDAWP_WITH_PROJECTM)
   milkdawp_deploy_projectm_runtime(milkdawp_plugin_VST3)
   milkdawp_deploy_projectm_runtime(milkdawp_plugin_Standalone)
 endif()
+milkdawp_check_runtime_layout(milkdawp_plugin_VST3)
+milkdawp_check_runtime_layout(milkdawp_plugin_Standalone)
 
 if(BUILD_TESTING)
   add_subdirectory(tests)

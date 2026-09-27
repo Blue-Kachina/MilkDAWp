@@ -7,6 +7,29 @@
 #
 # Exposes MILKDAWP_PROJECTM_TARGET for consumers once milkdawp_engine exists.
 
+# milkdawp_check_runtime_layout(<target>)
+#
+# Adds a POST_BUILD step that fails the build unless <target>'s directory
+# holds only the binary, its build byproducts, and (with projectM) projectM's
+# library (3.10). Call it on every shipped binary (the VST3, the Standalone,
+# later the app) after milkdawp_deploy_projectm_runtime(), so it sees the
+# deployed result. Not for dev tools or tests, whose output directories are
+# shared with other targets.
+function(milkdawp_check_runtime_layout target)
+  set(_mdw_projectm_file "")
+  if(MILKDAWP_WITH_PROJECTM)
+    set(_mdw_projectm_file "$<TARGET_FILE:${MILKDAWP_PROJECTM_TARGET}>")
+  endif()
+  add_custom_command(TARGET ${target} POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+      "-DMILKDAWP_CHECK_TARGET_FILE=$<TARGET_FILE:${target}>"
+      "-DMILKDAWP_PROJECTM_FILE=${_mdw_projectm_file}"
+      -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/scripts/check_runtime_layout.cmake"
+    VERBATIM
+    COMMENT "Checking nothing unexpected ships next to ${target}"
+  )
+endfunction()
+
 if(NOT MILKDAWP_WITH_PROJECTM)
   return()
 endif()
@@ -57,32 +80,32 @@ message(STATUS "MilkDAWp: using projectM target ${MILKDAWP_PROJECTM_TARGET}")
 # copy (VCPKG_APPLOCAL_DEPS) only copies DLLs for things a target actually
 # links against, so projectM's own shared library is never placed next to
 # the plugin/app binary on its own -- and neither is anything *projectM
-# itself* dynamically links against (4.1.7 pulled in glew32d.dll this way;
-# the 4.2 overlay port, ADR-0008, has no third-party DLL dependencies per
-# `dumpbin /dependents`, but that can change between pins). Rather than hand-track projectM's
-# transitive DLLs one at a time as they change across versions/platforms,
-# this copies the whole vcpkg-installed bin directory for the active config,
-# then deletes the specific files we know we don't want: zlib/libpng are
-# vcpkg dependencies of *other* things in this manifest, not of projectM or
-# of us (§4.11 -- we use JUCE's own bundled zlib/libpng, not vcpkg's), and
-# leaving them here is more than just clutter: real, separate DLLs sitting
-# next to the plugin binary are exactly what broke loading in REAPER/Cubase
-# the one time this project did eagerly link vcpkg's copies (see §4.11's
-# 2026-09-26 update) -- not worth re-introducing the same risk for files
-# nothing here actually uses. Call this on every final linked binary that
-# constructs a RenderEngine (plugin, app, mdw-view) so ProjectMLibrary's
-# bundle-relative/module-directory search (§2.1) has everything it needs.
+# itself* dynamically links against (4.1.7 pulled in glew32d.dll this way).
+# The 4.2 overlay port (ADR-0008) needs nothing beyond system libraries and
+# the C/C++ runtime (`dumpbin /dependents`, 2026-09-26), so this copies
+# exactly one file: projectM's library, resolved per config from the imported
+# target. It used to copy the whole vcpkg bin directory, which also shipped
+# zlib/libpng (vcpkg dependencies of other things in the manifest; we use
+# JUCE's bundled copies, §4.11), projectM's unused playlist library and .pdb
+# files. Stray zlib/libpng DLLs next to the plugin are what broke loading in
+# REAPER/Cubase (§4.11's 2026-09-26 update), so the deploy step also deletes
+# any file from a vcpkg bin directory it finds left over there, and
+# milkdawp_check_runtime_layout() fails the build if anything else turns up.
+# If a projectM pin gains a real DLL dependency, the engine will fail to load
+# projectM and the dependency has to be added here deliberately.
+#
+# Call this on every final linked binary that constructs a RenderEngine
+# (plugin, app, mdw-view, engine tests) so ProjectMLibrary's
+# bundle-relative/module-directory search (§2.1) finds the library.
 function(milkdawp_deploy_projectm_runtime target)
-  set(_mdw_vcpkg_bin "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/$<$<CONFIG:Debug>:debug/>bin")
+  set(_mdw_triplet_dir "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
   add_custom_command(TARGET ${target} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-      "${_mdw_vcpkg_bin}"
-      "$<TARGET_FILE_DIR:${target}>"
-    COMMAND ${CMAKE_COMMAND} -E rm -f
-      "$<TARGET_FILE_DIR:${target}>/z$<$<CONFIG:Debug>:d>.dll"
-      "$<TARGET_FILE_DIR:${target}>/libpng16$<$<CONFIG:Debug>:d>.dll"
+    COMMAND ${CMAKE_COMMAND}
+      "-DMILKDAWP_PROJECTM_FILE=$<TARGET_FILE:${MILKDAWP_PROJECTM_TARGET}>"
+      "-DMILKDAWP_DEST_DIR=$<TARGET_FILE_DIR:${target}>"
+      "-DMILKDAWP_VCPKG_BIN_DIRS=${_mdw_triplet_dir}/bin$<SEMICOLON>${_mdw_triplet_dir}/debug/bin"
+      -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/scripts/deploy_projectm_runtime.cmake"
     VERBATIM
-    COMMENT "Deploying projectM's vcpkg runtime directory next to ${target} (minus unused zlib/libpng)"
+    COMMENT "Deploying projectM's library next to ${target}"
   )
-  unset(_mdw_vcpkg_bin)
 endfunction()
