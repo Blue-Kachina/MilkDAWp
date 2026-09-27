@@ -45,7 +45,6 @@ public:
 
 private:
   double sampleRate_;
-  std::size_t hopSize_;
   float phaseCorrectionGain_;
   float phaseCorrectionWindowFraction_;
 

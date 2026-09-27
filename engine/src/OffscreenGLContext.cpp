@@ -43,6 +43,7 @@ std::string glString(unsigned int name) {
   return text != nullptr ? reinterpret_cast<const char*>(text) : "?";
 }
 
+#if defined(_WIN32) // only the WGL path checks the version so far
 // "4.6.0 NVIDIA 560.94" -> {4, 6}; "OpenGL ES 3.2 Mesa" -> {3, 2}.
 bool parseGlVersion(const std::string& text, int& major, int& minor) {
   auto isDigit = [](char c) { return c >= '0' && c <= '9'; };
@@ -67,6 +68,7 @@ bool parseGlVersion(const std::string& text, int& major, int& minor) {
   ++i;
   return readNumber(minor);
 }
+#endif
 
 } // namespace
 

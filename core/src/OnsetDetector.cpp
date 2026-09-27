@@ -10,7 +10,7 @@ namespace milkdawp::core {
 
 OnsetDetector::OnsetDetector(double sampleRate, std::size_t hopSize, float windowSeconds,
                               float thresholdMultiplier, float minIntervalSeconds)
-    : sampleRate_(sampleRate), hopSize_(hopSize),
+    : hopSize_(hopSize),
       windowSizeHops_(std::max<std::size_t>(
           1, static_cast<std::size_t>(windowSeconds * sampleRate / static_cast<double>(hopSize)))),
       thresholdMultiplier_(thresholdMultiplier),

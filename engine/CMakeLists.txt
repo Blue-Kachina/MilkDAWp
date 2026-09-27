@@ -31,6 +31,13 @@ target_include_directories(milkdawp_engine PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 target_compile_features(milkdawp_engine PUBLIC cxx_std_20)
+# Same as ui/plugin/app. PUBLIC because juce_opengl (below) is: every target
+# that compiles JUCE's module sources through this one needs them, or on Linux
+# juce_gui_extra includes GTK's WebKit headers.
+target_compile_definitions(milkdawp_engine PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+)
 target_link_libraries(milkdawp_engine
   PUBLIC
     milkdawp_core

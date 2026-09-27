@@ -25,3 +25,11 @@ else()
     -Werror
   )
 endif()
+
+# JUCE module sources (juce_graphics_Harfbuzz.cpp etc.) compile *inside* the
+# targets that link juce::juce_*, so they get these flags despite SYSTEM
+# headers. GCC's -Wmaybe-uninitialized false-positives in JUCE's bundled
+# HarfBuzz at -O2; keep it a warning, not an error, on GCC only.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  target_compile_options(milkdawp_warnings INTERFACE -Wno-error=maybe-uninitialized)
+endif()

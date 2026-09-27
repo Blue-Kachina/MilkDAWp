@@ -13,7 +13,15 @@
 FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG LLVM_VERSION=18
+# 20+ for RealtimeSanitizer (-fsanitize=realtime, the ci-linux-rtsan job).
+# Ubuntu 24.04's own archive stops at 18, so LLVM comes from apt.llvm.org.
+ARG LLVM_VERSION=20
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+    && curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_VERSION} main" \
+       > /etc/apt/sources.list.d/llvm.list \
+    && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
 # Toolchains: GCC + Clang (D5), CMake, Ninja, ccache, and vcpkg's own build
@@ -23,6 +31,7 @@ ARG LLVM_VERSION=18
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential gcc-13 g++-13 \
       clang-${LLVM_VERSION} clang-format-${LLVM_VERSION} clang-tidy-${LLVM_VERSION} lld-${LLVM_VERSION} \
+      libclang-rt-${LLVM_VERSION}-dev \
       cmake ninja-build ccache git curl ca-certificates zip unzip tar pkg-config \
       autoconf automake libtool bison flex python3 python3-pip \
       # JUCE 9 Linux build deps (§4.11: EGL replaces GLX; libxi-dev is new)
@@ -36,6 +45,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       xvfb x11-utils \
     && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100 \
     && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} 100 \
+    && update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-${LLVM_VERSION} 100 \
+    && update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-${LLVM_VERSION} 100 \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100 \
     && rm -rf /var/lib/apt/lists/*

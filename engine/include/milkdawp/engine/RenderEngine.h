@@ -46,6 +46,19 @@ struct RenderStats {
   std::int64_t lastLandingErrorSamples = 0;
 };
 
+/// RenderEngine::Config. At namespace scope because `create()` defaults it
+/// with `= {}`: GCC and Clang reject that for a nested class with default
+/// member initializers (CWG 1397), though MSVC accepts it.
+struct RenderEngineConfig {
+  std::int32_t fps = 60;
+  std::size_t meshWidth = 48;
+  std::size_t meshHeight = 32;
+  int initialWidth = 1280;  // FBO size before any surface reports its size
+  int initialHeight = 720;
+  int maxDimension = 4096;  // cap on either FBO dimension
+  double sampleRate = 48000.0; // for TransitionExecutor's soft-cut early issue
+};
+
 /// Owns the GL context, the render thread and the projectM instance for the
 /// lifetime of the processor or app (§4.5, Phases 2.2/2.3/2.10).
 ///
@@ -68,15 +81,7 @@ struct RenderStats {
 ///     surface registration and size reports, latestFrame().
 class RenderEngine {
 public:
-  struct Config {
-    std::int32_t fps = 60;
-    std::size_t meshWidth = 48;
-    std::size_t meshHeight = 32;
-    int initialWidth = 1280;  // FBO size before any surface reports its size
-    int initialHeight = 720;
-    int maxDimension = 4096;  // cap on either FBO dimension
-    double sampleRate = 48000.0; // for TransitionExecutor's soft-cut early issue
-  };
+  using Config = RenderEngineConfig;
 
   /// Loads projectM and starts the render thread. Never returns null: if
   /// projectM or a GL context is unavailable the engine stays valid and

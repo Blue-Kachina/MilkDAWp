@@ -114,7 +114,6 @@ private:
   }
 
   double sampleRate_;
-  std::size_t hopSize_;
   double hopDurationSeconds_;
   TransitionSchedulerConfig config_;
   std::mt19937 rng_;

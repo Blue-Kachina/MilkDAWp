@@ -9,7 +9,7 @@
 namespace milkdawp::core {
 
 TransitionScheduler::TransitionScheduler(double sampleRate, std::size_t hopSize, std::uint64_t rngSeed)
-    : sampleRate_(sampleRate), hopSize_(hopSize),
+    : sampleRate_(sampleRate),
       hopDurationSeconds_(static_cast<double>(hopSize) / sampleRate),
       rng_(static_cast<std::mt19937::result_type>(rngSeed)) {}
 

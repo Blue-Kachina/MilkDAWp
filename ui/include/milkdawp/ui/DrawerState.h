@@ -14,6 +14,15 @@ enum class DrawerVisualState : std::uint8_t {
   Pinned,
 };
 
+/// DrawerStateMachine::Config. At namespace scope because the constructor
+/// defaults it with `= {}`: GCC and Clang reject that for a nested class with
+/// default member initializers (CWG 1397), though MSVC accepts it.
+struct DrawerStateMachineConfig {
+  bool startPinned = false;     // e.g. true for the plugin editor's default (§4.9)
+  bool firstRunRevealed = true; // "drawer starts open until the first interaction"
+  double autoHideSeconds = 3.0;
+};
+
 /// The reveal/hide/pin state machine behind `ControlDrawer`, deliberately
 /// kept free of JUCE (no `Component`, no `Timer`) so it is a plain,
 /// deterministic unit under test -- the roadmap's own requirement for this
@@ -40,11 +49,7 @@ enum class DrawerVisualState : std::uint8_t {
 ///    ordinary timer-based auto-hide applies.
 class DrawerStateMachine {
 public:
-  struct Config {
-    bool startPinned = false;     // e.g. true for the plugin editor's default (§4.9)
-    bool firstRunRevealed = true; // "drawer starts open until the first interaction"
-    double autoHideSeconds = 3.0;
-  };
+  using Config = DrawerStateMachineConfig;
 
   explicit DrawerStateMachine(Config config = {});
 

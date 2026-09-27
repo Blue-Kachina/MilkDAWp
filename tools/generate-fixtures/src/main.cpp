@@ -21,7 +21,6 @@ using milkdawp::core::writeWavFile;
 namespace {
 
 constexpr double kSampleRate = 48000.0;
-constexpr float kPi = 3.14159265358979323846f;
 
 WavAudio makeSilentBuffer(double durationSeconds) {
   WavAudio audio;

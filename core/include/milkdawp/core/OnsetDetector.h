@@ -38,7 +38,6 @@ public:
   std::optional<Onset> processHop(float odfValue);
 
 private:
-  double sampleRate_;
   std::size_t hopSize_;
   std::size_t windowSizeHops_;
   float thresholdMultiplier_;

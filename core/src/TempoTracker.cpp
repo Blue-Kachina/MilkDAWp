@@ -30,8 +30,7 @@ constexpr float kOctaveWeightSigmaOctaves = 0.5f;
 
 TempoTracker::TempoTracker(double sampleRate, std::size_t hopSize, float windowSeconds, float minBpm,
                             float maxBpm)
-    : sampleRate_(sampleRate), hopSize_(hopSize),
-      hopDurationSeconds_(static_cast<double>(hopSize) / sampleRate),
+    : hopDurationSeconds_(static_cast<double>(hopSize) / sampleRate),
       windowSizeHops_(static_cast<std::size_t>(windowSeconds / hopDurationSeconds_)),
       minLagHops_(std::max<std::size_t>(1, static_cast<std::size_t>(
                                                 std::lround((60.0 / maxBpm) / hopDurationSeconds_)))),

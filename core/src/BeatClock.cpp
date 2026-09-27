@@ -7,9 +7,9 @@
 
 namespace milkdawp::core {
 
-BeatClock::BeatClock(double sampleRate, std::size_t hopSize, float phaseCorrectionGain,
+BeatClock::BeatClock(double sampleRate, std::size_t /*hopSize*/, float phaseCorrectionGain,
                       float phaseCorrectionWindowFraction)
-    : sampleRate_(sampleRate), hopSize_(hopSize), phaseCorrectionGain_(phaseCorrectionGain),
+    : sampleRate_(sampleRate), phaseCorrectionGain_(phaseCorrectionGain),
       phaseCorrectionWindowFraction_(phaseCorrectionWindowFraction) {}
 
 BeatClockState BeatClock::processHop(std::uint64_t currentSamplePos, const TempoEstimate& tempo,

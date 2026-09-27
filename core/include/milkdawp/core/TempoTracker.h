@@ -33,8 +33,6 @@ public:
 private:
   [[nodiscard]] static float octaveWeight(float bpm);
 
-  double sampleRate_;
-  std::size_t hopSize_;
   double hopDurationSeconds_;
   std::size_t windowSizeHops_;
   std::size_t minLagHops_;

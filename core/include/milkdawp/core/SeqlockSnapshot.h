@@ -74,8 +74,11 @@ public:
       after = sequence_.load(std::memory_order_relaxed);
     } while ((before & 1U) != 0 || before != after);
 
+    // void*: GCC's -Wclass-memaccess calls a T with default member
+    // initializers "non-trivial", but the static_assert above is what makes
+    // this copy valid.
     T value;
-    std::memcpy(&value, words.data(), sizeof(T));
+    std::memcpy(static_cast<void*>(&value), words.data(), sizeof(T));
     return value;
   }
 
