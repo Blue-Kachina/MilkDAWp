@@ -69,11 +69,17 @@ public:
 private:
   void copyFrames(float* dest, std::int64_t fromFrame, std::size_t numFrames) const noexcept;
 
+  static_assert(std::atomic<float>::is_always_lock_free, "AudioRing needs lock-free float atomics");
+
   std::size_t capacityFrames_;
   int numChannels_;
-  std::vector<float> buffer_; // capacityFrames_ * numChannels_, interleaved
+  // capacityFrames_ * numChannels_, interleaved. Relaxed atomics: write()
+  // may overwrite a slot while a reader copies it (the ring never blocks the
+  // audio thread), and readers detect that via writeReserve_ afterwards.
+  std::vector<std::atomic<float>> buffer_;
 
-  std::atomic<std::uint64_t> writePosition_{0}; // total frames written so far
+  std::atomic<std::uint64_t> writePosition_{0}; // total frames written so far (published)
+  std::atomic<std::uint64_t> writeReserve_{0};  // frames write() may have overwritten, >= writePosition_
   std::uint64_t readPosition_ = 0;              // consumeHop's cursor (reader-owned, not atomic)
 };
 

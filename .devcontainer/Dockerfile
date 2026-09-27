@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential gcc-13 g++-13 \
       clang-${LLVM_VERSION} clang-format-${LLVM_VERSION} clang-tidy-${LLVM_VERSION} lld-${LLVM_VERSION} \
-      libclang-rt-${LLVM_VERSION}-dev \
+      libclang-rt-${LLVM_VERSION}-dev llvm-${LLVM_VERSION} \
       cmake ninja-build ccache git curl ca-certificates zip unzip tar pkg-config \
       autoconf automake libtool bison flex python3 python3-pip \
       # JUCE 9 Linux build deps (§4.11: EGL replaces GLX; libxi-dev is new)
@@ -47,6 +47,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} 100 \
     && update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-${LLVM_VERSION} 100 \
     && update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-${LLVM_VERSION} 100 \
+    # Sanitizer reports print "<null>" frames without it on PATH.
+    && update-alternatives --install /usr/bin/llvm-symbolizer llvm-symbolizer /usr/lib/llvm-${LLVM_VERSION}/bin/llvm-symbolizer 100 \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100 \
     && rm -rf /var/lib/apt/lists/*
