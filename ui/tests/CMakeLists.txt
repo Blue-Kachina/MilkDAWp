@@ -9,6 +9,13 @@ add_executable(milkdawp_ui_tests
   PresetMenuTests.cpp
 )
 
+# Same as milkdawp_ui: this target compiles JUCE's module sources too, and
+# without these Linux links them against libcurl/WebKit.
+target_compile_definitions(milkdawp_ui_tests PRIVATE
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+)
+
 target_link_libraries(milkdawp_ui_tests PRIVATE
   milkdawp_ui
   milkdawp_warnings

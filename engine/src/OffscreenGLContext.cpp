@@ -25,6 +25,7 @@ namespace milkdawp::engine {
 
 namespace {
 
+#if defined(_WIN32) || defined(__linux__) // macOS has no offscreen context yet (the #else stub)
 constexpr unsigned int kGlVendor = 0x1F00;
 constexpr unsigned int kGlRenderer = 0x1F01;
 constexpr unsigned int kGlVersion = 0x1F02;
@@ -42,6 +43,7 @@ std::string glString(unsigned int name) {
   const auto* text = getString(name);
   return text != nullptr ? reinterpret_cast<const char*>(text) : "?";
 }
+#endif
 
 #if defined(_WIN32) // only the WGL path checks the version so far
 // "4.6.0 NVIDIA 560.94" -> {4, 6}; "OpenGL ES 3.2 Mesa" -> {3, 2}.
