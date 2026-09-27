@@ -1840,17 +1840,114 @@ rework:
         Show log file).
       - Verified by relaunching: preset, mode, folder, Output window and fullscreen all come
         back as left.
-- [ ] 4.4 (M) MIDI learn: map CC/notes to any parameter; persisted; UI affordance on each
+- [x] 4.4 (M) MIDI learn: map CC/notes to any parameter; persisted; UI affordance on each
       control.
-- [ ] 4.5 (M) Preset library browser: tree of the library root, search, favourites, recently
+      Note (2026-09-27):
+      - `MidiLearn` (new, `app/src/MidiLearn.{h,cpp}`) listens on every enabled MIDI input
+        (no per-device picker; out of scope here) and maps CC/note-on messages to a
+        parameter id, persisted in `AppState.midiMappings` (one line per mapping) through
+        `stateString()`/`restoreFromState()`.
+      - The UI affordance lives at the one chokepoint every bindable widget already goes
+        through: `ParameterBinding::bind()`. `ParameterBinding` is now also a
+        `juce::MouseListener` on each widget it binds; right-click shows "MIDI Learn..." /
+        "Clear MIDI mapping", and every bound widget's tooltip shows its current mapping (or
+        "Right-click to map a MIDI control", or "Listening..." while armed) via
+        `refreshMidiLearnTooltips()`.
+      - **Real-hardware finding, not just a design choice:** enabling a MIDI input
+        (`AudioDeviceManager::setMidiInputDeviceEnabled`) blocked forever against a real USB
+        MIDI interface on this machine (a MOTU box) -- confirmed with timing diagnostics
+        before removing them. `enableAllInputs()` therefore runs on its own **detached**
+        background thread, checking an `alive` flag between devices; the destructor does not
+        join it, since joining could hang app shutdown on the same stuck driver call.
+        This also fixed a second problem: JUCE's Windows MIDI enumeration call needs the
+        message loop pumped to complete, which isn't running yet inside
+        `JUCEApplication::initialise()` (where `MidiLearn` is constructed) and never runs at
+        all in a console unit test -- moving the call off that thread entirely sidesteps both.
+      - Verified against real hardware: app stays responsive at launch (was hanging
+        indefinitely before the fix); `app_tests` runs in seconds instead of hanging forever.
+        `MidiLearnTests.cpp` covers the pure state machine (arm/cancel, mapping table
+        round-trip through `stateString`/`restoreFromState`, malformed-line handling); nothing
+        exercises `handleIncomingMidiMessage` itself, since CI has no MIDI hardware.
+- [x] 4.5 (M) Preset library browser: tree of the library root, search, favourites, recently
       played, right-click add to blacklist.
-- [ ] 4.6 (S) File associations and drag-and-drop for `.milk` files and folders
+      Note (2026-09-27):
+      - `PresetBrowserPanel` (new, `app/src/PresetBrowserPanel.{h,cpp}`, opened via File >
+        "Browse presets..."): a search box, All/Favourites/Recent tabs, and a `juce::TreeView`
+        built from `ui::buildPresetTree`, which gained a `(name, index)`-pairs overload so a
+        filtered view (Favourites/Recent, both flat and most-relevant-first rather than
+        grouped by folder) keeps the *real* playlist index rather than its position in the
+        filtered list. Pull-based like `AudioSettingsPanel`: polls on a 2 Hz timer, only
+        rebuilding the tree when the underlying data actually changed, so an open folder or
+        scroll position survives ticks where nothing did.
+      - Favourites and recently-played are app-level state (`AppState.favouritePresets` /
+        `.recentlyPlayedPresets`, both keyed by absolute path, the latter bounded to
+        `kMaxRecentlyPlayed` = 20 and recorded in `MainComponent::timerCallback` whenever the
+        director's current preset path changes).
+      - The blacklist reuses `PresetLoader`'s existing (already-implemented, §2.5) blacklist
+        rather than inventing a browser-only flag, so right-click "blacklist" actually keeps
+        playback off a preset, the same as a preset projectM itself rejects. Reaching it from
+        the UI thread needed new plumbing: `Director::blacklistPreset`/`unblacklistPreset`
+        queue the request (`pendingBlacklistOps_`, drained once per director-thread loop
+        tick) and `blacklistedPaths()` publishes a snapshot; `Director::presetPath(s)` mirrors
+        `presetName(s)` so the browser can key by absolute path, which a playlist index
+        doesn't survive a rescan.
+      - Tests: `ui/tests/PresetMenuTests.cpp` (the pairs overload),
+        `engine/tests/PresetLoaderTests.cpp` (`blacklistedPaths()`),
+        `engine/tests/DirectorTests.cpp` (paths mirror names; blacklist round-trips) -- the
+        last needs no projectM/GL, since the folder scan and the blacklist queue both run on
+        the director thread regardless of whether a surface can render.
+- [x] 4.6 (S) File associations and drag-and-drop for `.milk` files and folders
       (desktop-shell code, per the boundary rules).
-- [ ] 4.7 (L) Windows WASAPI loopback capture module behind `SystemAudioCapture`, selectable as
+      Note (2026-09-27):
+      - `MainComponent::openPath()` (new) opens a `.milk` file (its folder, with that file
+        preferred) or a folder, shared by three entry points: `MainComponent` now implements
+        `juce::FileDragAndDropTarget` (drop a file or folder onto the main window); `Main.cpp`
+        passes `initialise()`'s command line through on first launch and
+        `anotherInstanceStarted()`'s through `MainWindow::content()` (new accessor) on a
+        second one (double-clicking a second `.milk` file brings the single-instance window
+        forward and opens it, rather than starting a second engine).
+      - `juce_add_gui_app(... DOCUMENT_EXTENSIONS "milk")` adds the macOS Info.plist
+        document-type metadata for free. Windows registry / Linux desktop-file association
+        registration is installer work (§9, not started) -- Main.cpp already handles whatever
+        path that hands it either way, so nothing here blocks on it.
+- [x] 4.7 (L) Windows WASAPI loopback capture module behind `SystemAudioCapture`, selectable as
       "System audio" in the device list. Defines the interface: start/stop, a permission
       state the UI can explain ("needs permission", "denied", "unsupported on this OS"), and
       audio delivered into the same `AudioRing` path as a device input. Phase 7's Android
       module implements it too, so nothing Windows-specific goes in the interface.
+      Note (2026-09-27):
+      - `SystemAudioCapture` (`app/src/SystemAudioCapture.h`) is a small interface
+        (open/close/isOpen/permissionState/describe/takePeak), with one implementation file per
+        platform picked by `app/CMakeLists.txt` at build time and a `createSystemAudioCapture()`
+        factory that is never null: `SystemAudioCaptureWindows.cpp` (WASAPI loopback, real COM
+        against the default render endpoint, its own MTA capture thread) on Windows, and
+        `SystemAudioCaptureUnsupported.cpp` (always `PermissionState::Unsupported`) everywhere
+        else until 4.8/4.9. Windows needs no consent for loopback, so its `permissionState()` is
+        always `Granted`; failures surface as text through `describe()`/`open()`'s return value.
+      - `AudioSourceRouter` (new, `app/src/AudioSourceRouter.h`) picks between `AudioInput` and
+        `SystemAudioCapture` so exactly one feeds the `Visualizer` at a time -- both write into
+        the same ring, so running both would mix two unrelated streams into it. `MainComponent`
+        and `AudioSettingsPanel` now hold the router instead of `AudioInput` directly.
+      - `AudioSettingsPanel` gained a "Capture system audio (loopback) instead of a device"
+        toggle above the existing device selector; picking it closes the device and opens
+        system-audio capture (and vice versa), and it is greyed out with a tooltip when
+        `permissionState() == Unsupported`. `AppState.useSystemAudio` (persisted) remembers the
+        choice across launches.
+      - `PeakReader` (meter/monitor) moved out of `AudioInput` into a shared
+        `app/src/AudioPeakReader.h`, since `SystemAudioCapture` needed the same two-reader peak
+        tracking (`SystemAudioPeakTracker`, in `SystemAudioCapture.h`) over its own capture
+        thread.
+      - Verified on Windows (dev-identity build): app launches on the device input as before;
+        opening File > Audio input..., checking the new toggle closes the device
+        (`AudioDeviceSelectorComponent` shows `<< none >>`) and starts real WASAPI loopback --
+        the dialog's status line and the app's diagnostics overlay both read "System audio
+        (loopback)". Unchecking it reopens the last device. App quits cleanly from either mode
+        (the capture thread is joined in `close()`). `functiondiscoverykeys_devpkey.h`
+        (`PKEY_Device_FriendlyName`, for a nicer status string) triggers `DEFINE_PROPERTYKEY`
+        redefinition errors under `INITGUID` with this SDK (10.0.26100.0); dropped rather than
+        chased -- the status line just says "System audio (loopback)" without the device name.
+      - Not done here: macOS process taps (4.8) and the Linux verification pass (4.9) still
+        return the Unsupported stub; Android's implementation is Phase 7 per ADR-0010.
 - [ ] 4.8 (L) macOS system audio capture via Core Audio process taps (14.2+) with
       ScreenCaptureKit fallback (13+); permission flow and messaging.
 - [ ] 4.9 (S) Linux: verify PipeWire/Pulse monitor sources appear; document.

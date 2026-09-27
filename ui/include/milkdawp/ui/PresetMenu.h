@@ -32,6 +32,11 @@ struct PresetTreeNode {
   [[nodiscard]] bool containsIndex(int index) const;
 };
 [[nodiscard]] PresetTreeNode buildPresetTree(const std::vector<std::string>& names);
+/// Same tree-building, but with an explicit playlist index per entry instead
+/// of assuming vector position -- what a filtered view (favourites, recently
+/// played, search results, §4.5) needs so picking an entry still maps to the
+/// right playlist index.
+[[nodiscard]] PresetTreeNode buildPresetTree(const std::vector<std::pair<std::string, int>>& entries);
 
 /// Appends `tree` to `menu`: a submenu per folder, an item per preset, the
 /// preset at `currentIndex` (and the folders holding it) ticked. Choosing a

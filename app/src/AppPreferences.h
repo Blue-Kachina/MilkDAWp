@@ -25,6 +25,16 @@ struct AppState {
   juce::String presetFolder;      // the library root; empty until chosen
   juce::String currentPresetPath; // reopened in that folder when it still exists
   juce::String audioDeviceState;  // AudioDeviceManager::createStateXml(), as text
+  bool useSystemAudio = false;    // §4.7: system-audio loopback instead of a device
+
+  /// §4.5's browser: absolute preset paths, favourites unordered, recently
+  /// played most-recent-first and bounded (`kMaxRecentlyPlayed`).
+  juce::StringArray favouritePresets;
+  juce::StringArray recentlyPlayedPresets;
+  static constexpr int kMaxRecentlyPlayed = 20;
+
+  /// §4.4: MidiLearn::stateString() / restoreFromState().
+  juce::String midiMappings;
 
   juce::Rectangle<int> mainWindowBounds; // empty: centre a default size
   bool mainWindowFullscreen = false;

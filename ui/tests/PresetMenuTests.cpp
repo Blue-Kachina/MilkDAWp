@@ -46,3 +46,15 @@ TEST_CASE("Subfolders become nested groups that keep playlist indices", "[ui][Pr
   CHECK(tree.containsIndex(4));
   CHECK_FALSE(tree.containsIndex(-1));
 }
+
+TEST_CASE("The (name, index) overload keeps caller-supplied indices, for a filtered view", "[ui][PresetMenu]") {
+  // §4.5's browser: favourites/search results are a subset of the playlist,
+  // so the tree must carry the *real* playlist index, not its position in
+  // the filtered vector.
+  const std::vector<std::pair<std::string, int>> entries{{"Pack/one", 7}, {"top", 2}};
+  const auto tree = buildPresetTree(entries);
+  REQUIRE(tree.presets.size() == 1);
+  CHECK(tree.presets[0] == std::pair<std::string, int>{"top", 2});
+  REQUIRE(tree.folders.size() == 1);
+  CHECK(tree.folders[0].presets[0] == std::pair<std::string, int>{"one", 7});
+}

@@ -5,17 +5,18 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
-#include "AudioInput.h"
+#include "AudioSourceRouter.h"
 
 namespace milkdawp::app {
 
-/// The audio input settings (4.2): JUCE's device selector (driver type,
-/// device, input pair, sample rate, buffer size) over the app's
-/// `AudioInput`, plus a live input level meter so "is anything arriving?"
-/// is answered on the spot.
+/// The audio input settings (4.2, §4.7): JUCE's device selector (driver
+/// type, device, input pair, sample rate, buffer size) over the app's
+/// device input, a toggle for system-audio loopback capture instead, and a
+/// live input level meter so "is anything arriving?" is answered on the
+/// spot for whichever source is active.
 class AudioSettingsPanel final : public juce::Component, private juce::Timer {
 public:
-  explicit AudioSettingsPanel(AudioInput& input);
+  explicit AudioSettingsPanel(AudioSourceRouter& router);
   ~AudioSettingsPanel() override;
 
   void paint(juce::Graphics& g) override;
@@ -23,8 +24,10 @@ public:
 
 private:
   void timerCallback() override;
+  void systemAudioToggled();
 
-  AudioInput& input_;
+  AudioSourceRouter& router_;
+  juce::ToggleButton systemAudioToggle_;
   juce::AudioDeviceSelectorComponent selector_;
   juce::Label statusLabel_;
   juce::Rectangle<int> meterArea_;

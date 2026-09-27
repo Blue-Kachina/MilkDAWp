@@ -30,6 +30,9 @@ public:
 
   void setFullscreen(bool shouldBeFullscreen);
   [[nodiscard]] bool isFullscreen() const noexcept { return fullscreen_; }
+  /// For a file association / drag-and-drop reopen (§4.6): another instance
+  /// started with a file or folder, or the OS launched this one with one.
+  [[nodiscard]] MainComponent& content() noexcept { return *content_; }
 
   /// Something in `AppState` changed (geometry, fullscreen).
   std::function<void()> onStateChanged;

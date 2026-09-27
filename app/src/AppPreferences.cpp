@@ -13,6 +13,7 @@ namespace {
 constexpr const char* kPresetFolder = "presetFolder";
 constexpr const char* kCurrentPreset = "currentPreset";
 constexpr const char* kAudioDevice = "audioDevice";
+constexpr const char* kUseSystemAudio = "useSystemAudio";
 constexpr const char* kMainBounds = "mainWindowBounds";
 constexpr const char* kMainFullscreen = "mainWindowFullscreen";
 constexpr const char* kOutputOpen = "outputWindowOpen";
@@ -23,7 +24,24 @@ constexpr const char* kControlsBounds = "controlsWindowBounds";
 constexpr const char* kDrawerPinned = "drawerPinned";
 constexpr const char* kShowDiagnostics = "showDiagnostics";
 constexpr const char* kLogging = "logging";
+constexpr const char* kFavourites = "favouritePresets";
+constexpr const char* kRecentlyPlayed = "recentlyPlayedPresets";
+constexpr const char* kMidiMappings = "midiMappings";
 constexpr const char* kParameterPrefix = "param.";
+
+// One path per line; paths never contain newlines.
+juce::StringArray readList(const juce::PropertySet& properties, const char* key) {
+  const auto text = properties.getValue(key);
+  return text.isEmpty() ? juce::StringArray() : juce::StringArray::fromLines(text);
+}
+
+void writeList(juce::PropertySet& properties, const char* key, const juce::StringArray& list) {
+  if (list.isEmpty()) {
+    properties.removeValue(key);
+  } else {
+    properties.setValue(key, list.joinIntoString("\n"));
+  }
+}
 
 juce::Rectangle<int> readBounds(const juce::PropertySet& properties, const char* key) {
   const auto text = properties.getValue(key);
@@ -57,6 +75,10 @@ AppState loadAppState(const juce::PropertySet& properties) {
   state.presetFolder = properties.getValue(kPresetFolder);
   state.currentPresetPath = properties.getValue(kCurrentPreset);
   state.audioDeviceState = properties.getValue(kAudioDevice);
+  state.useSystemAudio = properties.getBoolValue(kUseSystemAudio, false);
+  state.favouritePresets = readList(properties, kFavourites);
+  state.recentlyPlayedPresets = readList(properties, kRecentlyPlayed);
+  state.midiMappings = properties.getValue(kMidiMappings);
   state.mainWindowBounds = readBounds(properties, kMainBounds);
   state.mainWindowFullscreen = properties.getBoolValue(kMainFullscreen, false);
   state.outputWindowOpen = properties.getBoolValue(kOutputOpen, false);
@@ -79,6 +101,10 @@ void saveAppState(const AppState& state, juce::PropertySet& properties) {
   properties.setValue(kPresetFolder, state.presetFolder);
   properties.setValue(kCurrentPreset, state.currentPresetPath);
   properties.setValue(kAudioDevice, state.audioDeviceState);
+  properties.setValue(kUseSystemAudio, state.useSystemAudio);
+  writeList(properties, kFavourites, state.favouritePresets);
+  writeList(properties, kRecentlyPlayed, state.recentlyPlayedPresets);
+  properties.setValue(kMidiMappings, state.midiMappings);
   writeBounds(properties, kMainBounds, state.mainWindowBounds);
   properties.setValue(kMainFullscreen, state.mainWindowFullscreen);
   properties.setValue(kOutputOpen, state.outputWindowOpen);

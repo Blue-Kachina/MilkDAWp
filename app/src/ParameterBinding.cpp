@@ -3,8 +3,10 @@
 
 #include "ParameterBinding.h"
 
+#include <algorithm>
 #include <cmath>
 
+#include "MidiLearn.h"
 #include "milkdawp/core/ParameterModel.h"
 
 namespace milkdawp::app {
@@ -18,6 +20,12 @@ const core::ParameterSpec* specFor(std::string_view id) {
 ParameterBinding::ParameterBinding(engine::ParameterValues& values, std::function<void()> onChanged)
     : values_(values), onChanged_(std::move(onChanged)) {}
 
+ParameterBinding::~ParameterBinding() {
+  for (const auto& entry : entries_) {
+    entry.widget->removeMouseListener(this);
+  }
+}
+
 void ParameterBinding::bind(juce::Slider& slider, std::string id) {
   if (const auto* spec = specFor(id)) {
     const double step = spec->type == core::ParameterType::Int ? 1.0 : 0.0;
@@ -29,6 +37,7 @@ void ParameterBinding::bind(juce::Slider& slider, std::string id) {
   }
   slider.onValueChange = [this, id, &slider] { write(id, static_cast<float>(slider.getValue())); };
   entries_.push_back({Kind::Slider, &slider, std::move(id)});
+  slider.addMouseListener(this, false);
   refresh(entries_.back());
 }
 
@@ -36,6 +45,7 @@ void ParameterBinding::bind(juce::Button& button, std::string id) {
   button.setClickingTogglesState(true);
   button.onClick = [this, id, &button] { write(id, button.getToggleState() ? 1.0f : 0.0f); };
   entries_.push_back({Kind::Button, &button, std::move(id)});
+  button.addMouseListener(this, false);
   refresh(entries_.back());
 }
 
@@ -46,6 +56,7 @@ void ParameterBinding::bind(juce::ComboBox& combo, std::string id) {
     }
   };
   entries_.push_back({Kind::ComboBox, &combo, std::move(id)});
+  combo.addMouseListener(this, false);
   refresh(entries_.back());
 }
 
@@ -111,6 +122,51 @@ void ParameterBinding::write(std::string_view id, float value) {
   if (onChanged_) {
     onChanged_();
   }
+}
+
+void ParameterBinding::attachMidiLearn(MidiLearn& midiLearn) {
+  midiLearn_ = &midiLearn;
+  refreshMidiLearnTooltips();
+}
+
+void ParameterBinding::refreshMidiLearnTooltips() {
+  if (midiLearn_ == nullptr) {
+    return;
+  }
+  for (const auto& entry : entries_) {
+    auto* tooltipClient = dynamic_cast<juce::SettableTooltipClient*>(entry.widget);
+    if (tooltipClient == nullptr) {
+      continue;
+    }
+    if (midiLearn_->isLearning() && midiLearn_->learningParameterId() == entry.id) {
+      tooltipClient->setTooltip("Listening for a MIDI control or note...");
+      continue;
+    }
+    const auto mapped = midiLearn_->describeMapping(entry.id);
+    tooltipClient->setTooltip(mapped.isNotEmpty() ? "MIDI: " + mapped + " (right-click to change)"
+                                                  : "Right-click to map a MIDI control");
+  }
+}
+
+void ParameterBinding::mouseDown(const juce::MouseEvent& event) {
+  if (midiLearn_ == nullptr || !event.mods.isPopupMenu()) {
+    return;
+  }
+  auto* comp = event.eventComponent;
+  const auto it =
+      std::find_if(entries_.begin(), entries_.end(), [comp](const Entry& entry) { return entry.widget == comp; });
+  if (it == entries_.end()) {
+    return;
+  }
+  const auto id = it->id;
+  const auto mapped = midiLearn_->describeMapping(id);
+  juce::PopupMenu menu;
+  if (mapped.isNotEmpty()) {
+    menu.addSectionHeader("Mapped: " + mapped);
+  }
+  menu.addItem("MIDI Learn...", [this, id] { midiLearn_->startLearning(id); });
+  menu.addItem("Clear MIDI mapping", mapped.isNotEmpty(), false, [this, id] { midiLearn_->clearMapping(id); });
+  menu.showMenuAsync(juce::PopupMenu::Options());
 }
 
 } // namespace milkdawp::app

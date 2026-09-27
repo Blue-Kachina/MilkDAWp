@@ -23,10 +23,9 @@ bool PresetTreeNode::containsIndex(int index) const {
          std::any_of(folders.begin(), folders.end(), [index](const auto& f) { return f.containsIndex(index); });
 }
 
-PresetTreeNode buildPresetTree(const std::vector<std::string>& names) {
+PresetTreeNode buildPresetTree(const std::vector<std::pair<std::string, int>>& entries) {
   PresetTreeNode root;
-  for (std::size_t i = 0; i < names.size(); ++i) {
-    const auto& name = names[i];
+  for (const auto& [name, index] : entries) {
     auto* node = &root;
     std::size_t start = 0;
     for (auto slash = name.find_first_of("/\\"); slash != std::string::npos;
@@ -44,9 +43,18 @@ PresetTreeNode buildPresetTree(const std::vector<std::string>& names) {
       }
       node = &*it;
     }
-    node->presets.emplace_back(name.substr(start), static_cast<int>(i));
+    node->presets.emplace_back(name.substr(start), index);
   }
   return root;
+}
+
+PresetTreeNode buildPresetTree(const std::vector<std::string>& names) {
+  std::vector<std::pair<std::string, int>> entries;
+  entries.reserve(names.size());
+  for (std::size_t i = 0; i < names.size(); ++i) {
+    entries.emplace_back(names[i], static_cast<int>(i));
+  }
+  return buildPresetTree(entries);
 }
 
 void addPresetTree(juce::PopupMenu& menu, const PresetTreeNode& tree, int currentIndex,

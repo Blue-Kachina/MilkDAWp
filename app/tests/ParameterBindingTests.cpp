@@ -11,9 +11,10 @@ TEST_CASE("ParameterBinding takes ranges from the parameter model and writes thr
   const juce::ScopedJuceInitialiser_GUI juce;
   engine::ParameterValues values;
   int changes = 0;
-  app::ParameterBinding binding(values, [&] { ++changes; });
-
+  // Widgets must outlive the binding (its own doc comment, and now its
+  // destructor, which removes itself as each widget's mouse listener).
   juce::Slider bars;
+  app::ParameterBinding binding(values, [&] { ++changes; });
   binding.bind(bars, "transitionBars");
   CHECK(bars.getMinimum() == 1.0);
   CHECK(bars.getMaximum() == 16.0);
@@ -28,10 +29,10 @@ TEST_CASE("ParameterBinding takes ranges from the parameter model and writes thr
 TEST_CASE("ParameterBinding keeps every widget bound to an id in step", "[app][binding]") {
   const juce::ScopedJuceInitialiser_GUI juce;
   engine::ParameterValues values;
-  app::ParameterBinding binding(values, {});
-
   juce::ComboBox drawerMode;
   juce::ComboBox panelMode;
+  app::ParameterBinding binding(values, {});
+
   for (auto* combo : {&drawerMode, &panelMode}) {
     for (int i = 0; i < 5; ++i) {
       combo->addItem("mode " + juce::String(i), i + 1);
@@ -54,9 +55,8 @@ TEST_CASE("ParameterBinding toggles, clamps and ignores unknown ids", "[app][bin
   const juce::ScopedJuceInitialiser_GUI juce;
   engine::ParameterValues values;
   int changes = 0;
-  app::ParameterBinding binding(values, [&] { ++changes; });
-
   juce::ToggleButton lock;
+  app::ParameterBinding binding(values, [&] { ++changes; });
   binding.bind(lock, "lockCurrentPreset");
   binding.toggle("lockCurrentPreset");
   CHECK(values.lockCurrentPreset == 1.0f);

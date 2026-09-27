@@ -2,8 +2,10 @@ include(${CMAKE_SOURCE_DIR}/cmake/FetchCatch2.cmake)
 
 add_executable(milkdawp_app_tests
   AppPreferencesTests.cpp
+  MidiLearnTests.cpp
   ParameterBindingTests.cpp
   SignalMonitorTests.cpp
+  SystemAudioCaptureTests.cpp
 )
 
 target_link_libraries(milkdawp_app_tests PRIVATE

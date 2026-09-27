@@ -21,6 +21,8 @@ constexpr int kDefaultHeight = 720;
 
 enum MenuIndex { FileMenu = 0, PlaybackMenu = 1, ViewMenu = 2 };
 
+bool isPresetFile(const juce::File& file) { return file.hasFileExtension("milk"); }
+
 juce::PopupMenu::Item makeItem(const juce::String& text, std::function<void()> action, bool ticked = false,
                                const juce::String& shortcut = {}, bool enabled = true) {
   juce::PopupMenu::Item item(text);
@@ -33,16 +35,18 @@ juce::PopupMenu::Item makeItem(const juce::String& text, std::function<void()> a
 
 } // namespace
 
-MainComponent::MainComponent(engine::Visualizer& visualizer, AudioInput& input, AppState& state)
+MainComponent::MainComponent(engine::Visualizer& visualizer, AudioSourceRouter& input, AppState& state)
     : visualizer_(visualizer), input_(input), state_(state), surface_(visualizer.renderEngine()),
       drawer_(ui::DrawerStateMachine::Config{.startPinned = state.drawerPinned}),
-      binding_(state.parameters, [this] {
-        publishControls();
-        if (transitionSettings_.isVisible()) {
-          transitionSettings_.refreshRelevance();
-        }
-        notifyStateChanged();
-      }) {
+      binding_(state.parameters,
+              [this] {
+                publishControls();
+                if (transitionSettings_.isVisible()) {
+                  transitionSettings_.refreshRelevance();
+                }
+                notifyStateChanged();
+              }),
+      midiLearn_(input.device().deviceManager(), binding_) {
   addAndMakeVisible(surface_);
 
   // Everything drawn over the video is a child of the surface, never a
@@ -89,11 +93,28 @@ MainComponent::MainComponent(engine::Visualizer& visualizer, AudioInput& input, 
   binding_.bind(transitionSettings_.hardCutToggle, "hardCutEnabled");
   transitionSettings_.refreshRelevance();
 
-  input_.onDeviceChanged = [this] {
-    state_.audioDeviceState = input_.stateXml();
+  input_.device().onDeviceChanged = [this] {
+    if (!input_.isUsingSystemAudio()) {
+      state_.audioDeviceState = input_.device().stateXml();
+    }
     juce::Logger::writeToLog("Audio input: " + input_.describe());
     notifyStateChanged();
   };
+  input_.systemAudio().onPermissionChanged = [this] {
+    juce::Logger::writeToLog("System audio: " + input_.systemAudio().describe());
+    notifyStateChanged();
+  };
+
+  // §4.4: every widget bound above and below gets the right-click "MIDI
+  // Learn..." affordance; restore what was saved before any of them refresh.
+  binding_.attachMidiLearn(midiLearn_);
+  midiLearn_.restoreFromState(state_.midiMappings);
+  midiLearn_.onChanged = [this] {
+    binding_.refreshMidiLearnTooltips();
+    state_.midiMappings = midiLearn_.stateString();
+    notifyStateChanged();
+  };
+  binding_.refreshMidiLearnTooltips();
 
   publishControls();
   setWantsKeyboardFocus(true);
@@ -104,7 +125,9 @@ MainComponent::MainComponent(engine::Visualizer& visualizer, AudioInput& input, 
 
 MainComponent::~MainComponent() {
   stopTimer();
-  input_.onDeviceChanged = nullptr;
+  input_.device().onDeviceChanged = nullptr;
+  input_.systemAudio().onPermissionChanged = nullptr;
+  midiLearn_.onChanged = nullptr;
   // Hand the drawer back before it is destroyed; the saved layout stays as
   // it is, so the next run floats the controls again.
   controlsWindow_.reset();
@@ -138,6 +161,44 @@ void MainComponent::choosePresetFolder() {
 
 void MainComponent::rescanPresets() { visualizer_.director().rescan(); }
 
+void MainComponent::openPath(const juce::String& path) {
+  if (path.isEmpty()) {
+    return;
+  }
+  const juce::File file(path);
+  if (isPresetFile(file) && file.existsAsFile()) {
+    const auto folder = file.getParentDirectory();
+    visualizer_.director().setPresetFolder(folder.getFullPathName().toStdString(), file.getFullPathName().toStdString());
+    state_.presetFolder = folder.getFullPathName();
+    state_.currentPresetPath = file.getFullPathName();
+  } else if (file.isDirectory()) {
+    visualizer_.director().setPresetFolder(file.getFullPathName().toStdString());
+    state_.presetFolder = file.getFullPathName();
+    state_.currentPresetPath = {};
+  } else {
+    return;
+  }
+  juce::Logger::writeToLog("Preset folder: " + state_.presetFolder);
+  notifyStateChanged();
+}
+
+bool MainComponent::isInterestedInFileDrag(const juce::StringArray& files) {
+  return std::any_of(files.begin(), files.end(), [](const juce::String& path) {
+    const juce::File file(path);
+    return file.isDirectory() || isPresetFile(file);
+  });
+}
+
+void MainComponent::filesDropped(const juce::StringArray& files, int, int) {
+  const auto it = std::find_if(files.begin(), files.end(), [](const juce::String& path) {
+    const juce::File file(path);
+    return file.isDirectory() || isPresetFile(file);
+  });
+  if (it != files.end()) {
+    openPath(*it);
+  }
+}
+
 void MainComponent::showPresetPicker() {
   auto& director = visualizer_.director();
   const auto folder = director.presetFolder();
@@ -162,6 +223,57 @@ void MainComponent::showPresetPicker() {
                       [this](int index) { visualizer_.director().requestPreset(index); });
   }
   menu.showMenuAsync(ui::DrawerLookAndFeel::menuOptions(drawer_.presetTitleComponent()));
+}
+
+void MainComponent::showPresetBrowser() {
+  PresetBrowserPanel::Callbacks callbacks;
+  callbacks.names = [this] { return visualizer_.director().presetNames(); };
+  callbacks.paths = [this] { return visualizer_.director().presetPaths(); };
+  callbacks.currentIndex = [this] { return visualizer_.director().status().currentIndex; };
+  callbacks.blacklistedPaths = [this] { return visualizer_.director().blacklistedPaths(); };
+  callbacks.favouritePaths = [this] {
+    std::vector<std::string> paths;
+    for (const auto& path : state_.favouritePresets) {
+      paths.push_back(path.toStdString());
+    }
+    return paths;
+  };
+  callbacks.recentPaths = [this] {
+    std::vector<std::string> paths;
+    for (const auto& path : state_.recentlyPlayedPresets) {
+      paths.push_back(path.toStdString());
+    }
+    return paths;
+  };
+  callbacks.onPick = [this](int index) { visualizer_.director().requestPreset(index); };
+  callbacks.onSetFavourite = [this](const std::string& path, bool favourite) {
+    const juce::String jucePath(path);
+    if (favourite) {
+      if (!state_.favouritePresets.contains(jucePath)) {
+        state_.favouritePresets.add(jucePath);
+      }
+    } else {
+      state_.favouritePresets.removeString(jucePath);
+    }
+    notifyStateChanged();
+  };
+  callbacks.onSetBlacklisted = [this](const std::string& path, bool blacklisted) {
+    if (blacklisted) {
+      visualizer_.director().blacklistPreset(path);
+    } else {
+      visualizer_.director().unblacklistPreset(path);
+    }
+  };
+
+  juce::DialogWindow::LaunchOptions options;
+  options.content.setOwned(new PresetBrowserPanel(std::move(callbacks)));
+  options.dialogTitle = "Preset Library";
+  options.dialogBackgroundColour = getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId);
+  options.escapeKeyTriggersCloseButton = true;
+  options.useNativeTitleBar = true;
+  options.resizable = true;
+  options.componentToCentreAround = this;
+  options.launchAsync();
 }
 
 void MainComponent::showAudioSettings() {
@@ -291,6 +403,7 @@ juce::PopupMenu MainComponent::createMenu(int menuIndex) {
     }
     menu.addItem(makeItem("Choose preset folder...", [this] { choosePresetFolder(); }));
     menu.addItem(makeItem("Rescan preset folder", [this] { rescanPresets(); }, false, {}, !folder.empty()));
+    menu.addItem(makeItem("Browse presets...", [this] { showPresetBrowser(); }, false, {}, !folder.empty()));
     menu.addSeparator();
     menu.addItem(makeItem("Audio input...", [this] { showAudioSettings(); }));
     if (!all) {
@@ -472,13 +585,22 @@ void MainComponent::timerCallback() {
   if (const juce::String current(visualizer_.director().currentPresetPath());
       current.isNotEmpty() && current != state_.currentPresetPath) {
     state_.currentPresetPath = current;
+    recordRecentlyPlayed(current);
     notifyStateChanged();
+  }
+}
+
+void MainComponent::recordRecentlyPlayed(const juce::String& absolutePath) {
+  state_.recentlyPlayedPresets.removeString(absolutePath);
+  state_.recentlyPlayedPresets.insert(0, absolutePath);
+  while (state_.recentlyPlayedPresets.size() > AppState::kMaxRecentlyPlayed) {
+    state_.recentlyPlayedPresets.remove(state_.recentlyPlayedPresets.size() - 1);
   }
 }
 
 void MainComponent::updateInputHint() {
   const auto now = juce::Time::getMillisecondCounterHiRes() / 1000.0;
-  const auto state = signalMonitor_.update(input_.isOpen(), input_.takePeak(AudioInput::PeakReader::Monitor), now);
+  const auto state = signalMonitor_.update(input_.isOpen(), input_.takePeak(PeakReader::Monitor), now);
   switch (state) {
   case SignalMonitor::State::NoDevice:
     inputHint_.setButtonText("No audio input. Click to choose one.");

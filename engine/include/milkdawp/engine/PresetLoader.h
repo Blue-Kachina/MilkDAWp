@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <juce_core/juce_core.h>
 
@@ -63,6 +64,9 @@ public:
   void clearBlacklistEntry(const std::string& presetPath);
   void clearBlacklist();
   [[nodiscard]] std::size_t blacklistSize() const;
+  /// Every blacklisted path, for the preset browser (§4.5) to mark entries
+  /// blacklisted-by-load-failure the same way as ones the user blacklisted.
+  [[nodiscard]] std::vector<std::string> blacklistedPaths() const;
 
 private:
   mutable std::mutex mutex_;

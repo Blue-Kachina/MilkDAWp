@@ -110,4 +110,14 @@ std::size_t PresetLoader::blacklistSize() const {
   return blacklist_.size();
 }
 
+std::vector<std::string> PresetLoader::blacklistedPaths() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  std::vector<std::string> paths;
+  paths.reserve(blacklist_.size());
+  for (const auto& [path, reason] : blacklist_) {
+    paths.push_back(path);
+  }
+  return paths;
+}
+
 } // namespace milkdawp::engine

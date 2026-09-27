@@ -18,6 +18,10 @@ TEST_CASE("An empty preferences file gives the defaults", "[app][preferences]") 
   CHECK(state.drawerPinned);
   CHECK_FALSE(state.outputWindowOpen);
   CHECK_FALSE(state.loggingEnabled);
+  CHECK_FALSE(state.useSystemAudio);
+  CHECK(state.favouritePresets.isEmpty());
+  CHECK(state.recentlyPlayedPresets.isEmpty());
+  CHECK(state.midiMappings.isEmpty());
 }
 
 TEST_CASE("App preferences round-trip through a PropertySet", "[app][preferences]") {
@@ -30,6 +34,10 @@ TEST_CASE("App preferences round-trip through a PropertySet", "[app][preferences
   state.presetFolder = "C:/presets";
   state.currentPresetPath = "C:/presets/a/b.milk";
   state.audioDeviceState = "<DEVICESETUP deviceType=\"Windows Audio\"/>";
+  state.useSystemAudio = true;
+  state.favouritePresets = {"C:/presets/a/b.milk", "C:/presets/c/d.milk"};
+  state.recentlyPlayedPresets = {"C:/presets/c/d.milk", "C:/presets/a/b.milk"};
+  state.midiMappings = "shuffle=0,1,21\nlockCurrentPreset=1,3,60";
   state.mainWindowBounds = {10, 20, 800, 450};
   state.mainWindowFullscreen = true;
   state.outputWindowOpen = true;
@@ -53,6 +61,10 @@ TEST_CASE("App preferences round-trip through a PropertySet", "[app][preferences
   CHECK(loaded.presetFolder == state.presetFolder);
   CHECK(loaded.currentPresetPath == state.currentPresetPath);
   CHECK(loaded.audioDeviceState == state.audioDeviceState);
+  CHECK(loaded.useSystemAudio);
+  CHECK(loaded.favouritePresets == state.favouritePresets);
+  CHECK(loaded.recentlyPlayedPresets == state.recentlyPlayedPresets);
+  CHECK(loaded.midiMappings == state.midiMappings);
   CHECK(loaded.mainWindowBounds == state.mainWindowBounds);
   CHECK(loaded.mainWindowFullscreen);
   CHECK(loaded.outputWindowOpen);

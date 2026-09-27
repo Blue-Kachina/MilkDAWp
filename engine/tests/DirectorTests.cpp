@@ -185,3 +185,32 @@ TEST_CASE("Director advances automatically in Timed mode and not while locked (2
 
   render.unregisterSurface(surface);
 }
+
+TEST_CASE("Director exposes preset paths parallel to names, and blacklisting by path (2.6, 4.5)",
+          "[engine][Director]") {
+  // No projectM/GL needed: the folder scan and the blacklist queue both run
+  // on the director thread regardless of whether a surface can render.
+  engine::Visualizer::Config config;
+  engine::Visualizer visualizer(config);
+  auto& director = visualizer.director();
+
+  PresetFolder presets;
+  director.setPresetFolder(presets.folder.getFullPathName().toStdString());
+  REQUIRE(waitFor([&] { return director.status().playlistSize == 4; }));
+
+  const auto names = director.presetNames();
+  const auto paths = director.presetPaths();
+  REQUIRE(paths.size() == names.size());
+  CHECK(juce::File(juce::String(paths[0])).getFileName() == "mdw-border.milk");
+  CHECK(director.presetPath(0) == paths[0]);
+  CHECK(director.presetPath(-1).empty());
+  CHECK(director.presetPath(99).empty());
+
+  CHECK(director.blacklistedPaths().empty());
+  director.blacklistPreset(paths[0], "test");
+  REQUIRE(waitFor([&] { return !director.blacklistedPaths().empty(); }));
+  CHECK(director.blacklistedPaths() == std::vector<std::string>{paths[0]});
+
+  director.unblacklistPreset(paths[0]);
+  REQUIRE(waitFor([&] { return director.blacklistedPaths().empty(); }));
+}

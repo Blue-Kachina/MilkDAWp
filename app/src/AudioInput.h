@@ -10,6 +10,7 @@
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
+#include "AudioPeakReader.h"
 #include "milkdawp/engine/Visualizer.h"
 
 namespace milkdawp::app {
@@ -22,8 +23,9 @@ namespace milkdawp::app {
 ///
 /// Device selection, including which input pair, is JUCE's own
 /// `AudioDeviceSelectorComponent` over `deviceManager()`. `SystemAudioCapture`
-/// (4.7/4.8, and Android's in Phase 7) will be further sources feeding the
-/// same `Visualizer`, not part of this class.
+/// (4.7/4.8, and Android's in Phase 7) is a further source feeding the same
+/// `Visualizer`, not part of this class; `AudioSourceRouter` picks between
+/// the two.
 class AudioInput final : private juce::AudioIODeviceCallback, private juce::ChangeListener {
 public:
   explicit AudioInput(engine::Visualizer& visualizer);
@@ -44,9 +46,6 @@ public:
   /// "Device name (inputs 1+2)", or "No input device".
   [[nodiscard]] juce::String describe() const;
 
-  /// Who reads the input peak: each reader has its own slot, so the level
-  /// meter and the "no signal" monitor never take each other's peaks.
-  enum class PeakReader { Meter, Monitor };
   /// Largest absolute input sample since this reader's previous call.
   [[nodiscard]] float takePeak(PeakReader reader) noexcept {
     return peaks_[static_cast<std::size_t>(reader)].exchange(0.0f, std::memory_order_relaxed);

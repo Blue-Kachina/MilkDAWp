@@ -5,8 +5,10 @@
 
 #include "AppPreferences.h"
 #include "AudioInput.h"
+#include "AudioSourceRouter.h"
 #include "MainComponent.h"
 #include "MainWindow.h"
+#include "SystemAudioCapture.h"
 #include "milkdawp/engine/Visualizer.h"
 
 namespace milkdawp::app {
@@ -28,7 +30,10 @@ public:
   const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
   bool moreThanOneInstanceAllowed() override { return false; }
 
-  void initialise(const juce::String&) override {
+  /// `commandLine` is a `.milk` file or a preset folder when the OS launched
+  /// this instance via a file association or "Open with" (§4.6); empty on a
+  /// plain launch.
+  void initialise(const juce::String& commandLine) override {
     juce::PropertiesFile::Options options;
     options.applicationName = "app";
     options.folderName = MILKDAWP_APP_DATA_FOLDER;
@@ -47,12 +52,17 @@ public:
     }
 
     input_ = std::make_unique<AudioInput>(*visualizer_);
-    if (const auto error = input_->open(state_.audioDeviceState); error.isNotEmpty()) {
-      juce::Logger::writeToLog("Audio input: " + error);
+    systemAudio_ = createSystemAudioCapture();
+    router_ = std::make_unique<AudioSourceRouter>(*visualizer_, *input_, *systemAudio_);
+    const auto error =
+        state_.useSystemAudio ? router_->openSystemAudio() : router_->openDevice(state_.audioDeviceState);
+    if (error.isNotEmpty()) {
+      const juce::String prefix = state_.useSystemAudio ? "System audio: " : "Audio input: ";
+      juce::Logger::writeToLog(prefix + error);
     }
-    juce::Logger::writeToLog("Audio input: " + input_->describe());
+    juce::Logger::writeToLog("Audio input: " + router_->describe());
 
-    auto content = std::make_unique<MainComponent>(*visualizer_, *input_, state_);
+    auto content = std::make_unique<MainComponent>(*visualizer_, *router_, state_);
     auto* component = content.get();
     component->onStateChanged = [this] { saveState(); };
     component->onLoggingChanged = [this](bool enabled) { setLogging(enabled); };
@@ -60,14 +70,19 @@ public:
     window_->onStateChanged = [this] { saveState(); };
     component->restoreSecondaryWindows();
     component->grabKeyboardFocus();
+
+    if (const auto path = commandLine.unquoted().trim(); path.isNotEmpty()) {
+      component->openPath(path);
+    }
   }
 
   void shutdown() override {
-    // The device first (no more audio into the engine), then the windows
-    // (their surfaces unregister from the engine), then the engine.
-    if (input_ != nullptr) {
+    // The audio source first (no more audio into the engine), then the
+    // windows (their surfaces unregister from the engine), then the engine.
+    if (router_ != nullptr) {
       state_.audioDeviceState = input_->stateXml();
-      input_->close();
+      state_.useSystemAudio = router_->isUsingSystemAudio();
+      router_->close();
     }
     if (visualizer_ != nullptr) {
       if (const auto current = visualizer_->director().currentPresetPath(); !current.empty()) {
@@ -77,6 +92,8 @@ public:
     saveState();
     properties_.saveIfNeeded();
     window_.reset();
+    router_.reset();
+    systemAudio_.reset();
     input_.reset();
     visualizer_.reset();
     juce::Logger::writeToLog("Stopped");
@@ -85,10 +102,16 @@ public:
 
   void systemRequestedQuit() override { quit(); }
 
-  void anotherInstanceStarted(const juce::String&) override {
+  /// Another launch, e.g. double-clicking a second `.milk` file: this
+  /// (single-instance) window comes forward and opens it (§4.6), rather
+  /// than a second engine opening on the same audio device.
+  void anotherInstanceStarted(const juce::String& commandLine) override {
     if (window_ != nullptr) {
       window_->setMinimised(false);
       window_->toFront(true);
+      if (const auto path = commandLine.unquoted().trim(); path.isNotEmpty()) {
+        window_->content().openPath(path);
+      }
     }
   }
 
@@ -115,6 +138,8 @@ private:
   std::unique_ptr<juce::FileLogger> logger_;
   std::unique_ptr<engine::Visualizer> visualizer_;
   std::unique_ptr<AudioInput> input_;
+  std::unique_ptr<SystemAudioCapture> systemAudio_;
+  std::unique_ptr<AudioSourceRouter> router_;
   std::unique_ptr<MainWindow> window_;
 };
 

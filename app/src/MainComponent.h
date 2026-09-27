@@ -9,8 +9,10 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 
 #include "AppPreferences.h"
-#include "AudioInput.h"
+#include "AudioSourceRouter.h"
+#include "MidiLearn.h"
 #include "ParameterBinding.h"
+#include "PresetBrowserPanel.h"
 #include "SignalMonitor.h"
 #include "milkdawp/engine/OutputSurface.h"
 #include "milkdawp/engine/OutputWindow.h"
@@ -36,9 +38,9 @@ namespace milkdawp::app {
 ///
 /// Remembers what it owns in the shared `AppState` and calls
 /// `onStateChanged` whenever something worth saving changed.
-class MainComponent final : public juce::Component, private juce::Timer {
+class MainComponent final : public juce::Component, private juce::Timer, private juce::FileDragAndDropTarget {
 public:
-  MainComponent(engine::Visualizer& visualizer, AudioInput& input, AppState& state);
+  MainComponent(engine::Visualizer& visualizer, AudioSourceRouter& input, AppState& state);
   ~MainComponent() override;
 
   // ---- actions ----
@@ -47,7 +49,12 @@ public:
   void choosePresetFolder();
   void rescanPresets();
   void showPresetPicker();
+  void showPresetBrowser();
   void showAudioSettings();
+  /// A `.milk` file (loads its folder, selects the file) or a folder
+  /// (loads it) from a command-line argument, another instance's, or a
+  /// drop (§4.6). Ignored if `path` is neither.
+  void openPath(const juce::String& path);
   void setTransitionSettingsVisible(bool visible);
   void toggleOutputWindow(bool fullscreen);
   void setControlsFloating(bool floating);
@@ -92,9 +99,15 @@ private:
   void updateInputHint();
   void updateStatusText();
   void notifyStateChanged();
+  void recordRecentlyPlayed(const juce::String& absolutePath);
+
+  // juce::FileDragAndDropTarget (§4.6): a .milk file or a preset folder
+  // dropped on the main window.
+  bool isInterestedInFileDrag(const juce::StringArray& files) override;
+  void filesDropped(const juce::StringArray& files, int, int) override;
 
   engine::Visualizer& visualizer_;
-  AudioInput& input_;
+  AudioSourceRouter& input_;
   AppState& state_;
 
   engine::OutputSurface surface_;
@@ -105,6 +118,8 @@ private:
   juce::SharedResourcePointer<juce::TooltipWindow> tooltipWindow_;
   // After every widget it binds: destroyed first.
   ParameterBinding binding_;
+  // After binding_, which it calls into; before it, which is what it binds.
+  MidiLearn midiLearn_;
 
   SignalMonitor signalMonitor_;
   bool pinnedBeforeFullscreen_ = false;

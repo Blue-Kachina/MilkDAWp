@@ -9,6 +9,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "milkdawp/core/AudioRing.h"
@@ -109,6 +110,21 @@ public:
   [[nodiscard]] std::string presetName(std::int32_t index) const;
   /// Every display name, in playlist order (one lock, for the preset picker).
   [[nodiscard]] std::vector<std::string> presetNames() const;
+  /// Absolute path for playlist entry `index`, or empty. Parallel to
+  /// `presetName`/`presetNames` (§4.5's browser keys favourites/recency by
+  /// this, since a playlist index shifts on rescan but a path doesn't).
+  [[nodiscard]] std::string presetPath(std::int32_t index) const;
+  [[nodiscard]] std::vector<std::string> presetPaths() const;
+
+  /// Marks `absolutePath` so playback skips it, the same way a preset
+  /// projectM itself rejects is skipped (§2.5's PresetLoader) -- the
+  /// browser's right-click "blacklist" (§4.5) uses this. Applied on the
+  /// director thread; takes effect within one loop tick.
+  void blacklistPreset(const std::string& absolutePath, std::string reason = "blacklisted by user");
+  void unblacklistPreset(const std::string& absolutePath);
+  /// Every currently blacklisted absolute path, user- and failure-added
+  /// alike (one lock, for the browser).
+  [[nodiscard]] std::vector<std::string> blacklistedPaths() const;
 
   [[nodiscard]] DirectorStatus status() const noexcept { return status_.read(); }
 
@@ -140,6 +156,9 @@ private:
   std::string currentFolder_;
   std::string currentPresetPath_;
   std::vector<std::string> presetNames_;
+  std::vector<std::string> presetPaths_; // parallel to presetNames_
+  std::vector<std::pair<std::string, std::string>> pendingBlacklistOps_; // path, reason ("": unblacklist
+  std::vector<std::string> blacklistedPaths_; // published snapshot of the loader's blacklist
 
   std::thread thread_;
 };

@@ -117,6 +117,34 @@ std::vector<std::string> Director::presetNames() const {
   return presetNames_;
 }
 
+std::string Director::presetPath(std::int32_t index) const {
+  const std::lock_guard lock(mutex_);
+  if (index < 0 || static_cast<std::size_t>(index) >= presetPaths_.size()) {
+    return {};
+  }
+  return presetPaths_[static_cast<std::size_t>(index)];
+}
+
+std::vector<std::string> Director::presetPaths() const {
+  const std::lock_guard lock(mutex_);
+  return presetPaths_;
+}
+
+void Director::blacklistPreset(const std::string& absolutePath, std::string reason) {
+  const std::lock_guard lock(mutex_);
+  pendingBlacklistOps_.emplace_back(absolutePath, std::move(reason));
+}
+
+void Director::unblacklistPreset(const std::string& absolutePath) {
+  const std::lock_guard lock(mutex_);
+  pendingBlacklistOps_.emplace_back(absolutePath, std::string{});
+}
+
+std::vector<std::string> Director::blacklistedPaths() const {
+  const std::lock_guard lock(mutex_);
+  return blacklistedPaths_;
+}
+
 void Director::run() {
   juce::Thread::setCurrentThreadName("MilkDAWp director");
 
@@ -201,10 +229,13 @@ void Director::run() {
       auto entries = request.folder.empty() ? std::vector<core::PlaylistEntry>{}
                                             : core::Playlist::scanFolder(request.folder);
       std::vector<std::string> names;
+      std::vector<std::string> paths;
       names.reserve(entries.size());
+      paths.reserve(entries.size());
       std::optional<std::size_t> preferredIndex;
       for (std::size_t i = 0; i < entries.size(); ++i) {
         names.push_back(displayName(entries[i]));
+        paths.push_back(entries[i].absolutePath);
         if (!request.preferredPresetPath.empty() &&
             juce::File(juce::String(entries[i].absolutePath)) ==
                 juce::File(juce::String(request.preferredPresetPath))) {
@@ -215,6 +246,7 @@ void Director::run() {
         const std::lock_guard lock(mutex_);
         currentFolder_ = request.folder;
         presetNames_ = std::move(names);
+        presetPaths_ = std::move(paths);
         if (entries.empty()) {
           currentPresetPath_.clear();
         }
@@ -238,11 +270,32 @@ void Director::run() {
     }
 
     // Presets projectM rejected on the render thread: never pick them again.
+    bool blacklistChanged = false;
     while (const auto failedId = render_.presetHandoff().popFailure()) {
       if (const auto path = library.pathFor(*failedId)) {
         loader.blacklist(*path, "projectM could not load this preset");
+        blacklistChanged = true;
       }
       ++status.presetsSkipped;
+    }
+
+    // User blacklist/unblacklist requests from the browser (§4.5).
+    std::vector<std::pair<std::string, std::string>> blacklistOps;
+    {
+      const std::lock_guard lock(mutex_);
+      blacklistOps.swap(pendingBlacklistOps_);
+    }
+    for (auto& [path, reason] : blacklistOps) {
+      if (reason.empty()) {
+        loader.clearBlacklistEntry(path);
+      } else {
+        loader.blacklist(path, std::move(reason));
+      }
+      blacklistChanged = true;
+    }
+    if (blacklistChanged) {
+      const std::lock_guard lock(mutex_);
+      blacklistedPaths_ = loader.blacklistedPaths();
     }
 
     if (playlist) {

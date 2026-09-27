@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+
 #include "milkdawp/engine/PresetLoader.h"
 
 using namespace milkdawp::engine;
@@ -107,4 +109,16 @@ TEST_CASE("PresetLoader blacklist can be queried, cleared, and re-cleared entire
   loader.clearBlacklist();
   CHECK(loader.blacklistSize() == 0);
   CHECK_FALSE(loader.isBlacklisted("b.milk"));
+}
+
+TEST_CASE("PresetLoader::blacklistedPaths lists every blacklisted path", "[engine][PresetLoader]") {
+  PresetLoader loader;
+  CHECK(loader.blacklistedPaths().empty());
+  loader.blacklist("a.milk", "reason a");
+  loader.blacklist("b.milk", "reason b");
+  auto paths = loader.blacklistedPaths();
+  std::sort(paths.begin(), paths.end());
+  CHECK(paths == std::vector<std::string>{"a.milk", "b.milk"});
+  loader.clearBlacklistEntry("a.milk");
+  CHECK(loader.blacklistedPaths() == std::vector<std::string>{"b.milk"});
 }
