@@ -204,7 +204,6 @@ validator runs.
 | Adaptive quality (FBO resolution scaling that affects real output) | | ✔ | |
 | Host automation of all parameters | ✔ | ✔ | |
 | MIDI learn (standalone) | | ✔ | |
-| State migration from v1 sessions | ✔ | ✔ | |
 | Bundled preset pack | | ✔ | |
 | Signed, notarized installers | | ✔ | |
 | Texture sharing output (Spout / Syphon / NDI) | | | ✔ |
@@ -376,10 +375,9 @@ replace the in-process queues later without touching the shells. Post-1.0 item.
 
 ### 4.8 State and compatibility
 
-- State is a versioned schema (`StateSchema v2`) serialized as a `ValueTree`. A migrator reads
-  v1's `MilkDAWpState` tree (params child, `presetPath`, `playlistFolderPath`,
-  `editorW/H`) and maps every v1 parameter ID onto its v2 equivalent. Round-trip and migration
-  are unit-tested against fixtures captured from real v1 sessions.
+- State is a versioned schema (`StateSchema v2`) serialized as a `ValueTree`. Round-trip is
+  unit-tested. There is no v1 migration (dropped 2026-09-26, see 1.14): a v1 session opens
+  with v2 defaults, because the loader skips lines it cannot parse.
 - Preset references are stored both as absolute paths and as `{libraryRoot, relativePath,
   contentHash}` so a moved preset folder can be relinked.
 
@@ -771,6 +769,9 @@ simulations are deterministic and pass; CI runs the metric suite and fails on re
       Matthew's 2-3 real `.vstpreset`/project blobs** to validate against an actual v1 binary
       state blob, per this item's own text. This is the one Phase 1 item I could not fully close
       without that input.
+      Update (2026-09-26): v1 migration is dropped; Matthew decided v2 doesn't need to load v1
+      sessions. The `StateSchemaV2` half stands. `migrateFromV1`/`V1StateRecord` were never
+      wired into the plugin and are now dead code.
 
 Hand test: run `mdw-analyze` on a couple of your own tracks and check the SVG: do the beat
 markers sit on the kicks? Note any track where it drifts and add it as a fixture.
@@ -1265,7 +1266,7 @@ here):
 ### Phase 3 — Plugin shell (VST3 / AU / Standalone wrapper)
 
 **Goal:** a plugin at least as capable as v1 0.7.5, on the new engine. **Exit:** `pluginval`
-strictness 5+ passes on all platforms in CI; the v1 → v2 migration test passes; manual checks in
+strictness 5+ passes on all platforms in CI; manual checks in
 Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
 
 - [x] 3.1 (M) `MilkDAWpProcessor`: stereo/mono passthrough, RT-safe ring writes, transport
@@ -1323,7 +1324,8 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       shape without one would be unverifiable, so `setStateInformation` only handles v2-native
       state for now; wiring v1 detection + migration in is a clearly-scoped follow-up for whenever
       those fixtures arrive.
-- [~] 3.3 (M) Video-first editor (§4.9): the whole editor is an embedded `OutputSurface`
+      Update (2026-09-26): v1 migration dropped (see 1.14), so this item is complete as it is.
+- [x] 3.3 (M) Video-first editor (§4.9): the whole editor is an embedded `OutputSurface`
       with the `ControlDrawer` over it, pinned by default. Drawer row: preset combo, picker,
       prev/next, lock, shuffle, transition mode, BPM/sync badge, output, settings, pin. Status
       from engine snapshots, not timers polling the processor. Resizable down to 480×270.
@@ -1372,6 +1374,11 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       (host or detected, marked "host"), "Out" opens/closes the Output window (3.12) and "Set"
       opens a menu (preset folder, rescan, Output fullscreen, diagnostics). The parameters
       listed above now drive the engine (2.6).
+      Update (2026-09-26, "UI Love"): the picker exists. Clicking the preset title opens a
+      popup menu (`ui::buildPresetTree`/`addPresetTree`) with the library as a folder tree and
+      the current preset ticked, plus choose-folder and rescan at the top. Matthew judged the
+      menu enough for the plugin, so this item is done. A browser with search, favourites and
+      recents is Phase 4.5.
 - [x] 3.4 (S) Transition settings popover: mode selector, bars (N), blend, energy threshold,
       jitter, with sensible defaults (Beat-quantized, 4 bars, soft 2 beats).
       Note (2026-09-26): `ui::TransitionSettingsPanel` (`ui/include/milkdawp/ui/TransitionSettings.h`)
@@ -1532,8 +1539,8 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       checklist rather than something re-derived each time. All rows are currently unchecked;
       filling them in is real hand-testing work for whoever has hosts to test in.
 
-Hand test: the DAW checklist in at least Reaper + one other host on each OS you have. Load a v1
-project and confirm preset, playlist, and knob values survive. Reproduce your OBS setup: output
+Hand test: the DAW checklist in at least Reaper + one other host on each OS you have. Reproduce
+your OBS setup: output
 window fullscreen on the capture display, editor with pinned drawer on the other.
 
 ### Phase 4 — Standalone application
@@ -1677,7 +1684,6 @@ docs live; v1 repo archived with a pointer.
 | Engine headless render | offscreen GL via Mesa llvmpipe, fixture presets | every push, Linux; nightly on macOS/Windows runners |
 | RT safety | Clang RealtimeSanitizer on `processBlock` and ring code | every push, Linux |
 | Plugin validation | `pluginval` strictness 5 (VST3 all platforms, AU macOS), `auval` | every push |
-| State migration | fixtures from real v1 sessions | every push |
 | Soak / stress | scripted 4-hour app run, memory sampling | nightly / pre-release |
 | Manual DAW matrix | `docs/daw-checklist.md` | before each beta and release |
 

@@ -15,8 +15,9 @@ v2 **is** the next MilkDAWp, not a new product:
 
 - Keep v1's manufacturer code (`OMda`), plugin code (`Mlkw`), bundle ID
   (`com.otitismedia.MilkDAWp`), and product name (`MilkDAWp`).
-- The first release ships as MilkDAWp 1.0. Existing v1 sessions keep loading,
-  with state migrated by `MigrateFromV1` (§4.8, Phase 1.14).
+- The first release ships as MilkDAWp 1.0. Existing v1 sessions keep loading
+  the plugin, but with v2 default settings: v1 state is not migrated
+  (dropped 2026-09-26, roadmap Phase 1.14).
 - The state schema is versioned from the first commit (`StateSchema v2`) so
   beta/dev builds also migrate forward cleanly.
 - Dev and beta builds carry a visible pre-release version string.

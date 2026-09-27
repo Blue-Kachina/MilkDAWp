@@ -90,12 +90,9 @@ below is still `[ ]`, carried over unchanged from the template above.
 
 ## Loading a v1 session
 
-Only meaningful once Phase 3.2's v1 migration is implemented (currently deferred -- see that
-item's note: it needs real v1 `.vstpreset`/project state blobs, which this checklist is also a
-good place to source once Matthew has them to hand).
+v1 state is not migrated (dropped 2026-09-26). The one check left is that an old session
+doesn't break anything.
 
 | # | Check | Result | Notes |
 |---|---|---|---|
-| 1 | Open a real v1 MilkDAWp session; every migrated parameter matches its v1 value | `[ ]` | |
-| 2 | Preset path and playlist folder path carry over | `[ ]` | |
-| 3 | Editor size carries over | `[ ]` | |
+| 1 | Open a v1 MilkDAWp session: the plugin loads with v2 defaults, no crash | `[ ]` | |
