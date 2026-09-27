@@ -597,6 +597,13 @@ under two minutes; a fresh Claude Code web session can build and run the core te
       targets. Verified by configuring with the VS 2022 generator (JUCE fetch + `juceaide`
       build succeed); the vcpkg/projectM path is untested here since this machine has no
       `VCPKG_ROOT` — needs a real check on CI or a dev box with vcpkg installed.
+      Update (2026-09-27): the vcpkg/projectM path is now verified in CI on all three
+      platforms (run `36320629909`, commit `3d5dcc9`): projectM 4.2.0 from the overlay port
+      (2.12) as `x64-windows-dynamic`, `arm64-osx-dynamic`, and `x64-linux-dynamic` (the last
+      pre-built in the devcontainer image). The single-copy check is wired and passes on every
+      final binary on all three. It had a Linux false positive, fixed on the way: `ldd` prints
+      `libz.so.1 => /lib/.../libz.so.1`, and the regex counted the name and the path as two
+      copies; it now counts only resolved paths.
 - [x] 0.2 (S) Skeleton targets: `milkdawp_core` (static lib), `milkdawp_engine`,
       `milkdawp_ui`, `milkdawp_plugin`, `milkdawp_app`, `mdw-analyze`, Catch2 test runner.
       Note: building all six targets plus Catch2 tests verified locally (MSVC/Ninja, VS 2022
@@ -606,19 +613,55 @@ under two minutes; a fresh Claude Code web session can build and run the core te
       vcpkg's copies actually linked in (e.g. this skeleton, with no `VCPKG_ROOT` available).
       Now gated on `MILKDAWP_WITH_PROJECTM` and wired to link vcpkg's `ZLIB`/`PNG` targets when
       on; still unverified with projectM actually present (needs vcpkg on a real box or CI).
+      Update (2026-09-27): verified with projectM present on Windows, macOS and Linux in CI
+      (see 0.1 and 0.3).
       `milkdawp_app` stays off by default (`MILKDAWP_BUILD_APP=OFF`) per D8/Phase 4.
-- [ ] 0.3 (S) CI matrix (Linux, macOS, Windows): configure, build all targets, run core tests.
+- [~] 0.3 (S) CI matrix (Linux, macOS, Windows): configure, build all targets, run core tests.
       vcpkg binary caching via GitHub cache to keep runs under ~15 minutes after warm-up.
       Note: `.github/workflows/ci.yml` written (macOS/Windows native + Linux-in-container jobs,
       x-gha vcpkg binary caching). YAML syntax checked with `js-yaml`; **not** run — needs an
       actual push/PR to verify (a shared-state action I didn't take without asking).
-- [ ] 0.4 (S) Sanitizer job on Linux: ASan + UBSan for core/engine tests, TSan for queue and
+      Update (2026-09-27): **green on all three platforms** (run `36320629909`, commit
+      `3d5dcc9`): `ctest` 177/177 on `windows-latest` (MSVC), `macos-latest` (Apple Clang,
+      arm64) and Linux (GCC 13, in the devcontainer image), plus the `mdw-analyze` metric gate
+      (1.10) and pluginval (3.9). The repo is public, so Actions minutes (macOS included) are
+      free. Every push before this had failed in 0 s without running a job: `container:
+      ${{ env.* }}` isn't allowed (the `env` context isn't available there), so the whole file
+      failed to parse; and GHCR rejects the uppercase `Blue-Kachina` owner name. The image name
+      is now a lowercase literal, with GHCR credentials on the container jobs. Getting to green
+      also surfaced the first non-MSVC compile of the codebase: Clang's
+      `-Wunused-private-field` (5 fields) and `-Wunused-function`/`-Wunused-const-variable`
+      (platform-only GL helpers, `generate-fixtures`' `kPi`), GCC's `-Wclass-memaccess`
+      (`SeqlockSnapshot`), nested `Config` structs with default member initializers used as
+      `= {}` default arguments inside their own class (CWG 1397; MSVC accepts it, GCC/Clang
+      don't; now `RenderEngineConfig`/`DrawerStateMachineConfig` at namespace scope with
+      `Config` aliases), `JUCE_WEB_BROWSER=0`/`JUCE_USE_CURL=0` missing on `milkdawp_engine`
+      and `milkdawp_ui_tests` (GTK/libcurl on Linux), a GCC `-Wmaybe-uninitialized` false
+      positive in JUCE's bundled HarfBuzz (demoted to a warning, GCC only), and
+      `[[clang::nonblocking]]` placement (see 3.1). **Stays `[~]`:** caching doesn't work.
+      vcpkg has removed the `x-gha` backend (the log says so), so both native jobs rebuild
+      projectM and its dependencies from source on every run, and a run takes about 22-25
+      minutes, not ~15. Needs a different provider (`files` + `actions/cache`, or NuGet on
+      GitHub Packages).
+- [x] 0.4 (S) Sanitizer job on Linux: ASan + UBSan for core/engine tests, TSan for queue and
       ring tests. Clang RealtimeSanitizer (`-fsanitize=realtime`) job for functions marked
       `[[clang::nonblocking]]` (the audio callback path).
       Note: `cmake/Sanitizers.cmake` + `ci-linux-{asan,tsan,rtsan}` presets added; `sanitize` job
       in ci.yml. No TSan-worthy code exists yet (AudioRing/Messages land in Phase 1.1/1.2); no
       `[[clang::nonblocking]]` function exists yet either (Phase 3.1). Unverified — no Clang in
       this sandbox and nothing to sanitize yet regardless.
+      Update (2026-09-27): all three jobs run and are green in CI (run `36320629909`), 169/169
+      tests each (core, engine, ui, plugin-free build). The image needed two fixes first:
+      `-fsanitize=realtime` needs Clang 20, but Ubuntu 24.04 stops at 18, so LLVM now comes
+      from apt.llvm.org (`LLVM_VERSION=20`); and the sanitizer runtimes
+      (`libclang_rt.asan*.a`, `.tsan*.a`) were never installed, so ASan/TSan could not have
+      linked on the old image either (`libclang-rt-20-dev` now). `llvm-symbolizer` is on
+      PATH too, so reports name functions instead of printing `<null>` frames. TSan found a
+      real race on its first run (see 1.1). **Gap:** the RTSan preset builds with
+      `MILKDAWP_BUILD_PLUGIN=OFF`, and nothing else is marked `[[clang::nonblocking]]`, so
+      the job currently checks nothing; see 3.1. Running sanitizer binaries locally in Docker
+      needs `--security-opt seccomp=unconfined` (TSan re-execs itself with ASLR off via
+      `personality()`, which the default seccomp profile blocks).
 - [x] 0.5 (S) `clang-format`, `clang-tidy`, `.editorconfig`, pre-commit hook script,
       `CONTRIBUTING.md` with the threading rules from §4.2.
 - [x] 0.6 (S) ADR directory with ADR-0001..0006 recording D1–D12 as decided so far.
@@ -649,13 +692,21 @@ under two minutes; a fresh Claude Code web session can build and run the core te
       Containers / CLion Gateway) to run or resume an interactive session. Not yet rebuilt/tested
       against a real container on this pass (needs a real Docker daemon, same limitation 0.9
       itself had before Matthew's machine).
-- [ ] 0.10 (S) `devcontainer-image.yml`: builds and publishes the image to GHCR on changes to
+- [x] 0.10 (S) `devcontainer-image.yml`: builds and publishes the image to GHCR on changes to
       the Dockerfile, `vcpkg.json`, `vcpkg-configuration.json`, or the JUCE pin in `cmake/`; CI jobs from 0.3 run inside
       it (`container:`) so CI and local containers are identical.
       Note: workflow written; ci.yml's Linux jobs run `container: ghcr.io/.../milkdawp2-devcontainer:latest`.
       **Bootstrapping gotcha:** on a brand-new repo this image doesn't exist yet, so ci.yml's
       Linux/sanitize jobs will fail until someone runs this workflow once via `workflow_dispatch`
       (or pushes a Dockerfile change to `main`). Not run — needs a push/dispatch to verify.
+      Update (2026-09-27): runs and publishes `ghcr.io/blue-kachina/milkdawp2-devcontainer`
+      (`:latest` and `:<sha>`) in 6-9 minutes (so far) with the GHA layer cache; all four Linux CI
+      jobs run inside it. The package is public, so `docker pull` works without a login.
+      Its first runs failed because GHCR names must be lowercase (now a literal). **Known
+      race:** a push that changes the Dockerfile starts this workflow and CI together, and
+      CI pulls the *previous* `:latest`, so toolchain changes only reach CI on the following
+      run (re-run the failed jobs once the image finishes). The image now has LLVM 20 (see
+      0.4).
 - [ ] 0.11 (S) Claude Code web session-start hook (`.claude/`): pulls or reuses the image
       contents, configures the Linux preset, warms the build so agents can run tests
       immediately. Verified by opening a fresh session and running `ctest`.
@@ -688,6 +739,20 @@ simulations are deterministic and pass; CI runs the metric suite and fails on re
       in the test itself (not the ring) where the reader could spin forever after the ring
       dropped frames it fell behind on. TSan not run for real (no Clang in this sandbox) — the
       `ci-linux-tsan` CI job (0.4) is unverified end-to-end.
+      **Bug found and fixed (2026-09-27):** the first real TSan run reported a data race in
+      the concurrent writer/reader test. By design, `write()` overwrites the oldest frames
+      when a reader falls behind, but `copyFrames()` checked a frame was available and then
+      `memcpy`'d it, so `write()` could wrap round and overwrite the slot during the copy:
+      undefined behaviour, and a frame of newer audio returned under an older position. The
+      header's "already overwritten frames come back as zero" was never enforced. Fixed with
+      the same seqlock idea as `SeqlockSnapshot` (3.1): the buffer is relaxed
+      `std::atomic<float>` (plain loads/stores on x86/ARM); `write()` publishes
+      `writeReserve_` (how far it may overwrite) behind a release fence before touching the
+      buffer; `copyFrames()` re-reads it after an acquire fence and zeroes any frame that could
+      have been overwritten mid-copy. `write()` stays wait-free. This covers `consumeHop()`,
+      `copyLatest()` and `copyRange()` (the render thread's `PcmFeeder`). Verified in the CI
+      image with TSan: the original code fails the `[AudioRing]` tests 50/50 runs, the fix
+      0/50, full core suite 100/100; CI's `ci-linux-tsan` job is green since.
 - [x] 1.2 (S) `Messages.h`: POD message types (parameter change, transition request, preset
       load result, status snapshot) and the SPSC/MPSC queue templates. Static-asserted trivially
       copyable.
@@ -739,6 +804,9 @@ simulations are deterministic and pass; CI runs the metric suite and fails on re
       closing that gap is unfinished tuning work, not something quietly lowered to look done.
       Update 2026-09-19: re-verified by Matthew inside the devcontainer build (still 6/6), on
       top of the full `ctest` suite (90/90) — see 0.9. Still not wired as an actual CI job.
+      Update (2026-09-27): runs in CI now, as a step of the Linux job
+      (`mdw-analyze --suite fixtures --thresholds fixtures/thresholds.json`), 6/6 passing
+      (run `36320629909`).
 - [x] 1.11 (M) `Playlist`: folder scan (recursive, `.milk`), sequential / shuffle-no-repeat
       (history window) / weighted policies, lock, index mapping, stable ordering across
       rescans. Pure functions, unit-tested.
@@ -1107,6 +1175,17 @@ file with beat-aligned transitions.
       without it they report why and pass. **Stays `[~]`:** the Linux EGL-surfaceless path
       is written but has never compiled or run (no Linux box or CI run yet), and no ASan run
       has happened anywhere.
+      Update (2026-09-27): the Linux EGL path now compiles (GCC and Clang, including ASan) and
+      the harness runs in every CI job, but **nothing renders in CI yet**: all three
+      platforms take the "unavailable, report why and pass" path. On Linux,
+      `eglGetDisplay`/`eglInitialize` fails in the devcontainer image (confirmed locally with
+      `-s`: "headless render unavailable here: eglGetDisplay/eglInitialize failed"). Mesa's
+      EGL vendor file is present, so the likely cause is asking for the default display with
+      no X/Wayland display, instead of `eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA,
+      ...)`. macOS still has no offscreen context (the `#else` stub). The Windows runner only
+      has the GL 1.1 software renderer. So the ASan run exists, but it doesn't reach the
+      render path yet. Next: fix the Linux display selection, then consider making CI fail
+      rather than skip when the render path is expected to be available.
 - [x] 2.8 (S) Frame timing and GPU time metrics (`GL_TIMESTAMP` queries where available);
       status snapshot for the UI.
       Note (2026-09-26): `RenderStats`, published per frame through a `SeqlockSnapshot`:
@@ -1168,7 +1247,7 @@ file with beat-aligned transitions.
       shrinking their text at narrow widths) was judged not worth a bespoke breakpoint mechanism
       yet. Checkbox now `[x]`: the class exists and is composed for real in Phase 3.3, which was
       this item's own stated blocker.
-- [~] 2.12 (S) projectM 4.2 overlay port (ADR-0008, D15): `vcpkg-overlays/projectm/` building
+- [x] 2.12 (S) projectM 4.2 overlay port (ADR-0008, D15): `vcpkg-overlays/projectm/` building
       upstream `master` at a pinned commit hash (start from `1e7ef78`, 2026-09-10, re-check
       for newer commits first) with a `SHA512`; register it under `overlay-ports` in
       `vcpkg-configuration.json`; move `vcpkg.json`'s `projectm` override to the overlay version.
@@ -1202,6 +1281,12 @@ file with beat-aligned transitions.
       devcontainer-image workflow triggers on it. **Stays `[~]`:** not yet run in the
       devcontainer/Linux or macOS. (The live-instance hand test is done: REAPER, above, and
       the Standalone and `mdw-view` now render real presets with it, see 2.3.)
+      Update (2026-09-27): builds on Linux (`x64-linux-dynamic`, in the devcontainer image,
+      `libprojectM-4.so.4.2.0`) and macOS (`arm64-osx-dynamic`, in CI) as well as Windows. The
+      deploy step places it next to the Linux and macOS binaries and the runtime layout
+      check (3.10) passes there. Loading it at runtime on Linux/macOS is still unverified,
+      because the headless tests skip before `ProjectMLibrary` renders anything (2.7); that
+      is tracked under 2.3/2.7, not here.
 - [x] 2.13 (M) Adopt the 4.2 API in the engine. `ProjectMLibrary`: require
       `projectm_opengl_render_frame_fbo`, `projectm_create_with_opengl_load_proc` and
       `projectm_set_frame_time`. A 4.1.x library then reports `Unavailable` and names the
@@ -1307,6 +1392,17 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       new cases: an eight-word payload tearing test, and non-zero defaults before the first
       publish. Result: 138/138 in `ctest` (Windows Debug), and the concurrency tests passed
       50/50 reruns. The `ci-linux-tsan` job still hasn't run for real anywhere (0.4).
+      Update (2026-09-27): `ci-linux-tsan` now runs in CI and `SeqlockSnapshot`'s tests are
+      TSan-clean there. Apple Clang rejected `MILKDAWP_NONBLOCKING void processBlock(...)`:
+      `[[clang::nonblocking]]` is a type attribute and must follow the parameter list, and
+      Clang also requires `noexcept` with it. Now `processBlock(...) noexcept
+      MILKDAWP_NONBLOCKING override` (checked against Clang 20 with the project's warning
+      flags). `processBlock` is therefore `noexcept` on every compiler: an exception in it
+      now terminates rather than propagating into the host. **Correction:** "RTSan job
+      covers it" above is not true yet. The `ci-linux-rtsan` preset builds with
+      `MILKDAWP_BUILD_PLUGIN=OFF`, so `processBlock` is never compiled or run under RTSan.
+      Covering it needs the plugin (or a plugin-test target) built in that job, with a test
+      that drives `processBlock`.
 - [x] 3.2 (S) State save/restore with schema v2 and v1 migration; editor size persistence with
       the Cubase ordering fix.
       Note: the v2-native half is done and tested -- `getStateInformation`/`setStateInformation`
@@ -1532,6 +1628,8 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       in Debug and Release, with no failures. The Windows CI job now runs it at strictness 10,
       3 randomised repeats, without GUI tests (no GPU on the runner), and uploads the log on
       failure. That CI step hasn't run yet, because the CI workflow itself hasn't run (0.3).
+      Update (2026-09-27): the Windows CI step now runs and passes (strictness 10, 3 repeats,
+      no GUI; `SUCCESS` in run `36320629909`).
       **Not done:** macOS/Linux (the script is Windows-only; macOS goes with the AU in 3.8),
       Steinberg's `validator` (pluginval skips it without `--vst3validator`). The runtime
       layout check landed with 3.10, as a build step rather than a separate script.
@@ -1562,6 +1660,12 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       Redistributable (6.2), rather than building with the static CRT, which would also
       need a matching projectM triplet. Until the installer exists, a machine without the
       Redistributable can't load the plugin.
+      Update (2026-09-27): macOS and Linux now build in CI. The runtime layout check passes on
+      their VST3 and Standalone, and the single-zlib/libpng check on those plus `mdw-view`
+      and `mdw-analyze`. Built is not loaded, though: whether the dylib install name/rpath and the
+      Linux `$ORIGIN` rpath actually let `ProjectMLibrary` find projectM at runtime is still
+      unverified, since nothing in CI loads the plugin on those platforms yet (no pluginval
+      there, and 2.7 skips). Stays `[~]` for that and the AU (3.8).
 - [x] 3.11 (S) DAW compatibility checklist doc (`docs/daw-checklist.md`): scan, insert,
       automate every parameter, save/reload, drawer reveal/pin in each host, keyboard
       shortcuts in editor and Output window, output window on second display, close and
