@@ -659,6 +659,16 @@ under two minutes; a fresh Claude Code web session can build and run the core te
       `.pdb` isn't cacheable; launchers passed on the CI configure line only, so local
       builds are unchanged). If warm runs are still slow, the bigger fix is compiling JUCE's
       modules once into a shared static library instead of into every target.
+      Update (2026-09-27, run `36326021776`, commit `a69496d`): first warm compiler-cache
+      run, **8.5 min wall clock** (was 18 and 23.5). Build step: macOS 19 s, Windows 1.3 min,
+      TSan 1.2 min, RTSan 1.5 min, ASan 3.5 min (98% ccache hits), Linux 6.7 min (20% hits).
+      The Linux job's ccache key `ci-linux` is a prefix of `ci-linux-asan` etc., and the
+      action restores by prefix, so it had loaded the ASan cache; renamed to `ci-linux-gcc`.
+      Windows also rebuilt projectM once (1.9 min in Configure): the new `.gitattributes`
+      checks the triplet and overlay files out with LF instead of the runner's CRLF, which
+      changes both the vcpkg ABI hashes and the cache key, so the fallback cache didn't
+      match. The new key was saved, so later runs restore it. Stays `[~]` until a run with
+      the renamed Linux key confirms all jobs are warm.
 - [x] 0.4 (S) Sanitizer job on Linux: ASan + UBSan for core/engine tests, TSan for queue and
       ring tests. Clang RealtimeSanitizer (`-fsanitize=realtime`) job for functions marked
       `[[clang::nonblocking]]` (the audio callback path).
@@ -1668,7 +1678,8 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       layout check landed with 3.10, as a build step rather than a separate script.
       Update (2026-09-27): Linux CI now runs pluginval on the VST3 too (the image's pinned
       pluginval under `xvfb-run`, strictness 10, 3 randomised repeats, no GUI; log uploaded
-      on failure). Not yet run in CI. A plugin that can't find projectM stays inert and still
+      on failure). Passed in run `36326021776`: `SUCCESS` on Linux and Windows, both logging
+      `MilkDAWp: projectM 4.2.0 loaded`. A plugin that can't find projectM stays inert and still
       passes pluginval, so both pluginval steps now set `MILKDAWP_REQUIRE_PROJECTM`: with it
       set, the processor constructor aborts with the load failure reason when projectM didn't
       load, and otherwise prints `MilkDAWp: projectM <version> loaded`. Checked locally on
@@ -1710,8 +1721,9 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       there, and 2.7 skips). Stays `[~]` for that and the AU (3.8).
       Update (2026-09-27): the Linux half now has a check. The Linux CI job loads the VST3 in
       pluginval with `MILKDAWP_REQUIRE_PROJECTM` set (3.9), so a runtime layout in which the
-      plugin can't find `libprojectM-4.so` fails the job instead of passing inert. Pending its
-      first CI run. macOS stays unverified until it gets a pluginval step (3.8).
+      plugin can't find `libprojectM-4.so` fails the job instead of passing inert. First run
+      (`36326021776`) passed: the bundle holds `MilkDAWp.so` and `libprojectM-4.so` side by
+      side, and the plugin loaded projectM 4.2.0 from there. Linux is verified. macOS stays unverified until it gets a pluginval step (3.8).
 - [x] 3.11 (S) DAW compatibility checklist doc (`docs/daw-checklist.md`): scan, insert,
       automate every parameter, save/reload, drawer reveal/pin in each host, keyboard
       shortcuts in editor and Output window, output window on second display, close and

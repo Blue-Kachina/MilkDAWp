@@ -163,10 +163,13 @@ jobs:
         uses: actions/checkout@v4
 
       # ccache is in the image; the action caches the image's CCACHE_DIR.
+      # The action restores by key prefix ("ccache-<key>-"), so no key may be
+      # a prefix of another: plain "ci-linux" picked up the ci-linux-asan
+      # cache (20% hits).
       - name: Compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: ci-linux
+          key: ci-linux-gcc
           max-size: 1G
           evict-old-files: job
 
