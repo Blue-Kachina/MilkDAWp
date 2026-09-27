@@ -643,6 +643,22 @@ under two minutes; a fresh Claude Code web session can build and run the core te
       projectM and its dependencies from source on every run, and a run takes about 22-25
       minutes, not ~15. Needs a different provider (`files` + `actions/cache`, or NuGet on
       GitHub Packages).
+      Update (2026-09-27, run `36323254149`, commit `c4e70a2`): vcpkg caching fixed. The
+      native jobs use the `files` provider, restored and saved with `actions/cache` (key: vcpkg
+      commit + manifest + triplets + overlay ports; saved right after Configure, even if a
+      later step fails). The first run missed as expected, built projectM (1.1 min macOS,
+      1.4 min Windows) and saved. It also turned out the Linux jobs had been rebuilding
+      everything too: the workflow-level `VCPKG_BINARY_SOURCES: clear;...` wiped the
+      image's pre-built cache. It's now scoped to the native job, and all four Linux jobs log
+      `Restored 10 package(s) from /opt/vcpkg-binary-cache` in about 140 ms. **Still over
+      ~15 minutes**, though, because vcpkg was never the main cost: the Build step is 18 min
+      on Windows, 15-16 min on Linux/ASan, 11-12 min on TSan/macOS. JUCE's module sources
+      compile once per target that links JUCE (7 times on Linux). Next step, in progress:
+      compiler caching in CI (`hendrikmuhs/ccache-action`: ccache on Linux/macOS, sccache on
+      Windows with `CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded`, since `/Zi`'s shared
+      `.pdb` isn't cacheable; launchers passed on the CI configure line only, so local
+      builds are unchanged). If warm runs are still slow, the bigger fix is compiling JUCE's
+      modules once into a shared static library instead of into every target.
 - [x] 0.4 (S) Sanitizer job on Linux: ASan + UBSan for core/engine tests, TSan for queue and
       ring tests. Clang RealtimeSanitizer (`-fsanitize=realtime`) job for functions marked
       `[[clang::nonblocking]]` (the audio callback path).
@@ -1186,6 +1202,22 @@ file with beat-aligned transitions.
       has the GL 1.1 software renderer. So the ASan run exists, but it doesn't reach the
       render path yet. Next: fix the Linux display selection, then consider making CI fail
       rather than skip when the render path is expected to be available.
+      Update (2026-09-27, run `36323254149`): **the Linux render path now runs in CI for
+      real.** Cause confirmed with a small EGL probe in the image: `eglGetDisplay(
+      EGL_DEFAULT_DISPLAY)` fails with `EGL_NOT_INITIALIZED` when there's no X11/Wayland
+      display, while `eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, ...)` gives
+      Mesa llvmpipe with GL 4.5 core. `OffscreenGLContext` now tries the default display
+      first (on a desktop that's the display JUCE's windows use, which 2.3's sharing will
+      need) and falls back to the surfaceless platform. Local run in the image: the three
+      tests make 19 assertions (up from 3 when skipping), and all 36 engine test cases pass.
+      Regression guard: with `MILKDAWP_REQUIRE_HEADLESS_RENDER` set, "unavailable" is a
+      failure instead of a pass, and the Linux CI job sets it. In CI the three tests pass
+      in 0.11-0.72 s each (0.02 s when they were skipping). **Stays `[~]`** for the ASan
+      part: the `ci-linux-asan` preset builds with `MILKDAWP_WITH_PROJECTM=OFF`, so the
+      harness still skips under ASan. Turning projectM on there is the remaining step (expect
+      LeakSanitizer reports from Mesa/projectM that may need a suppressions file). macOS
+      still has no offscreen context, and the Windows runner only has GL 1.1, so neither
+      renders in CI.
 - [x] 2.8 (S) Frame timing and GPU time metrics (`GL_TIMESTAMP` queries where available);
       status snapshot for the UI.
       Note (2026-09-26): `RenderStats`, published per frame through a `SeqlockSnapshot`:

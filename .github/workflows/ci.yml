@@ -35,8 +35,15 @@ jobs:
         include:
           - os: macos-latest
             preset: ci-mac
+            compiler-cache: ccache
+            extra-configure-args: ""
+          # sccache rather than ccache for MSVC, and /Z7 (debug info in the
+          # .obj) instead of /Zi: objects that write to a shared .pdb can't be
+          # cached. The linker still produces the .pdb.
           - os: windows-latest
             preset: ci-win
+            compiler-cache: sccache
+            extra-configure-args: "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
 
     runs-on: ${{ matrix.os }}
 
@@ -46,7 +53,7 @@ jobs:
 
       - name: Install Ninja (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja
+        run: brew install ninja   # ccache comes from the compiler-cache step
 
       - name: Install Ninja (Windows)
         if: runner.os == 'Windows'
@@ -77,8 +84,23 @@ jobs:
         with:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT }}
 
+      # Compiler cache (installed, restored now, saved in the action's post
+      # step). Most of a run is compiling JUCE's module sources, once per
+      # target that links JUCE; this makes the unchanged ones cache hits.
+      - name: Compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.preset }}
+          variant: ${{ matrix.compiler-cache }}
+          max-size: 1G
+          evict-old-files: job
+
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        run: >-
+          cmake --preset ${{ matrix.preset }}
+          -DCMAKE_C_COMPILER_LAUNCHER=${{ matrix.compiler-cache }}
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.compiler-cache }}
+          ${{ matrix.extra-configure-args }}
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
 
@@ -137,8 +159,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ccache is in the image; the action caches the image's CCACHE_DIR.
+      - name: Compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ci-linux
+          max-size: 1G
+          evict-old-files: job
+
       - name: Configure
-        run: cmake --preset ci-linux
+        run: >-
+          cmake --preset ci-linux
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build --preset ci-linux
@@ -176,8 +209,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.preset }}
+          max-size: 1G
+          evict-old-files: job
+
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        run: >-
+          cmake --preset ${{ matrix.preset }}
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
