@@ -1251,7 +1251,8 @@ file with beat-aligned transitions.
       requests. So preset, playlist position *and* the visual itself survive; the director
       keeps analysing and scheduling throughout. `RenderEngineTests` covers it: frames stop
       advancing while hidden, `paused` is set, the engine stays available, and rendering
-      resumes on the same context when visible again.- [x] 2.11 (M) `milkdawp_ui` drawer components: `ControlDrawer` (hidden / revealed / pinned
+      resumes on the same context when visible again.
+- [x] 2.11 (M) `milkdawp_ui` drawer components: `ControlDrawer` (hidden / revealed / pinned
       states, hover and tap reveal, auto-hide timer, first-run reveal), `DrawerScrim`
       (translucent band, optional blur), slot layout that collapses to icons at small widths.
       Unit-testable state machine for the reveal/hide logic.
@@ -1665,6 +1666,15 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       **Not done:** macOS/Linux (the script is Windows-only; macOS goes with the AU in 3.8),
       Steinberg's `validator` (pluginval skips it without `--vst3validator`). The runtime
       layout check landed with 3.10, as a build step rather than a separate script.
+      Update (2026-09-27): Linux CI now runs pluginval on the VST3 too (the image's pinned
+      pluginval under `xvfb-run`, strictness 10, 3 randomised repeats, no GUI; log uploaded
+      on failure). Not yet run in CI. A plugin that can't find projectM stays inert and still
+      passes pluginval, so both pluginval steps now set `MILKDAWP_REQUIRE_PROJECTM`: with it
+      set, the processor constructor aborts with the load failure reason when projectM didn't
+      load, and otherwise prints `MilkDAWp: projectM <version> loaded`. Checked locally on
+      Windows: Release VST3 passes strictness 10 and logs `projectM 4.2.0 loaded`; with
+      `projectM-4.dll` renamed away it aborts with the reason and pluginval fails.
+      **Still not done:** macOS (with the AU, 3.8), Steinberg's `validator`.
 - [~] 3.10 (S) Runtime dependency bundling per platform, ported from v1 (DLL copy, dylib
       fix-up, rpath), now for VST3, AU, and Standalone.
       Note (2026-09-26): `milkdawp_deploy_projectm_runtime()` now copies exactly one file,
@@ -1698,6 +1708,10 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       Linux `$ORIGIN` rpath actually let `ProjectMLibrary` find projectM at runtime is still
       unverified, since nothing in CI loads the plugin on those platforms yet (no pluginval
       there, and 2.7 skips). Stays `[~]` for that and the AU (3.8).
+      Update (2026-09-27): the Linux half now has a check. The Linux CI job loads the VST3 in
+      pluginval with `MILKDAWP_REQUIRE_PROJECTM` set (3.9), so a runtime layout in which the
+      plugin can't find `libprojectM-4.so` fails the job instead of passing inert. Pending its
+      first CI run. macOS stays unverified until it gets a pluginval step (3.8).
 - [x] 3.11 (S) DAW compatibility checklist doc (`docs/daw-checklist.md`): scan, insert,
       automate every parameter, save/reload, drawer reveal/pin in each host, keyboard
       shortcuts in editor and Output window, output window on second display, close and

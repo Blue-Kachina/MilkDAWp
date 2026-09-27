@@ -127,6 +127,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/pluginval.ps1 -Strictness 10 -Repeat 3 -SkipGui
+        env:
+          # Abort if the plugin can't load projectM, instead of passing inert.
+          MILKDAWP_REQUIRE_PROJECTM: "1"
 
       - name: Upload pluginval log
         if: failure() && runner.os == 'Windows'
@@ -188,6 +191,30 @@ jobs:
         run: |
           cmake --build --preset ci-linux --target mdw-analyze
           ./build-ci-linux/tools/mdw-analyze/mdw-analyze --suite fixtures --thresholds fixtures/thresholds.json
+
+      # 3.9/3.10: load the Linux VST3 in a host. pluginval is in the image;
+      # Xvfb gives JUCE a display (no GUI tests: no GPU). With
+      # MILKDAWP_REQUIRE_PROJECTM the plugin aborts if it can't find
+      # libprojectM-4.so next to itself, so this checks the runtime layout,
+      # not just that an inert plugin is valid.
+      - name: pluginval (VST3)
+        env:
+          MILKDAWP_REQUIRE_PROJECTM: "1"
+        run: |
+          plugin="$(find build-ci-linux/plugin/milkdawp_plugin_artefacts -maxdepth 3 -type d -name '*.vst3' | head -n 1)"
+          test -n "$plugin" || { echo "No VST3 bundle under build-ci-linux/"; exit 1; }
+          echo "Plugin: $plugin"
+          ls -l "$plugin"/Contents/*/
+          mkdir -p build-tools/pluginval-logs
+          xvfb-run -a pluginval --strictness-level 10 --timeout-ms 900000 --repeat 3 --randomise \
+            --skip-gui-tests --output-dir build-tools/pluginval-logs --validate "$plugin"
+
+      - name: Upload pluginval log (Linux)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pluginval-log-linux
+          path: build-tools/pluginval-logs/
 
   # Sanitizer jobs (0.4, §8): also inside the devcontainer image (Clang is
   # already installed there). No projectM/plugin -- these exist to catch bugs

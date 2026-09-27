@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include "PluginEditor.h"
 #include "milkdawp/core/ParameterModel.h"
@@ -103,6 +105,21 @@ MilkDAWpAudioProcessor::MilkDAWpAudioProcessor()
   // drives everything and "transport stopped" never pauses the Timed clock.
   config.followHostTransport = wrapperType != wrapperType_Standalone;
   visualizer_ = std::make_unique<engine::Visualizer>(config);
+
+  // CI guard (3.9/3.10): a plugin that can't find projectM stays inert and
+  // still passes pluginval, which would hide a broken runtime layout (rpath,
+  // install name, missing library). With MILKDAWP_REQUIRE_PROJECTM set, as
+  // in the CI pluginval steps, that is fatal instead.
+  if (juce::SystemStats::getEnvironmentVariable("MILKDAWP_REQUIRE_PROJECTM", {}).isNotEmpty()) {
+    const auto version = visualizer_->renderEngine().projectMVersion();
+    if (version.empty()) {
+      std::fprintf(stderr, "MilkDAWp: projectM required (MILKDAWP_REQUIRE_PROJECTM) but not loaded: %s\n",
+                   visualizer_->renderEngine().unavailableReason().c_str());
+      std::fflush(stderr);
+      std::abort();
+    }
+    std::fprintf(stderr, "MilkDAWp: projectM %s loaded\n", version.c_str());
+  }
 
   raw_.beatSensitivity = apvts.getRawParameterValue("beatSensitivity");
   raw_.transitionDurationSeconds = apvts.getRawParameterValue("transitionDurationSeconds");
