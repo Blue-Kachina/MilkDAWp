@@ -17,6 +17,7 @@
 #include "milkdawp/core/OnsetDetector.h"
 #include "milkdawp/core/PresetLibrary.h"
 #include "milkdawp/core/TempoTracker.h"
+#include "milkdawp/engine/PresetCompileTimeCache.h"
 #include "milkdawp/engine/PresetLoader.h"
 
 namespace milkdawp::engine {
@@ -158,6 +159,8 @@ void Director::run() {
   core::PresetLibrary library;
   PresetLoader loader;
   std::mt19937 rng{std::random_device{}()};
+  PresetCompileTimeCache compileTimeCache; // path -> last render-thread load time (5.4)
+  std::uint32_t lastMeasuredPresetId = 0;
 
   std::uint64_t appliedFolderSerial = 0;
   std::int32_t appliedPresetIndex = INT_MIN;
@@ -193,9 +196,50 @@ void Director::run() {
   };
 
   // Steps the playlist until an entry loads (skipping blacklisted or
-  // unreadable ones), at most once around.
+  // unreadable ones), at most once around. Sequential order is a
+  // user-visible sequence, so it always takes the very next entry. For the
+  // randomized policies -- where any of several candidates is an equally
+  // valid pick -- a hard cut (no crossfade to hide a slow compile) prefers
+  // one this session has already measured as cheap, when the scan turns one
+  // up (5.4); soft/timed cuts don't bother, since the blend hides a hitch
+  // either way.
   auto step = [&](bool forward, core::CutStyle cutStyle, float blendSeconds, std::int64_t dueAtSample) {
     const std::size_t attempts = std::min<std::size_t>(playlist->size(), 16);
+
+    if (cutStyle == core::CutStyle::Hard && playlist->policy() != core::PlaylistPolicy::Sequential) {
+      constexpr float kCheapEnoughMs = 20.0f; // only switch to a candidate confirmed at least this cheap
+      std::optional<std::size_t> firstValidIndex;
+      std::optional<std::size_t> cheapIndex;
+      float cheapCost = kCheapEnoughMs;
+      for (std::size_t i = 0; i < attempts; ++i) {
+        const auto index = forward ? playlist->advanceNext(rng) : playlist->advancePrevious();
+        const auto& entry = playlist->at(index);
+        if (loader.isBlacklisted(entry.absolutePath) ||
+            !PresetLoader::validate(juce::File(juce::String(entry.absolutePath))).ok) {
+          continue; // issue() would just skip it too; no point costing it
+        }
+        if (!firstValidIndex) {
+          firstValidIndex = index;
+        }
+        if (const auto cost = compileTimeCache.estimateMs(entry.absolutePath); cost && *cost <= cheapCost) {
+          cheapIndex = index;
+          cheapCost = *cost;
+        }
+      }
+      // An unmeasured candidate might be cheap or might not -- only a
+      // *confirmed* cheap one is worth preferring over the first valid pick;
+      // otherwise fall back to that first pick, same as the plain walk below.
+      if (const auto chosen = cheapIndex ? cheapIndex : firstValidIndex; chosen) {
+        playlist->setCurrentIndex(*chosen);
+        if (issue(*chosen, cutStyle, blendSeconds, dueAtSample)) {
+          return;
+        }
+      }
+      // Fall through: nothing valid turned up (cache-cold candidates are
+      // still fine -- firstValidIndex covers that), or the chosen one still
+      // failed issue() (e.g. a file that vanished after validate()).
+    }
+
     for (std::size_t i = 0; i < attempts; ++i) {
       const auto index = forward ? playlist->advanceNext(rng) : playlist->advancePrevious();
       if (issue(index, cutStyle, blendSeconds, dueAtSample)) {
@@ -277,6 +321,16 @@ void Director::run() {
         blacklistChanged = true;
       }
       ++status.presetsSkipped;
+    }
+
+    // Learn how expensive each preset was to load, from the render thread's
+    // own measurement, so a future hard cut can prefer a cheap one (5.4).
+    if (const auto renderStats = render_.stats();
+        renderStats.currentPresetId != 0 && renderStats.currentPresetId != lastMeasuredPresetId) {
+      lastMeasuredPresetId = renderStats.currentPresetId;
+      if (const auto path = library.pathFor(renderStats.currentPresetId)) {
+        compileTimeCache.record(*path, renderStats.lastPresetLoadMs);
+      }
     }
 
     // User blacklist/unblacklist requests from the browser (§4.5).

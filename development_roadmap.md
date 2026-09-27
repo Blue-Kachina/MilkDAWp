@@ -1971,12 +1971,36 @@ energy mode demonstrably cuts on drops in the fixture set; adaptive quality keep
       filters in the transition settings ("only *calm* during breakdowns" is post-1.0).
 - [ ] 5.3 (M) Adaptive quality on the real FBO with GPU-time-driven hysteresis and a manual
       override; visible current-scale indicator.
-- [ ] 5.4 (S) Preset load hitch mitigation: measure per-preset compile time, cache it, and
+- [x] 5.4 (S) Preset load hitch mitigation: measure per-preset compile time, cache it, and
       prefer cheap presets when the scheduler needs a hard cut on the next beat. This is the
       **primary** hitch fix. projectM compiles preset shaders synchronously on the GL thread in
       every version (4.1.7 and 4.2 alike, no async load API), so 2.5's file prefetch can't hide
       that cost. If measurements show it's still bad, consider contributing async or
       parallel shader compilation upstream (§10).
+      Note (2026-09-27):
+      - `PresetCompileTimeCache` (new, `engine/include/milkdawp/engine/PresetCompileTimeCache.h`,
+        header-only): last-measured load time per absolute path. `Director::run()` already had
+        the measurement -- `RenderStats::lastPresetLoadMs` (projectM parse + shader compile, on
+        the render thread) -- just nowhere to keep it; the director thread now polls
+        `render_.stats()` once per loop and records `(path, lastPresetLoadMs)` whenever
+        `currentPresetId` changes, keyed by path via the existing `PresetLibrary::pathFor`.
+      - `step()`'s attempt loop uses the cache only for a hard cut (`CutStyle::Hard`) under a
+        *randomized* policy (ShuffleNoRepeat/Weighted): scans the same candidates it already
+        would, and switches to one confirmed at or under 20 ms instead of the first valid one,
+        falling back to that first valid pick when nothing scanned is confirmed cheap. Sequential
+        policy is deliberately excluded -- it's a user-visible order, and a first attempt that
+        used raw cost comparison ended up jumping back to the already-measured *current* preset
+        instead of advancing, since an unmeasured next entry has no cost to compare against yet;
+        `DirectorTests.cpp`'s existing Sequential-mode test caught this immediately. The fix:
+        only ever prefer a *confirmed*-cheap candidate over the default first-valid pick, never
+        an unmeasured one over a measured one in either direction, and never touch Sequential's
+        order at all.
+      - `PresetCompileTimeCacheTests.cpp` (new) covers the cache in isolation. No new
+        Director-level test asserts the preference itself (real GL load timings are too
+        variable to assert an exact pick deterministically); the existing Director tests (which
+        exercise Hard cutStyle end to end) pass unchanged and are the regression guard.
+      - Verified on Windows: `milkdawp_engine_tests` (52 cases/633 assertions) and the full
+        project's `ctest` (212 tests) pass; VST3, Standalone, and app targets still build clean.
 - [ ] 5.5 (S) Beat sensitivity semantics: one knob that scales both our detector's threshold
       and `projectm_set_beat_sensitivity`, documented. The two are different things:
       projectM's value only rescales the bass/mid/treb levels presets animate from (clamped

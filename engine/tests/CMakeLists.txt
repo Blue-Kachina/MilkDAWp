@@ -8,6 +8,7 @@ add_executable(milkdawp_engine_tests
   HeadlessRenderTests.cpp
   PcmFeederTests.cpp
   PresetHandoffTests.cpp
+  PresetCompileTimeCacheTests.cpp
   FrameReadbackExchangeTests.cpp
   ControlMappingTests.cpp
   DirectorTests.cpp
