@@ -2,6 +2,11 @@
   "$comment": "Pinned minimum tool versions (D5/D14). Read by scripts/bootstrap.{sh,ps1} --doctor and referenced by CI/devcontainer setup. Bump alongside a CI matrix run, not silently.",
   "cmake": { "minVersion": "3.25.0" },
   "ninja": { "minVersion": "1.11.0" },
+  "pluginval": {
+    "version": "1.0.4",
+    "note": "Exact version, downloaded by scripts/pluginval.ps1 (Phase 3.9)",
+    "sha256Windows": "C08E61CE3B96DB41636F8EC7E76F4C7E2C13EBDAC7FA1B5A1F52B4F32EC715AB"
+  },
   "windows": {
     "visualStudio": { "minVersion": "17.0", "note": "VS 2022 with the 'Desktop development with C++' workload" }
   },

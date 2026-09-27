@@ -75,6 +75,21 @@ jobs:
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
 
+      # 3.9. No GUI tests: the runner has no GPU, only Windows' GL 1.1
+      # software renderer, which can't create the editor's GL context. Run
+      # scripts/pluginval.ps1 locally for the editor tests.
+      - name: pluginval (VST3)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/pluginval.ps1 -Strictness 10 -Repeat 3 -SkipGui
+
+      - name: Upload pluginval log
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pluginval-log
+          path: build-tools/pluginval-logs/
+
   # Linux: runs *inside* the published devcontainer image (0.10), which
   # already has GCC+Clang, CMake, Ninja, JUCE pre-fetched, and projectM's
   # dependency tree pre-built into vcpkg's binary cache. No apt-get, no

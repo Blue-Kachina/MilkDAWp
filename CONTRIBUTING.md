@@ -75,6 +75,16 @@ Both scripts are idempotent and read minimum versions from `toolchain.json`;
 `--doctor`/`-Doctor` only reports, never installs, and exits non-zero on any
 gap.
 
+After changing the plugin, run pluginval against the VST3 you just built
+(Windows; it downloads the pinned version on first use):
+
+```powershell
+pwsh scripts\pluginval.ps1             # strictness 10, with the editor tests
+pwsh scripts\pluginval.ps1 -Repeat 5   # five runs in random order, for threading changes
+```
+
+CI runs the same script without the editor tests, since its runners have no GPU.
+
 ## Threading rules (§4.2)
 
 This is the rule that matters most and the one most likely to be violated by

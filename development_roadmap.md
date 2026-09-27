@@ -1522,8 +1522,19 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       transitions are visible to a human" is still pending real rendering (Phase 2's blocked
       items) -- this item is specifically about the build target existing, which it now does.
 - [ ] 3.8 (M) AU target on macOS; `auval` in CI on macOS runner.
-- [ ] 3.9 (M) `pluginval` job in CI for VST3 (all platforms) and AU (macOS), strictness 5,
+- [~] 3.9 (M) `pluginval` job in CI for VST3 (all platforms) and AU (macOS), strictness 5,
       with the runtime dependency layout check from v1 (`check_runtime_win.ps1`) ported.
+      Note (2026-09-26): `scripts/pluginval.ps1` downloads pluginval 1.0.4 (version and
+      SHA-256 pinned in `toolchain.json`) into `build-tools/` and validates the newest VST3
+      build, or `-Plugin <path>`. Run locally on Windows against the dev-identity VST3: it
+      passes strictness 10 with the GUI tests on (editor opened while processing, background
+      thread state, parameter thread safety, parameter fuzzing), five randomised repeats each,
+      in Debug and Release, with no failures. The Windows CI job now runs it at strictness 10,
+      3 randomised repeats, without GUI tests (no GPU on the runner), and uploads the log on
+      failure. That CI step hasn't run yet, because the CI workflow itself hasn't run (0.3).
+      **Not done:** macOS/Linux (the script is Windows-only; macOS goes with the AU in 3.8),
+      Steinberg's `validator` (pluginval skips it without `--vst3validator`), and the runtime
+      layout check, which belongs with 3.10.
 - [ ] 3.10 (S) Runtime dependency bundling per platform, ported from v1 (DLL copy, dylib
       fix-up, rpath), now for VST3, AU, and Standalone.
 - [x] 3.11 (S) DAW compatibility checklist doc (`docs/daw-checklist.md`): scan, insert,
