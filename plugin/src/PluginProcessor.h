@@ -134,6 +134,7 @@ private:
     std::atomic<float>* transitionMode = nullptr;
     std::atomic<float>* transitionBars = nullptr;
     std::atomic<float>* presetSelectionPolicy = nullptr;
+    std::atomic<float>* energyThreshold = nullptr;
   } raw_;
 
   int editorWidth_ = 480;

@@ -3,6 +3,9 @@
 
 #include "PluginEditor.h"
 
+#include <algorithm>
+#include <utility>
+
 #include "milkdawp/ui/Shortcuts.h"
 
 namespace milkdawp::plugin {
@@ -46,6 +49,28 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
   transitionModeAttachment_ = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
       processorRef.apvts, "transitionMode", controlDrawer.transitionModeCombo);
 
+  // Phase 3.4: the transition settings popover. A child of outputSurface for
+  // the same compositing reason as the drawer, added after it so it sits on
+  // top; hidden until chosen from the settings menu.
+  outputSurface.addChildComponent(transitionSettings);
+  transitionSettings.onCloseRequested = [this] { setTransitionSettingsVisible(false); };
+  auto& apvts = processorRef.apvts;
+  transitionSettingsModeAttachment_ =
+      std::make_unique<ComboBoxAttachment>(apvts, "transitionMode", transitionSettings.modeCombo);
+  for (auto [id, slider] : {std::pair<const char*, juce::Slider*>{"transitionBars", &transitionSettings.barsSlider},
+                            {"transitionDurationSeconds", &transitionSettings.timedDurationSlider},
+                            {"transitionDurationMin", &transitionSettings.jitterMinSlider},
+                            {"transitionDurationMax", &transitionSettings.jitterMaxSlider},
+                            {"energyThreshold", &transitionSettings.energyThresholdSlider},
+                            {"softCutDuration", &transitionSettings.blendSlider}}) {
+    transitionSliderAttachments_.push_back(std::make_unique<SliderAttachment>(apvts, id, *slider));
+  }
+  transitionButtonAttachments_.push_back(
+      std::make_unique<ButtonAttachment>(apvts, "transitionJitterEnabled", transitionSettings.jitterToggle));
+  transitionButtonAttachments_.push_back(
+      std::make_unique<ButtonAttachment>(apvts, "hardCutEnabled", transitionSettings.hardCutToggle));
+  transitionSettings.refreshRelevance();
+
   // Plugin build keeps EDITOR_WANTS_KEYBOARD_FOCUS FALSE (carried over from
   // v1, which received keys fine in practice) -- that only affects the
   // wrapper's initial focus request to the host. setWantsKeyboardFocus()
@@ -82,7 +107,27 @@ void MilkDAWpAudioProcessorEditor::resized() {
   // Relative to outputSurface's own local bounds now that it's the parent.
   diagnosticsLabel.setBounds(outputSurface.getLocalBounds().removeFromTop(80).reduced(8));
   controlDrawer.setBounds(outputSurface.getLocalBounds().removeFromBottom(kDrawerHeight));
+  layoutTransitionSettings();
   processorRef.setEditorSize(getWidth(), getHeight());
+}
+
+void MilkDAWpAudioProcessorEditor::layoutTransitionSettings() {
+  // Just above the drawer, right-aligned under the settings button that
+  // opened it; shrinks to fit at the 480x270 minimum size.
+  auto area = outputSurface.getLocalBounds().withTrimmedBottom(kDrawerHeight).reduced(6);
+  const auto width = std::min(milkdawp::ui::TransitionSettingsPanel::preferredWidth, area.getWidth());
+  const auto height = std::min(milkdawp::ui::TransitionSettingsPanel::preferredHeight, area.getHeight());
+  transitionSettings.setBounds(area.removeFromBottom(height).removeFromRight(width));
+}
+
+void MilkDAWpAudioProcessorEditor::setTransitionSettingsVisible(bool visible) {
+  transitionSettings.setVisible(visible);
+  if (visible) {
+    transitionSettings.refreshRelevance();
+    controlDrawer.reveal();
+  } else {
+    grabKeyboardFocus(); // the panel's widgets may have taken it; shortcuts need it back
+  }
 }
 
 void MilkDAWpAudioProcessorEditor::visibilityChanged() {
@@ -98,7 +143,11 @@ bool MilkDAWpAudioProcessorEditor::keyPressed(const juce::KeyPress& key) {
   using milkdawp::ui::ShortcutAction;
   switch (milkdawp::ui::mapKeyPress(key, /*isAppShell=*/false)) {
   case ShortcutAction::ExitFullscreenOrRevealDrawer:
-    controlDrawer.reveal();
+    if (transitionSettings.isVisible()) {
+      setTransitionSettingsVisible(false); // Esc closes the popover first
+    } else {
+      controlDrawer.reveal();
+    }
     return true;
   case ShortcutAction::PreviousPreset:
     pulseTrigger("triggerPrev");
@@ -157,6 +206,8 @@ void MilkDAWpAudioProcessorEditor::showSettingsMenu() {
   menu.addItem("Rescan preset folder", !folder.empty(), false,
                [this] { processorRef.visualizer().director().rescan(); });
   menu.addSeparator();
+  menu.addItem("Transition settings...", true, transitionSettings.isVisible(),
+               [this] { setTransitionSettingsVisible(!transitionSettings.isVisible()); });
   menu.addItem("Output window fullscreen (F11)", [this] { processorRef.toggleOutputFullscreen(); });
   menu.addItem("Show diagnostics", true, diagnosticsLabel.isVisible(),
                [this] { diagnosticsLabel.setVisible(!diagnosticsLabel.isVisible()); });
@@ -213,13 +264,19 @@ void MilkDAWpAudioProcessorEditor::timerCallback() {
   controlDrawer.presetLabel.setText(presetText, juce::dontSendNotification);
   controlDrawer.presetLabel.setTooltip(presetText);
 
-  juce::String bpmText(juce::CharPointer_UTF8("\xE2\x99\xA9")); // quarter note
-  if (status.beatSource == engine::BeatSource::None || status.bpm <= 0.0f) {
-    bpmText << "--";
-  } else {
-    bpmText << juce::String(status.bpm, 0) << (status.beatSource == engine::BeatSource::Host ? " host" : "");
+  using milkdawp::ui::BeatBadgeSource;
+  const auto source = status.beatSource == engine::BeatSource::Host       ? BeatBadgeSource::Host
+                      : status.beatSource == engine::BeatSource::Detected ? BeatBadgeSource::Detected
+                                                                          : BeatBadgeSource::None;
+  const auto badge = milkdawp::ui::describeBeat(source, status.bpm, status.beatConfidence);
+  controlDrawer.bpmLabel.setText(badge.text, juce::dontSendNotification);
+  controlDrawer.bpmLabel.setColour(juce::Label::textColourId, badge.colour);
+  controlDrawer.bpmLabel.setTooltip(badge.tooltip);
+
+  // Host automation moves the attached widgets but not their dimming.
+  if (transitionSettings.isVisible()) {
+    transitionSettings.refreshRelevance();
   }
-  controlDrawer.bpmLabel.setText(bpmText, juce::dontSendNotification);
 }
 
 } // namespace milkdawp::plugin

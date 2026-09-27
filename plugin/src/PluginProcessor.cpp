@@ -110,6 +110,7 @@ MilkDAWpAudioProcessor::MilkDAWpAudioProcessor()
   raw_.transitionMode = apvts.getRawParameterValue("transitionMode");
   raw_.transitionBars = apvts.getRawParameterValue("transitionBars");
   raw_.presetSelectionPolicy = apvts.getRawParameterValue("presetSelectionPolicy");
+  raw_.energyThreshold = apvts.getRawParameterValue("energyThreshold");
 
   // Momentary commands: react to the 0 -> 1 edge wherever it comes from
   // (editor pulse, host automation, MIDI learn later). A per-block poll
@@ -150,6 +151,7 @@ engine::EngineControls MilkDAWpAudioProcessor::readControls() const noexcept {
   controls.jitterMaxSeconds = load(raw_.transitionDurationMax, 15.0f);
   controls.cutStyle = load(raw_.hardCutEnabled, 0.0f) > 0.5f ? core::CutStyle::Hard : core::CutStyle::Soft;
   controls.blendSeconds = load(raw_.softCutDuration, 3.0f);
+  controls.energyThreshold = load(raw_.energyThreshold, 2.0f);
   controls.locked = load(raw_.lockCurrentPreset, 0.0f) > 0.5f;
   // v1's Shuffle toggle wins over the v2 policy choice when on.
   controls.policy = load(raw_.shuffle, 0.0f) > 0.5f

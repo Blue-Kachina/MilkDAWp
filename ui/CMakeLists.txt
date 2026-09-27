@@ -9,6 +9,8 @@ add_library(milkdawp_ui STATIC
   src/ControlDrawer.cpp
   include/milkdawp/ui/Shortcuts.h
   src/Shortcuts.cpp
+  include/milkdawp/ui/TransitionSettings.h
+  src/TransitionSettings.cpp
 )
 
 target_include_directories(milkdawp_ui PUBLIC

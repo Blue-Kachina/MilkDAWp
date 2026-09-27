@@ -55,6 +55,7 @@ core::TransitionSchedulerConfig schedulerConfigFor(const EngineControls& control
   config.jitterMaxSeconds = std::max(controls.jitterMinSeconds, controls.jitterMaxSeconds);
   config.cutStyle = controls.cutStyle;
   config.blendSeconds = std::max(controls.blendSeconds, 0.1f);
+  config.energyThresholdMultiplier = std::max(controls.energyThreshold, 0.0f);
   return config;
 }
 

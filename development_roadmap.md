@@ -1372,10 +1372,33 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       (host or detected, marked "host"), "Out" opens/closes the Output window (3.12) and "Set"
       opens a menu (preset folder, rescan, Output fullscreen, diagnostics). The parameters
       listed above now drive the engine (2.6).
-- [ ] 3.4 (S) Transition settings popover: mode selector, bars (N), blend, energy threshold,
+- [x] 3.4 (S) Transition settings popover: mode selector, bars (N), blend, energy threshold,
       jitter, with sensible defaults (Beat-quantized, 4 bars, soft 2 beats).
-- [ ] 3.5 (S) Beat/tempo badge in the drawer (BPM, confidence, host-sync indicator), useful
+      Note (2026-09-26): `ui::TransitionSettingsPanel` (`ui/include/milkdawp/ui/TransitionSettings.h`)
+      holds the widgets (mode, bars, timed interval, jitter + min/max, energy threshold, hard
+      cuts, blend). Like `ControlDrawer`, it has no APVTS, so the app (Phase 4) can reuse it. The
+      editor attaches it to the parameters and opens it from Set > "Transition settings...";
+      Close or Esc hides it. It is a child of `OutputSurface` above the drawer, not a
+      `CallOutBox`, for two reasons: a desktop window's attachments could outlive the processor
+      if a host removes the plugin while the popover is open, and a child composites over the GL
+      content the same way the drawer does. Settings that do nothing in the current mode are
+      dimmed, not disabled, via the pure `transitionSettingsRelevance()` (unit-tested). New
+      parameter `energyThreshold` (0.5-4.0 sd, default 2.0), wired through
+      `EngineControls::energyThreshold` to `TransitionSchedulerConfig::energyThresholdMultiplier`,
+      which had no control before; `docs/parameters.md` regenerated. The blend default stays
+      `softCutDuration`'s v1 3 s rather than "2 beats", since changing a carried-forward v1
+      parameter's meaning would break migration. Checked for real in the Standalone build: the
+      popover opens from the menu, dimming follows mode and jitter changes, it stays in sync
+      with the drawer's mode combo, and Close and Esc both hide it. Not yet run in a host.
+- [x] 3.5 (S) Beat/tempo badge in the drawer (BPM, confidence, host-sync indicator), useful
       for trust and for debugging in the field.
+      Note (2026-09-26): `ui::describeBeat()` formats the badge: "♩128 host" (green) while the
+      host drives, "♩120 80%" for a detected tempo (amber, with an explanatory tooltip, below
+      BeatQuantized's 0.3 fallback threshold), and "♩--" (grey) with no beat. There was no
+      `TooltipWindow` anywhere, so no drawer tooltip had ever shown. The editor now holds a
+      `SharedResourcePointer<TooltipWindow>`, which gives one per process rather than one per
+      instance, so editors from several plugin instances don't each draw every tooltip. The
+      host and detected states are unit-tested only: the Standalone check had no audio input.
 - [~] 3.12 (S) Output window from the plugin: ⛶ opens `OutputWindow` (2.4) on the remembered
       display; editor keeps the live mirror and pinned drawer; closing the editor leaves the
       output window running; removing the plugin closes it. Also v1's remaining OBS nicety,

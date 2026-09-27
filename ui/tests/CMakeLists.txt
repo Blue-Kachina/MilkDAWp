@@ -3,6 +3,7 @@ include(${CMAKE_SOURCE_DIR}/cmake/FetchCatch2.cmake)
 add_executable(milkdawp_ui_tests
   DrawerStateTests.cpp
   ShortcutsTests.cpp
+  TransitionSettingsTests.cpp
 )
 
 target_link_libraries(milkdawp_ui_tests PRIVATE

@@ -46,17 +46,19 @@ ControlDrawer::ControlDrawer(DrawerStateMachine::Config config) : state_(config)
 
   bpmLabel.setJustificationType(juce::Justification::centred);
   bpmLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-  bpmLabel.setInterceptsMouseClicks(false, false);
+  bpmLabel.setMinimumHorizontalScale(0.7f);
+  // Left mouse-sensitive (unlike presetLabel) so its tooltip shows: the beat
+  // source and confidence behind the number (Phase 3.5).
   addAndMakeVisible(bpmLabel);
 
-  // The shell wires both: the Output window (§4.9) and a settings menu (the
-  // preset folder for now; the transition settings popover is Phase 3.4).
+  // The shell wires both: the Output window (§4.9) and a settings menu
+  // (preset folder, transition settings popover, diagnostics).
   outputButton.setButtonText("Out");
   outputButton.setTooltip("Open or close the Output window (F11: fullscreen)");
   addAndMakeVisible(outputButton);
 
   settingsButton.setButtonText("Set");
-  settingsButton.setTooltip("Settings: preset folder");
+  settingsButton.setTooltip("Settings: preset folder, transitions");
   addAndMakeVisible(settingsButton);
 
   pinButton.setButtonText("Pin");
@@ -97,7 +99,7 @@ void ControlDrawer::resized() {
   fb.items.add(item(lockButton, 42));
   fb.items.add(item(shuffleButton, 42));
   fb.items.add(item(transitionModeCombo, 118));
-  fb.items.add(item(bpmLabel, 50));
+  fb.items.add(item(bpmLabel, 72));
   fb.items.add(juce::FlexItem().withFlex(1.0f)); // spacer: pushes output/settings/pin to the right edge
   fb.items.add(item(outputButton, 38));
   fb.items.add(item(settingsButton, 38));

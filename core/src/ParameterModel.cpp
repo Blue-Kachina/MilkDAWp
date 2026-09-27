@@ -43,6 +43,9 @@ const std::vector<ParameterSpec>& allParameters() {
       {"transitionBars", "Transition Bars (N)", ParameterType::Int, 1.0f, 16.0f, 4.0f, true, "", {}},
       {"presetSelectionPolicy", "Preset Selection", ParameterType::Choice, 0.0f, 2.0f, 0.0f, true, "",
        {"Sequential", "ShuffleNoRepeat", "Weighted"}},
+      // Energy mode: a drop is broadband energy this many standard deviations
+      // above the rolling mean (TransitionSchedulerConfig::energyThresholdMultiplier).
+      {"energyThreshold", "Energy Threshold (sd)", ParameterType::Float, 0.5f, 4.0f, 2.0f, true, "", {}},
   };
   return params;
 }

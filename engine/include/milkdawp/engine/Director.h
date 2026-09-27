@@ -34,6 +34,8 @@ struct EngineControls {
   float jitterMaxSeconds = 15.0f;
   core::CutStyle cutStyle = core::CutStyle::Soft;
   float blendSeconds = 3.0f;
+  /// Energy mode: standard deviations above the rolling mean that count as a drop.
+  float energyThreshold = 2.0f;
   bool locked = false;
   core::PlaylistPolicy policy = core::PlaylistPolicy::Sequential;
   /// Jump to this playlist index whenever the value changes (host

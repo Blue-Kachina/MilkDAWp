@@ -1,0 +1,64 @@
+// SPDX-FileCopyrightText: 2026 The MilkDAWp contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+#include <catch2/catch_test_macros.hpp>
+
+#include "milkdawp/ui/TransitionSettings.h"
+
+using milkdawp::core::TransitionMode;
+using namespace milkdawp::ui;
+
+TEST_CASE("Manual mode only offers the cut settings", "[ui][TransitionSettings]") {
+  const auto r = transitionSettingsRelevance(TransitionMode::Manual, false, false);
+  CHECK_FALSE(r.bars);
+  CHECK_FALSE(r.timedDuration);
+  CHECK_FALSE(r.jitter);
+  CHECK_FALSE(r.energyThreshold);
+  CHECK(r.blend);
+}
+
+TEST_CASE("Timed mode offers duration, or the jitter range when jitter is on", "[ui][TransitionSettings]") {
+  const auto fixed = transitionSettingsRelevance(TransitionMode::Timed, false, false);
+  CHECK(fixed.timedDuration);
+  CHECK(fixed.jitter);
+  CHECK_FALSE(fixed.jitterRange);
+  CHECK_FALSE(fixed.bars);
+
+  const auto jittered = transitionSettingsRelevance(TransitionMode::Timed, true, false);
+  CHECK_FALSE(jittered.timedDuration);
+  CHECK(jittered.jitterRange);
+}
+
+TEST_CASE("BeatQuantized offers bars and its timed fallback", "[ui][TransitionSettings]") {
+  const auto r = transitionSettingsRelevance(TransitionMode::BeatQuantized, false, false);
+  CHECK(r.bars);
+  CHECK(r.timedDuration);
+  CHECK_FALSE(r.energyThreshold);
+}
+
+TEST_CASE("Energy mode offers bars and the threshold, not timing", "[ui][TransitionSettings]") {
+  const auto r = transitionSettingsRelevance(TransitionMode::Energy, true, false);
+  CHECK(r.bars);
+  CHECK(r.energyThreshold);
+  CHECK_FALSE(r.timedDuration);
+  CHECK_FALSE(r.jitterRange);
+}
+
+TEST_CASE("Hard cuts make the blend time irrelevant", "[ui][TransitionSettings]") {
+  CHECK_FALSE(transitionSettingsRelevance(TransitionMode::Hybrid, false, true).blend);
+}
+
+TEST_CASE("Beat badge shows the source and confidence", "[ui][BeatBadge]") {
+  CHECK(describeBeat(BeatBadgeSource::None, 120.0f, 1.0f).text.endsWith("--"));
+  CHECK(describeBeat(BeatBadgeSource::Detected, 0.0f, 1.0f).text.endsWith("--"));
+
+  const auto host = describeBeat(BeatBadgeSource::Host, 127.6f, 0.0f);
+  CHECK(host.text.endsWith("128 host"));
+
+  const auto sure = describeBeat(BeatBadgeSource::Detected, 120.0f, 0.8f);
+  CHECK(sure.text.endsWith("120 80%"));
+  const auto unsure = describeBeat(BeatBadgeSource::Detected, 120.0f, 0.1f);
+  CHECK(unsure.text.endsWith("120 10%"));
+  CHECK(unsure.colour != sure.colour);
+  CHECK(unsure.tooltip.contains("falls back"));
+}
