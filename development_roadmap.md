@@ -1411,8 +1411,45 @@ Reaper, Ableton Live, FL Studio, Cubase, Logic (AU) pass the checklist below.
       Standalone build only so far. **Not done:** the transparency option; persisting the
       window bounds and fullscreen display in the plugin state (they are remembered only
       while the processor lives); checking it in REAPER (Matthew's hand test).
-- [ ] 3.13 (S) Detached controls: "float controls" action hosts the drawer in a small owned
+      Update (2026-09-26): Matthew checked it in REAPER with two instances; both Output windows
+      behave. The plugin state now saves the window layout (`core::WindowLayout` in
+      `StateSchemaV2`): whether the Output window is open, whether it is fullscreen, and its
+      windowed bounds, which also fix the display it goes fullscreen on. These are additive
+      keys, so older v2 states load with the window closed. Restoring state reopens, closes,
+      or re-fullscreens the window on the message thread through an `AsyncUpdater`, whatever
+      thread the host restores on. The processor keeps the layout current under a mutex (never
+      locked on the audio thread) through `OutputWindow::onLayoutChanged`, because
+      `getStateInformation` may run off the message thread. Saved bounds that land on no
+      connected display (a monitor unplugged since) fall back to a default centred on the main
+      display. Checked in the Standalone: opened the Output window, quit, relaunched, and it came
+      back at the same position. While there, `deserializeStateSchemaV2` stopped throwing on
+      malformed input: `std::stoi`/`std::stof` on a corrupt or fuzzed blob (pluginval sends
+      those) would have crashed the host, so a bad line is now skipped. Parsing uses the classic
+      locale, since a host's decimal-comma locale would misread "3.5". Both have tests.
+      **Still not done:** the transparency option. v1 has no window-transparency code (its
+      `VisualizationWindow` only had the fixed title and borderless fullscreen), so the
+      requirement needs defining before it is built. A layered (per-window alpha) GL window is
+      also unreliable on Windows, and OBS window capture ignores it anyway.
+- [x] 3.13 (S) Detached controls: "float controls" action hosts the drawer in a small owned
       window; docking returns it. Same component, no duplicated wiring.
+      Note (2026-09-26): `ui::DetachedControlsWindow` (`ui/include/milkdawp/ui/`) borrows the
+      editor's own `ControlDrawer` as non-owned content and hands it back on dock, so no
+      attachment or callback is duplicated. Set > "Float controls in a window" / "Dock
+      controls" switches between them, and the window's close button docks. The window is
+      only resizable in width; floating, the drawer is always shown, the pin button is hidden,
+      and the preset name takes the spare width. The editor owns the window, but whether the
+      controls float, and where, is the processor's saved `WindowLayout`, which the editor
+      follows. So closing and reopening the editor, or reloading the project, floats them
+      again in the same place. Keys in the window go to the editor's shortcut handler (§4.9:
+      windows we own receive keys).
+      Checked in the Standalone: float, dock, restore across a relaunch, and L/S from the
+      floating window. That check found two older drawer bugs. Toggled buttons (Lock/Shuf/Pin)
+      looked identical on and off, so they now have a blue "on" colour. Clicking a drawer
+      button also moved keyboard focus to it, so Space/Return would press that button instead
+      of reaching a DAW's transport; drawer controls no longer take focus. It also found that
+      `mapKeyPress` only matched upper-case letter codes. JUCE on Windows gets those from the
+      scan code, and injected keys without one (remote desktop, on-screen keyboards) arrive
+      lower-case, so letters now match either case (tested). Not yet run in a host.
 - [~] 3.14 (S) Shortcuts in the plugin: attach the shared `Shortcuts` table (§4.9) to the
       editor, Output window, and detached controls; unhandled keys fall through to the host;
       verify F11, Esc, arrows, L, S, H, P per host and record results in the DAW checklist.
@@ -1606,6 +1643,13 @@ docs live; v1 repo archived with a pointer.
 - Linux native loopback capture module.
 - Offline high-resolution render to video (`projectm_set_frame_time` from the file's sample
   clock makes this a straight loop, D15).
+- Cast the Output window to a network display (Chromecast / AirPlay / DLNA). The drawer's
+  Output button is a pop-out today; a cast target would sit beside it.
+- Drawer countdown: `DirectorStatus` publishes the next scheduled transition time and the
+  beat phase, so the drawer's (currently empty) progress track fills in Timed/Hybrid modes
+  and shows beat pips in BeatQuantized, with "next in 0:11" in the preset detail line.
+- Searchable preset browser panel (filter-as-you-type, favourites) to replace the drawer's
+  click-the-preset-name popup menu for large libraries.
 - **Layers: several inputs, several visuals, one canvas.** N projectM instances in the
   engine's one GL context, each fed its own audio input and rendering to its own FBO
   (`render_frame_fbo`, D15), mixed onto the output by our own compositor pass. Mix options:

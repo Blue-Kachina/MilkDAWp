@@ -75,7 +75,7 @@ struct DirectorStatus {
 ///
 /// Threading: setControls() from one producer thread; publishHostTransport()
 /// from the audio thread only (never blocks); requestNext()/
-/// requestPrevious() from any thread; the folder and name accessors from the
+/// requestPrevious()/requestPreset() from any thread; the folder and name accessors from the
 /// message thread (they take a mutex, never held by the audio thread).
 class Director {
 public:
@@ -93,6 +93,10 @@ public:
 
   void requestNext() noexcept { nextRequests_.fetch_add(1); }
   void requestPrevious() noexcept { previousRequests_.fetch_add(1); }
+  /// Jumps to playlist entry `index` (the UI's preset picker). Unlike the
+  /// `presetIndex` control it fires every time, even for the index already
+  /// asked for; out-of-range indices are ignored. Works while locked.
+  void requestPreset(std::int32_t index) noexcept { presetRequest_.store(index); }
 
   /// Scans `folder` recursively for .milk presets (on the director thread)
   /// and starts playing: `preferredPresetPath` if it is in the folder,
@@ -103,6 +107,8 @@ public:
   [[nodiscard]] std::string currentPresetPath() const;
   /// Display name (path relative to the folder, without ".milk"), or empty.
   [[nodiscard]] std::string presetName(std::int32_t index) const;
+  /// Every display name, in playlist order (one lock, for the preset picker).
+  [[nodiscard]] std::vector<std::string> presetNames() const;
 
   [[nodiscard]] DirectorStatus status() const noexcept { return status_.read(); }
 
@@ -124,6 +130,7 @@ private:
   std::atomic<bool> stopRequested_{false};
   std::atomic<std::uint32_t> nextRequests_{0};
   std::atomic<std::uint32_t> previousRequests_{0};
+  std::atomic<std::int32_t> presetRequest_{-1}; // -1: none pending
   core::SeqlockSnapshot<EngineControls> controls_;
   core::SeqlockSnapshot<core::TransportInfo> transport_;
   core::SeqlockSnapshot<DirectorStatus> status_;

@@ -23,6 +23,32 @@ struct V1StateRecord {
   std::map<std::string, float> paramValues;
 };
 
+/// A window's screen rectangle, in logical pixels. Empty (zero size) means
+/// "never placed": the shell picks a default.
+struct WindowBounds {
+  int x = 0;
+  int y = 0;
+  int width = 0;
+  int height = 0;
+
+  [[nodiscard]] bool isEmpty() const noexcept { return width <= 0 || height <= 0; }
+  bool operator==(const WindowBounds&) const = default;
+};
+
+/// The windows a session had open (Phase 3.12/3.13), so reopening a project
+/// puts the Output window back on the capture display and the controls where
+/// they were.
+struct WindowLayout {
+  bool outputWindowOpen = false;
+  bool outputWindowFullscreen = false;
+  /// Windowed bounds; fullscreen covers the display these fall on.
+  WindowBounds outputWindowBounds;
+  bool controlsFloating = false;
+  WindowBounds controlsWindowBounds;
+
+  bool operator==(const WindowLayout&) const = default;
+};
+
 /// MilkDAWp 2's canonical state (§4.8 "StateSchema v2"). Preset references
 /// are stored as both an absolute path and (once PresetLibrary exists,
 /// Phase 2.5) a {libraryRoot, relativePath, contentHash} triple so a moved
@@ -35,6 +61,7 @@ struct StateSchemaV2 {
   std::string playlistFolderPath;
   int editorWidth = 0;
   int editorHeight = 0;
+  WindowLayout windows; // additive keys: older v2 states load with everything closed
   std::map<std::string, float> paramValues; // keyed by ParameterModel's v2 ids
 };
 

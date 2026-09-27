@@ -134,6 +134,18 @@ TEST_CASE("Director loads a preset folder, steps through it, and skips files tha
   visualizer.setControls(controls);
   REQUIRE(waitFor([&] { return director.status().currentIndex == 1; }));
 
+  // The preset picker jumps directly too, and ignores indices outside the list.
+  CHECK(director.presetNames() == std::vector<std::string>{"mdw-border", director.presetName(1),
+                                                           director.presetName(2), director.presetName(3)});
+  director.requestPreset(2);
+  REQUIRE(waitFor([&] { return director.status().currentIndex == 2; }));
+  const auto issuedBefore = director.status().transitionsIssued;
+  director.requestPreset(99);
+  director.requestPreset(-1);
+  director.requestPreset(0);
+  REQUIRE(waitFor([&] { return director.status().currentIndex == 0; }));
+  CHECK(director.status().transitionsIssued == issuedBefore + 1);
+
   render.unregisterSurface(surface);
 }
 

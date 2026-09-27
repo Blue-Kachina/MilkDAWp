@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "milkdawp/ui/Icons.h"
+#include "milkdawp/ui/PresetMenu.h"
 #include "milkdawp/ui/Shortcuts.h"
 
 namespace milkdawp::plugin {
@@ -41,6 +43,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
     }
   };
   controlDrawer.settingsButton.onClick = [this] { showSettingsMenu(); };
+  controlDrawer.onPresetTitleClicked = [this] { showPresetPicker(); };
 
   lockAttachment_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
       processorRef.apvts, "lockCurrentPreset", controlDrawer.lockButton);
@@ -100,21 +103,68 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
   startTimerHz(10);
 }
 
-MilkDAWpAudioProcessorEditor::~MilkDAWpAudioProcessorEditor() { stopTimer(); }
+MilkDAWpAudioProcessorEditor::~MilkDAWpAudioProcessorEditor() {
+  stopTimer();
+  // Hand the drawer back before it is destroyed, without touching the
+  // processor's layout: a floating session reopens floating with the editor.
+  controlsWindow_.reset();
+}
 
 void MilkDAWpAudioProcessorEditor::resized() {
   outputSurface.setBounds(getLocalBounds());
   // Relative to outputSurface's own local bounds now that it's the parent.
   diagnosticsLabel.setBounds(outputSurface.getLocalBounds().removeFromTop(80).reduced(8));
-  controlDrawer.setBounds(outputSurface.getLocalBounds().removeFromBottom(kDrawerHeight));
+  if (controlsWindow_ == nullptr) {
+    controlDrawer.setBounds(outputSurface.getLocalBounds().removeFromBottom(kDrawerHeight));
+  }
   layoutTransitionSettings();
   processorRef.setEditorSize(getWidth(), getHeight());
+}
+
+void MilkDAWpAudioProcessorEditor::setControlsFloating(bool floating) {
+  if (floating == (controlsWindow_ != nullptr)) {
+    return;
+  }
+  if (floating) {
+    outputSurface.removeChildComponent(&controlDrawer);
+    controlDrawer.setFloating(true);
+    controlDrawer.setSize(controlDrawer.getWidth(), milkdawp::ui::ControlDrawer::floatingHeight);
+    controlsWindow_ = std::make_unique<milkdawp::ui::DetachedControlsWindow>(controlDrawer);
+    // Deferred: the close button fires inside the window's own handler.
+    controlsWindow_->onDockRequested = [this] {
+      juce::MessageManager::callAsync([editor = juce::Component::SafePointer(this)] {
+        if (editor != nullptr) {
+          editor->setControlsFloating(false);
+        }
+      });
+    };
+    controlsWindow_->onKeyPressed = [this](const juce::KeyPress& key) { return keyPressed(key); };
+    controlsWindow_->onLayoutChanged = [this] {
+      if (controlsWindow_ != nullptr) {
+        processorRef.setControlsLayout(true, controlsWindow_->getBounds());
+      }
+    };
+    const auto saved = processorRef.windowLayout().controlsWindowBounds;
+    controlsWindow_->show(saved.isEmpty() ? juce::Rectangle<int>()
+                                          : juce::Rectangle<int>(saved.x, saved.y, saved.width, saved.height));
+    processorRef.setControlsLayout(true, controlsWindow_->getBounds());
+  } else {
+    processorRef.setControlsLayout(false, controlsWindow_->getBounds());
+    controlsWindow_.reset(); // releases the drawer
+    controlDrawer.setFloating(false);
+    outputSurface.addAndMakeVisible(controlDrawer);
+    transitionSettings.toFront(false); // the popover stays above the drawer
+    grabKeyboardFocus();
+  }
+  resized();
 }
 
 void MilkDAWpAudioProcessorEditor::layoutTransitionSettings() {
   // Just above the drawer, right-aligned under the settings button that
   // opened it; shrinks to fit at the 480x270 minimum size.
-  auto area = outputSurface.getLocalBounds().withTrimmedBottom(kDrawerHeight).reduced(6);
+  // The controls, not the gradient headroom above them.
+  const int drawerHeight = controlsWindow_ != nullptr ? 0 : milkdawp::ui::ControlDrawer::controlsHeight;
+  auto area = outputSurface.getLocalBounds().withTrimmedBottom(drawerHeight).reduced(6);
   const auto width = std::min(milkdawp::ui::TransitionSettingsPanel::preferredWidth, area.getWidth());
   const auto height = std::min(milkdawp::ui::TransitionSettingsPanel::preferredHeight, area.getHeight());
   transitionSettings.setBounds(area.removeFromBottom(height).removeFromRight(width));
@@ -208,10 +258,42 @@ void MilkDAWpAudioProcessorEditor::showSettingsMenu() {
   menu.addSeparator();
   menu.addItem("Transition settings...", true, transitionSettings.isVisible(),
                [this] { setTransitionSettingsVisible(!transitionSettings.isVisible()); });
+  const bool floating = controlsWindow_ != nullptr;
+  menu.addItem(floating ? "Dock controls" : "Float controls in a window",
+               [this, floating] { setControlsFloating(!floating); });
   menu.addItem("Output window fullscreen (F11)", [this] { processorRef.toggleOutputFullscreen(); });
   menu.addItem("Show diagnostics", true, diagnosticsLabel.isVisible(),
                [this] { diagnosticsLabel.setVisible(!diagnosticsLabel.isVisible()); });
-  menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&controlDrawer.settingsButton));
+  menu.setLookAndFeel(&controlDrawer.getLookAndFeel());
+  menu.showMenuAsync(milkdawp::ui::DrawerLookAndFeel::menuOptions(controlDrawer.settingsMenuAnchor()));
+}
+
+void MilkDAWpAudioProcessorEditor::showPresetPicker() {
+  auto& director = processorRef.visualizer().director();
+  const auto folder = director.presetFolder();
+
+  juce::PopupMenu menu;
+  menu.setLookAndFeel(&controlDrawer.getLookAndFeel());
+  menu.addSectionHeader(folder.empty() ? juce::String("No preset folder") : juce::String(folder));
+  const auto menuIcon = [](milkdawp::ui::Icon icon) {
+    return milkdawp::ui::createIconDrawable(icon, milkdawp::ui::drawerTheme::menuText);
+  };
+  juce::PopupMenu::Item choose("Choose preset folder...");
+  choose.setImage(menuIcon(milkdawp::ui::Icon::Folder));
+  choose.setAction([this] { choosePresetFolder(); });
+  menu.addItem(std::move(choose));
+  juce::PopupMenu::Item rescan("Rescan preset folder");
+  rescan.setImage(menuIcon(milkdawp::ui::Icon::Rescan));
+  rescan.setEnabled(!folder.empty());
+  rescan.setAction([this] { processorRef.visualizer().director().rescan(); });
+  menu.addItem(std::move(rescan));
+
+  if (const auto names = director.presetNames(); !names.empty()) {
+    menu.addSeparator();
+    milkdawp::ui::addPresetTree(menu, milkdawp::ui::buildPresetTree(names), director.status().currentIndex,
+                                [this](int index) { processorRef.visualizer().director().requestPreset(index); });
+  }
+  menu.showMenuAsync(milkdawp::ui::DrawerLookAndFeel::menuOptions(controlDrawer.presetTitleComponent()));
 }
 
 void MilkDAWpAudioProcessorEditor::choosePresetFolder() {
@@ -254,15 +336,18 @@ void MilkDAWpAudioProcessorEditor::timerCallback() {
     diagnosticsLabel.setText(text, juce::dontSendNotification);
   }
 
-  juce::String presetText;
   if (status.playlistSize == 0) {
-    presetText = "No presets: Set > Choose preset folder";
+    controlDrawer.setPresetInfo("No presets loaded", "Click to choose a preset folder", {});
   } else if (status.currentIndex >= 0) {
-    presetText = juce::String(status.currentIndex + 1) + "/" + juce::String(status.playlistSize) + "  " +
-                 juce::String(visualizer.director().presetName(status.currentIndex));
+    const auto fullName = visualizer.director().presetName(status.currentIndex);
+    const auto parts = milkdawp::ui::splitPresetName(fullName);
+    juce::String detail;
+    if (!parts.folder.empty()) {
+      detail << juce::String(parts.folder) << juce::String(juce::CharPointer_UTF8(" \xc2\xb7 "));
+    }
+    detail << juce::String(status.currentIndex + 1) << " / " << juce::String(status.playlistSize);
+    controlDrawer.setPresetInfo(juce::String(parts.leaf), detail, juce::String(fullName));
   }
-  controlDrawer.presetLabel.setText(presetText, juce::dontSendNotification);
-  controlDrawer.presetLabel.setTooltip(presetText);
 
   using milkdawp::ui::BeatBadgeSource;
   const auto source = status.beatSource == engine::BeatSource::Host       ? BeatBadgeSource::Host
@@ -272,6 +357,13 @@ void MilkDAWpAudioProcessorEditor::timerCallback() {
   controlDrawer.bpmLabel.setText(badge.text, juce::dontSendNotification);
   controlDrawer.bpmLabel.setColour(juce::Label::textColourId, badge.colour);
   controlDrawer.bpmLabel.setTooltip(badge.tooltip);
+
+  // Follow the processor's layout: a restored project may float or dock the
+  // controls while this editor is open (and this also applies it on open).
+  if (const bool wantFloating = processorRef.windowLayout().controlsFloating;
+      wantFloating != (controlsWindow_ != nullptr)) {
+    setControlsFloating(wantFloating);
+  }
 
   // Host automation moves the attached widgets but not their dimming.
   if (transitionSettings.isVisible()) {

@@ -5,11 +5,13 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "milkdawp/core/HostTransport.h"
 #include "milkdawp/core/SeqlockSnapshot.h"
+#include "milkdawp/core/StateSchema.h"
 #include "milkdawp/engine/OutputWindow.h"
 #include "milkdawp/engine/Visualizer.h"
 
@@ -36,6 +38,8 @@ namespace milkdawp::plugin {
 ///
 /// The Output window (§4.9, 2.4/3.12) is owned here, not by the editor, so
 /// it keeps running when the editor closes and goes away with the plugin.
+/// Whether it is open, fullscreen, and where it sits are saved in the state,
+/// so reopening a project puts it back on the capture display.
 ///
 /// State save/restore (getStateInformation/setStateInformation) round-trips
 /// `core::StateSchemaV2`: parameters, editor size, preset folder and current
@@ -43,7 +47,8 @@ namespace milkdawp::plugin {
 /// here: `core::migrateFromV1` (Phase 1.14) needs a `V1StateRecord` built
 /// from the actual bytes of a v1 blob, and no real one has been provided yet.
 class MilkDAWpAudioProcessor final : public juce::AudioProcessor,
-                                     private juce::AudioProcessorValueTreeState::Listener {
+                                     private juce::AudioProcessorValueTreeState::Listener,
+                                     private juce::AsyncUpdater {
 public:
   MilkDAWpAudioProcessor();
   ~MilkDAWpAudioProcessor() override;
@@ -103,16 +108,30 @@ public:
   /// fullscreen if already open (§4.9).
   void toggleOutputFullscreen();
 
+  /// The session's window layout (Phase 3.12/3.13), saved with the plugin
+  /// state. Any thread may read it (getStateInformation can run off the
+  /// message thread); the message thread keeps it current as windows open,
+  /// close, and move.
+  [[nodiscard]] core::WindowLayout windowLayout() const;
+  /// Message thread: the editor reports its detached-controls window.
+  void setControlsLayout(bool floating, juce::Rectangle<int> bounds);
+
   juce::AudioProcessorValueTreeState apvts;
 
 private:
+  /// Restored state reopens (or closes) the Output window here, on the
+  /// message thread, whatever thread setStateInformation ran on.
+  void handleAsyncUpdate() override;
+  void updateOutputLayout();
+
   static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
   void parameterChanged(const juce::String& parameterId, float newValue) override;
   [[nodiscard]] engine::EngineControls readControls() const noexcept;
 
   std::unique_ptr<engine::Visualizer> visualizer_;
   std::unique_ptr<engine::OutputWindow> outputWindow_;
-  juce::Rectangle<int> outputWindowBounds_;
+  mutable std::mutex layoutMutex_; // never taken on the audio thread
+  core::WindowLayout layout_;
 
   core::SeqlockSnapshot<core::TransportInfo> transportSnapshot_;
   std::unique_ptr<core::HostTransport> hostTransport_;

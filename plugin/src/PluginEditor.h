@@ -12,6 +12,7 @@
 #include "PluginProcessor.h"
 #include "milkdawp/engine/OutputSurface.h"
 #include "milkdawp/ui/ControlDrawer.h"
+#include "milkdawp/ui/DetachedControlsWindow.h"
 #include "milkdawp/ui/TransitionSettings.h"
 
 namespace milkdawp::plugin {
@@ -27,8 +28,13 @@ namespace milkdawp::plugin {
 /// `controlDrawer.outputButton` opens/closes the processor-owned Output
 /// window (2.4/3.12); F11 opens it fullscreen. `settingsButton` shows a
 /// menu with the preset folder chooser and the transition settings popover
-/// (3.4). The preset label and BPM badge show the engine director's status:
-/// current preset name, and the beat source with its confidence (3.5).
+/// (3.4). The preset title and BPM badge show the engine director's status:
+/// current preset name, and the beat source with its confidence (3.5);
+/// clicking the title opens a preset picker.
+/// "Float controls" moves the drawer into a `DetachedControlsWindow` (3.13)
+/// owned by this editor; closing that window docks it again. Whether the
+/// controls float is the processor's (saved) layout, which this editor
+/// follows, so a reopened editor or a reloaded project floats them again.
 class MilkDAWpAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer {
 public:
   explicit MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcessor&);
@@ -42,9 +48,14 @@ private:
   void timerCallback() override;
   void pulseTrigger(const juce::String& parameterId);
   void showSettingsMenu();
+  /// Clicking the drawer's preset title: folder actions plus every preset,
+  /// grouped by subfolder; picking one jumps straight to it.
+  void showPresetPicker();
   void choosePresetFolder();
   void setTransitionSettingsVisible(bool visible);
   void layoutTransitionSettings();
+  /// Phase 3.13: moves `controlDrawer` into its own window, or back.
+  void setControlsFloating(bool floating);
 
   using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
   using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
@@ -66,6 +77,9 @@ private:
   std::vector<std::unique_ptr<ButtonAttachment>> transitionButtonAttachments_;
   std::unique_ptr<ComboBoxAttachment> transitionSettingsModeAttachment_;
   std::unique_ptr<juce::FileChooser> folderChooser_;
+  // Declared after controlDrawer so it is destroyed first: it only borrows
+  // the drawer, and hands it back in its destructor.
+  std::unique_ptr<milkdawp::ui::DetachedControlsWindow> controlsWindow_;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MilkDAWpAudioProcessorEditor)
 };

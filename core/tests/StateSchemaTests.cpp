@@ -128,3 +128,44 @@ TEST_CASE("StateSchemaV2 round-trips a full migrated v1 session", "[core][StateS
     CHECK(roundTripped.paramValues.at(id) == value);
   }
 }
+
+TEST_CASE("StateSchemaV2 round-trips the window layout", "[core][StateSchema]") {
+  StateSchemaV2 original;
+  original.windows.outputWindowOpen = true;
+  original.windows.outputWindowFullscreen = true;
+  original.windows.outputWindowBounds = {-1920, 40, 1280, 720}; // a display left of the primary
+  original.windows.controlsFloating = true;
+  original.windows.controlsWindowBounds = {100, 900, 640, 76};
+
+  const auto roundTripped = deserializeStateSchemaV2(serializeStateSchemaV2(original));
+  CHECK(roundTripped.windows == original.windows);
+}
+
+TEST_CASE("StateSchemaV2 without window keys loads with every window closed", "[core][StateSchema]") {
+  const auto state = deserializeStateSchemaV2("schemaVersion=2\neditorWidth=800\n");
+  CHECK(state.editorWidth == 800);
+  CHECK(state.windows == WindowLayout{});
+  CHECK(state.windows.outputWindowBounds.isEmpty());
+}
+
+TEST_CASE("StateSchemaV2 skips malformed lines instead of throwing", "[core][StateSchema]") {
+  const std::string text = "schemaVersion=two\n"
+                           "editorWidth=12abc\n"
+                           "editorHeight=600\r\n"
+                           "outputWindowBounds=1,2,3\n"
+                           "controlsWindowBounds=10,20,300,40\n"
+                           "param.beatSensitivity=nan\n"
+                           "param.shuffle=1\n"
+                           "param.presetIndex=\n"
+                           "garbage without equals\n";
+  StateSchemaV2 state;
+  REQUIRE_NOTHROW(state = deserializeStateSchemaV2(text));
+  CHECK(state.schemaVersion == StateSchemaV2::currentSchemaVersion);
+  CHECK(state.editorWidth == 0);
+  CHECK(state.editorHeight == 600); // CRLF tolerated
+  CHECK(state.windows.outputWindowBounds.isEmpty());
+  CHECK(state.windows.controlsWindowBounds == WindowBounds{10, 20, 300, 40});
+  CHECK(state.paramValues.count("beatSensitivity") == 0);
+  CHECK(state.paramValues.count("presetIndex") == 0);
+  CHECK(state.paramValues.at("shuffle") == 1.0f);
+}

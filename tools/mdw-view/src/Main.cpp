@@ -25,6 +25,7 @@
 #include "milkdawp/engine/OutputWindow.h"
 #include "milkdawp/engine/Visualizer.h"
 #include "milkdawp/ui/ControlDrawer.h"
+#include "milkdawp/ui/PresetMenu.h"
 #include "milkdawp/ui/Shortcuts.h"
 
 namespace {
@@ -92,6 +93,7 @@ public:
     };
     drawer_.outputButton.onClick = [this] { toggleOutputWindow(false); };
     drawer_.settingsButton.onClick = [this] { showMenu(); };
+    drawer_.onPresetTitleClicked = [this] { showPresetPicker(); };
 
     publish();
     setWantsKeyboardFocus(true);
@@ -233,21 +235,39 @@ private:
       });
     }
     menu.addSubMenu("Bars per transition", bars);
-    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&drawer_.settingsButton));
+    menu.setLookAndFeel(&drawer_.getLookAndFeel());
+    menu.showMenuAsync(ui::DrawerLookAndFeel::menuOptions(drawer_.settingsMenuAnchor()));
+  }
+
+  void showPresetPicker() {
+    auto& director = visualizer_.director();
+    juce::PopupMenu menu;
+    menu.setLookAndFeel(&drawer_.getLookAndFeel());
+    const auto names = director.presetNames();
+    if (names.empty()) {
+      menu.addItem("No presets: use Settings > Choose preset folder...", false, false, nullptr);
+    }
+    ui::addPresetTree(menu, ui::buildPresetTree(names), director.status().currentIndex,
+                      [this](int index) { visualizer_.director().requestPreset(index); });
+    menu.showMenuAsync(ui::DrawerLookAndFeel::menuOptions(drawer_.presetTitleComponent()));
   }
 
   void timerCallback() override {
     const auto status = visualizer_.director().status();
     const auto stats = visualizer_.renderEngine().stats();
 
-    juce::String presetText;
     if (status.currentIndex >= 0) {
-      presetText = juce::String(status.currentIndex + 1) + "/" + juce::String(status.playlistSize) + "  " +
-                   juce::String(visualizer_.director().presetName(status.currentIndex));
+      const auto fullName = visualizer_.director().presetName(status.currentIndex);
+      const auto parts = ui::splitPresetName(fullName);
+      juce::String detail;
+      if (!parts.folder.empty()) {
+        detail << juce::String(parts.folder) << juce::String(juce::CharPointer_UTF8(" \xc2\xb7 "));
+      }
+      detail << juce::String(status.currentIndex + 1) << " / " << juce::String(status.playlistSize);
+      drawer_.setPresetInfo(juce::String(parts.leaf), detail, juce::String(fullName));
     } else {
-      presetText = "No presets";
+      drawer_.setPresetInfo("No presets", "Settings > Choose preset folder...", {});
     }
-    drawer_.presetLabel.setText(presetText, juce::dontSendNotification);
 
     juce::String bpm(juce::CharPointer_UTF8("\xE2\x99\xA9"));
     bpm << (status.bpm > 0.0f ? juce::String(status.bpm, 0) : juce::String("--"));

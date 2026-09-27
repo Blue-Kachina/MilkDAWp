@@ -28,7 +28,9 @@ OutputWindow::~OutputWindow() {
 }
 
 void OutputWindow::show(juce::Rectangle<int> windowedBounds, bool fullscreen) {
-  if (windowedBounds.isEmpty()) {
+  const auto* target = juce::Desktop::getInstance().getDisplays().getDisplayForRect(windowedBounds);
+  const bool onADisplay = target != nullptr && target->userBounds.toNearestInt().intersects(windowedBounds);
+  if (windowedBounds.isEmpty() || !onADisplay) {
     const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay();
     const auto area = display != nullptr ? display->userBounds.toNearestInt() : juce::Rectangle<int>(0, 0, 1920, 1080);
     windowedBounds = juce::Rectangle<int>(kDefaultWidth, kDefaultHeight).withCentre(area.getCentre());
@@ -53,6 +55,13 @@ void OutputWindow::setFullscreen(bool fullscreen) {
   addToDesktopForMode();
   toFront(true);
   grabKeyboardFocus();
+  notifyLayoutChanged();
+}
+
+void OutputWindow::notifyLayoutChanged() {
+  if (onLayoutChanged) {
+    onLayoutChanged();
+  }
 }
 
 void OutputWindow::addToDesktopForMode() {
@@ -77,11 +86,15 @@ void OutputWindow::addToDesktopForMode() {
   }
 }
 
-void OutputWindow::resized() { surface_.setBounds(getLocalBounds()); }
+void OutputWindow::resized() {
+  surface_.setBounds(getLocalBounds());
+  moved(); // a resize of the windowed window changes the bounds to remember too
+}
 
 void OutputWindow::moved() {
   if (!fullscreen_ && isOnDesktop()) {
     windowedBounds_ = getScreenBounds();
+    notifyLayoutChanged();
   }
 }
 

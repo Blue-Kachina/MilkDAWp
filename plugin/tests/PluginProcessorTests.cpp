@@ -132,3 +132,30 @@ TEST_CASE("MilkDAWpAudioProcessor state round-trips a changed parameter and the 
   CHECK(destination.editorWidth() == 777);
   CHECK(destination.editorHeight() == 333);
 }
+
+TEST_CASE("MilkDAWpAudioProcessor state round-trips the detached-controls layout",
+          "[plugin][MilkDAWpAudioProcessor]") {
+  // No message loop runs here, so the restored Output window is never
+  // actually opened; this covers the saved layout itself.
+  MilkDAWpAudioProcessor source;
+  source.setControlsLayout(true, {50, 60, 700, 44});
+
+  juce::MemoryBlock block;
+  source.getStateInformation(block);
+
+  MilkDAWpAudioProcessor destination;
+  destination.setStateInformation(block.getData(), static_cast<int>(block.getSize()));
+
+  const auto layout = destination.windowLayout();
+  CHECK(layout.controlsFloating);
+  CHECK(layout.controlsWindowBounds == milkdawp::core::WindowBounds{50, 60, 700, 44});
+  CHECK_FALSE(layout.outputWindowOpen);
+}
+
+TEST_CASE("MilkDAWpAudioProcessor survives a garbage state blob", "[plugin][MilkDAWpAudioProcessor]") {
+  MilkDAWpAudioProcessor processor;
+  const std::string garbage = "editorWidth=\xff\xfe\nparam.shuffle=yes\noutputWindowBounds=a,b,c,d\n\0\0junk";
+  REQUIRE_NOTHROW(processor.setStateInformation(garbage.data(), static_cast<int>(garbage.size())));
+  CHECK(processor.editorWidth() == 480);
+  CHECK_FALSE(processor.windowLayout().outputWindowOpen);
+}

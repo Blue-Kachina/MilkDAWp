@@ -30,7 +30,10 @@ ShortcutAction mapKeyPress(const juce::KeyPress& key, bool isAppShell) noexcept 
   }
 
   if (isUnmodified(key)) {
-    switch (key.getKeyCode()) {
+    // Upper-cased: JUCE on Windows derives a letter's code from the scan
+    // code, and key events injected without one (remote desktop, on-screen
+    // keyboards, automation) arrive as the lower-case character instead.
+    switch (juce::CharacterFunctions::toUpperCase(static_cast<juce::juce_wchar>(key.getKeyCode()))) {
     case 'L':
       return ShortcutAction::ToggleLock;
     case 'S':

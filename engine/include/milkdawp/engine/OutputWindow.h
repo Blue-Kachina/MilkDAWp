@@ -33,8 +33,10 @@ public:
   explicit OutputWindow(RenderEngine& engine);
   ~OutputWindow() override;
 
-  /// Shows the window at `windowedBounds` (or a default size centred on the
-  /// main display if empty), optionally going straight to fullscreen.
+  /// Shows the window at `windowedBounds`, optionally going straight to
+  /// fullscreen. Empty bounds, or bounds on no connected display (a saved
+  /// session opened after unplugging a monitor), fall back to a default
+  /// size centred on the main display.
   void show(juce::Rectangle<int> windowedBounds, bool fullscreen);
 
   void setFullscreen(bool fullscreen);
@@ -44,6 +46,9 @@ public:
   [[nodiscard]] juce::Rectangle<int> windowedBounds() const noexcept { return windowedBounds_; }
 
   std::function<void()> onCloseRequested;
+  /// Called on the message thread after the window moves, resizes, or
+  /// enters or leaves fullscreen, so the owner can remember the layout.
+  std::function<void()> onLayoutChanged;
 
   void paint(juce::Graphics& g) override { g.fillAll(juce::Colours::black); }
   void resized() override;
@@ -54,6 +59,7 @@ public:
 
 private:
   void addToDesktopForMode();
+  void notifyLayoutChanged();
 
   OutputSurface surface_;
   bool fullscreen_ = false;

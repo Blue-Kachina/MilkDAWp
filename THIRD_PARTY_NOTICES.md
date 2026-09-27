@@ -10,6 +10,7 @@ file; this document is the human-curated index of what's used and why.
 |---|---|---|---|
 | [JUCE 9](https://github.com/juce-framework/JUCE) | AGPL-3.0 (open-source path) | Statically compiled in via `FetchContent` (`cmake/FetchJuce.cmake`) | Pinned tag + commit hash |
 | [projectM 4](https://github.com/projectM-visualizer/projectm) | LGPL-2.1 | **Dynamically** linked (required by LGPL; see `triplets/*.cmake` and `cmake/ProjectMDependency.cmake`) | vcpkg overlay port `vcpkg-overlays/projectm`, pre-release 4.2.0 built from upstream commit `1e7ef7803b69024d1e0656705670adda2ffac817` (ADR-0008). The LGPL source offer refers to that exact commit. |
+| [Lucide](https://lucide.dev) icons | ISC | Icon path data compiled in (`ui/src/Icons.cpp`, which carries the licence notice) | Copied from lucide.dev, redrawn as absolute SVG path strings |
 | [Catch2 v3](https://github.com/catchorg/Catch2) | BSL-1.0 | Test-only, not shipped in any release binary | `FetchContent` (`cmake/FetchCatch2.cmake`) |
 | zlib | zlib | Dynamically linked via vcpkg when projectM is enabled (§4.11); otherwise JUCE's bundled copy | vcpkg / JUCE |
 | libpng | libpng-2.0 | Dynamically linked via vcpkg when projectM is enabled (§4.11); otherwise JUCE's bundled copy | vcpkg / JUCE |

@@ -112,6 +112,11 @@ std::string Director::presetName(std::int32_t index) const {
   return presetNames_[static_cast<std::size_t>(index)];
 }
 
+std::vector<std::string> Director::presetNames() const {
+  const std::lock_guard lock(mutex_);
+  return presetNames_;
+}
+
 void Director::run() {
   juce::Thread::setCurrentThreadName("MilkDAWp director");
 
@@ -262,6 +267,14 @@ void Director::run() {
     if (const auto previous = previousRequests_.load(); previous != seenPrevious) {
       seenPrevious = previous;
       manualStep(false, controls);
+    }
+    if (const auto picked = presetRequest_.exchange(-1);
+        picked >= 0 && playlist && static_cast<std::size_t>(picked) < playlist->size()) {
+      const auto index = static_cast<std::size_t>(picked);
+      playlist->setCurrentIndex(index);
+      if (!issue(index, controls.cutStyle, controls.blendSeconds, static_cast<std::int64_t>(ring_.samplePosition()))) {
+        manualStep(true, controls); // unreadable or blacklisted: the next one that loads
+      }
     }
 
     const double rate = sampleRate_.load();

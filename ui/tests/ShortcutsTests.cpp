@@ -49,3 +49,13 @@ TEST_CASE("mapKeyPress returns None for an unrelated key", "[ui][Shortcuts]") {
   CHECK(mapKeyPress(plainKey('Q'), false) == ShortcutAction::None);
   CHECK(mapKeyPress(plainKey('Q'), true) == ShortcutAction::None);
 }
+
+TEST_CASE("mapKeyPress accepts lower-case letter codes", "[ui][Shortcuts]") {
+  // Windows keys injected without a scan code reach JUCE as the lower-case
+  // character rather than the upper-case key code.
+  CHECK(mapKeyPress(plainKey('l'), false) == ShortcutAction::ToggleLock);
+  CHECK(mapKeyPress(plainKey('s'), false) == ShortcutAction::ToggleShuffle);
+  CHECK(mapKeyPress(plainKey('h'), false) == ShortcutAction::ToggleDrawer);
+  CHECK(mapKeyPress(plainKey('p'), false) == ShortcutAction::TogglePin);
+  CHECK(mapKeyPress(modifiedKey('l', juce::ModifierKeys::ctrlModifier), false) == ShortcutAction::None);
+}

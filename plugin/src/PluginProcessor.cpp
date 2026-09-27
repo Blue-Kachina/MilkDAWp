@@ -48,6 +48,14 @@ float qualityScaleFor(int choice) noexcept {
   }
 }
 
+core::WindowBounds toWindowBounds(juce::Rectangle<int> r) noexcept {
+  return {r.getX(), r.getY(), r.getWidth(), r.getHeight()};
+}
+
+juce::Rectangle<int> toRectangle(const core::WindowBounds& b) noexcept {
+  return b.isEmpty() ? juce::Rectangle<int>() : juce::Rectangle<int>(b.x, b.y, b.width, b.height);
+}
+
 } // namespace
 
 juce::AudioProcessorValueTreeState::ParameterLayout MilkDAWpAudioProcessor::createParameterLayout() {
@@ -122,6 +130,7 @@ MilkDAWpAudioProcessor::MilkDAWpAudioProcessor()
 }
 
 MilkDAWpAudioProcessor::~MilkDAWpAudioProcessor() {
+  cancelPendingUpdate();
   apvts.removeParameterListener("triggerNext", this);
   apvts.removeParameterListener("triggerPrev", this);
   outputWindow_.reset();
@@ -213,13 +222,54 @@ void MilkDAWpAudioProcessor::openOutputWindow(bool fullscreen) {
           }
         });
   };
-  outputWindow_->show(outputWindowBounds_, fullscreen);
+  outputWindow_->onLayoutChanged = [this] { updateOutputLayout(); };
+  outputWindow_->show(toRectangle(windowLayout().outputWindowBounds), fullscreen);
+  updateOutputLayout();
 }
 
 void MilkDAWpAudioProcessor::closeOutputWindow() {
   if (outputWindow_ != nullptr) {
-    outputWindowBounds_ = outputWindow_->windowedBounds();
+    updateOutputLayout();
     outputWindow_.reset();
+    const std::lock_guard lock(layoutMutex_);
+    layout_.outputWindowOpen = false;
+  }
+}
+
+void MilkDAWpAudioProcessor::updateOutputLayout() {
+  if (outputWindow_ == nullptr) {
+    return;
+  }
+  const std::lock_guard lock(layoutMutex_);
+  layout_.outputWindowOpen = true;
+  layout_.outputWindowFullscreen = outputWindow_->isFullscreen();
+  layout_.outputWindowBounds = toWindowBounds(outputWindow_->windowedBounds());
+}
+
+core::WindowLayout MilkDAWpAudioProcessor::windowLayout() const {
+  const std::lock_guard lock(layoutMutex_);
+  return layout_;
+}
+
+void MilkDAWpAudioProcessor::setControlsLayout(bool floating, juce::Rectangle<int> bounds) {
+  const std::lock_guard lock(layoutMutex_);
+  layout_.controlsFloating = floating;
+  if (!bounds.isEmpty()) {
+    layout_.controlsWindowBounds = toWindowBounds(bounds);
+  }
+}
+
+void MilkDAWpAudioProcessor::handleAsyncUpdate() {
+  // The layout was just restored; make the Output window match it. The
+  // editor follows `controlsFloating` itself (its timer), and an editor
+  // opened later reads it when constructed.
+  const auto layout = windowLayout();
+  if (!layout.outputWindowOpen) {
+    closeOutputWindow();
+  } else if (outputWindow_ == nullptr) {
+    openOutputWindow(layout.outputWindowFullscreen);
+  } else if (outputWindow_->isFullscreen() != layout.outputWindowFullscreen) {
+    outputWindow_->setFullscreen(layout.outputWindowFullscreen);
   }
 }
 
@@ -237,6 +287,7 @@ void MilkDAWpAudioProcessor::getStateInformation(juce::MemoryBlock& destData) {
   state.editorHeight = editorHeight_;
   state.playlistFolderPath = visualizer_->director().presetFolder();
   state.presetAbsolutePath = visualizer_->director().currentPresetPath();
+  state.windows = windowLayout();
   for (const auto& spec : core::allParameters()) {
     if (auto* raw = apvts.getRawParameterValue(juce::String(spec.id))) {
       state.paramValues[spec.id] = raw->load(std::memory_order_relaxed);
@@ -266,6 +317,12 @@ void MilkDAWpAudioProcessor::setStateInformation(const void* data, int sizeInByt
   if (state.editorWidth > 0 && state.editorHeight > 0) {
     setEditorSize(state.editorWidth, state.editorHeight);
   }
+
+  {
+    const std::lock_guard lock(layoutMutex_);
+    layout_ = state.windows;
+  }
+  triggerAsyncUpdate(); // opens/closes the Output window on the message thread
 
   // Not publishing controls here: some hosts restore state while audio runs,
   // and processBlock is the controls snapshot's one writer. The next block

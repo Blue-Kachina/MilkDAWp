@@ -4,6 +4,9 @@ add_executable(milkdawp_ui_tests
   DrawerStateTests.cpp
   ShortcutsTests.cpp
   TransitionSettingsTests.cpp
+  IconsTests.cpp
+  ControlDrawerLayoutTests.cpp
+  PresetMenuTests.cpp
 )
 
 target_link_libraries(milkdawp_ui_tests PRIVATE
