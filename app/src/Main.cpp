@@ -3,37 +3,119 @@
 
 #include <juce_gui_extra/juce_gui_extra.h>
 
+#include "AppPreferences.h"
+#include "AudioInput.h"
+#include "MainComponent.h"
+#include "MainWindow.h"
+#include "milkdawp/engine/Visualizer.h"
+
 namespace milkdawp::app {
 
-/// Skeleton app shell (Phase 0.2). Phase 4 replaces this with the video-first
-/// main window, device input, MIDI learn, and preferences from §4.9/§7 Phase 4.
+/// The standalone app (Phase 4, D8): one engine (`engine::Visualizer`), fed
+/// by the chosen audio input, shown in the video-first main window.
+///
+/// Single instance: a second launch brings the running window to the front
+/// instead of opening a second engine on the same audio device.
+///
+/// Preferences (4.3) live in a `PropertiesFile` in the user's application
+/// data folder ("MilkDAWp/app.settings", or "MilkDAWp2 Dev/..." for
+/// MILKDAWP_DEV_ALT_IDENTITY builds, so a dev build never touches a real
+/// install's settings). It saves itself a moment after each change, and
+/// once more on quit.
 class MilkDAWpApplication final : public juce::JUCEApplication {
 public:
-  const juce::String getApplicationName() override { return "MilkDAWp"; }
-  const juce::String getApplicationVersion() override { return "2.0.0"; }
+  const juce::String getApplicationName() override { return JUCE_APPLICATION_NAME_STRING; }
+  const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
   bool moreThanOneInstanceAllowed() override { return false; }
 
   void initialise(const juce::String&) override {
-    mainWindow = std::make_unique<MainWindow>(getApplicationName());
-  }
+    juce::PropertiesFile::Options options;
+    options.applicationName = "app";
+    options.folderName = MILKDAWP_APP_DATA_FOLDER;
+    options.filenameSuffix = "settings";
+    options.osxLibrarySubFolder = "Application Support";
+    options.millisecondsBeforeSaving = 1000;
+    properties_.setStorageParameters(options);
+    state_ = loadAppState(*properties_.getUserSettings());
+    setLogging(state_.loggingEnabled);
+    juce::Logger::writeToLog(getApplicationName() + " " + getApplicationVersion() + " starting");
 
-  void shutdown() override { mainWindow = nullptr; }
-
-private:
-  class MainWindow final : public juce::DocumentWindow {
-  public:
-    explicit MainWindow(const juce::String& name)
-        : DocumentWindow(name, juce::Colours::black, DocumentWindow::allButtons) {
-      setUsingNativeTitleBar(true);
-      setContentOwned(new juce::Label({}, "MilkDAWp 2 (Phase 0 skeleton)"), true);
-      centreWithSize(480, 270);
-      setVisible(true);
+    visualizer_ = std::make_unique<engine::Visualizer>(engine::Visualizer::Config{});
+    if (state_.presetFolder.isNotEmpty() && juce::File(state_.presetFolder).isDirectory()) {
+      visualizer_->director().setPresetFolder(state_.presetFolder.toStdString(),
+                                              state_.currentPresetPath.toStdString());
     }
 
-    void closeButtonPressed() override { JUCEApplication::getInstance()->systemRequestedQuit(); }
-  };
+    input_ = std::make_unique<AudioInput>(*visualizer_);
+    if (const auto error = input_->open(state_.audioDeviceState); error.isNotEmpty()) {
+      juce::Logger::writeToLog("Audio input: " + error);
+    }
+    juce::Logger::writeToLog("Audio input: " + input_->describe());
 
-  std::unique_ptr<MainWindow> mainWindow;
+    auto content = std::make_unique<MainComponent>(*visualizer_, *input_, state_);
+    auto* component = content.get();
+    component->onStateChanged = [this] { saveState(); };
+    component->onLoggingChanged = [this](bool enabled) { setLogging(enabled); };
+    window_ = std::make_unique<MainWindow>(getApplicationName(), std::move(content), state_);
+    window_->onStateChanged = [this] { saveState(); };
+    component->restoreSecondaryWindows();
+    component->grabKeyboardFocus();
+  }
+
+  void shutdown() override {
+    // The device first (no more audio into the engine), then the windows
+    // (their surfaces unregister from the engine), then the engine.
+    if (input_ != nullptr) {
+      state_.audioDeviceState = input_->stateXml();
+      input_->close();
+    }
+    if (visualizer_ != nullptr) {
+      if (const auto current = visualizer_->director().currentPresetPath(); !current.empty()) {
+        state_.currentPresetPath = current;
+      }
+    }
+    saveState();
+    properties_.saveIfNeeded();
+    window_.reset();
+    input_.reset();
+    visualizer_.reset();
+    juce::Logger::writeToLog("Stopped");
+    setLogging(false);
+  }
+
+  void systemRequestedQuit() override { quit(); }
+
+  void anotherInstanceStarted(const juce::String&) override {
+    if (window_ != nullptr) {
+      window_->setMinimised(false);
+      window_->toFront(true);
+    }
+  }
+
+private:
+  void saveState() {
+    if (auto* settings = properties_.getUserSettings()) {
+      saveAppState(state_, *settings); // PropertiesFile writes it to disk shortly after
+    }
+  }
+
+  void setLogging(bool enabled) {
+    if (enabled && logger_ == nullptr) {
+      logger_.reset(juce::FileLogger::createDefaultAppLogger(MILKDAWP_APP_DATA_FOLDER, "MilkDAWp.log",
+                                                             getApplicationName() + " log"));
+      juce::Logger::setCurrentLogger(logger_.get());
+    } else if (!enabled && logger_ != nullptr) {
+      juce::Logger::setCurrentLogger(nullptr);
+      logger_.reset();
+    }
+  }
+
+  juce::ApplicationProperties properties_;
+  AppState state_;
+  std::unique_ptr<juce::FileLogger> logger_;
+  std::unique_ptr<engine::Visualizer> visualizer_;
+  std::unique_ptr<AudioInput> input_;
+  std::unique_ptr<MainWindow> window_;
 };
 
 } // namespace milkdawp::app

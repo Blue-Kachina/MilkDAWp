@@ -120,6 +120,7 @@
         "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "MILKDAWP_BUILD_PLUGIN": "OFF",
+        "MILKDAWP_BUILD_APP": "OFF",
         "MILKDAWP_WITH_PROJECTM": "OFF",
         "MILKDAWP_SANITIZE_ADDRESS_UB": "ON",
         "BUILD_TESTING": "ON"
@@ -136,6 +137,7 @@
         "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "MILKDAWP_BUILD_PLUGIN": "OFF",
+        "MILKDAWP_BUILD_APP": "OFF",
         "MILKDAWP_WITH_PROJECTM": "OFF",
         "MILKDAWP_SANITIZE_THREAD": "ON",
         "BUILD_TESTING": "ON"
@@ -152,6 +154,7 @@
         "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "MILKDAWP_BUILD_PLUGIN": "OFF",
+        "MILKDAWP_BUILD_APP": "OFF",
         "MILKDAWP_WITH_PROJECTM": "OFF",
         "MILKDAWP_SANITIZE_REALTIME": "ON",
         "BUILD_TESTING": "ON"

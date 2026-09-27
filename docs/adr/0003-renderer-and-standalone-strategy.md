@@ -32,3 +32,5 @@ reusing what JUCE already provides for early testing.
   mitigation, not this ADR.
 - `milkdawp_app`'s CMake target exists from Phase 0.2 but is off by default
   (`MILKDAWP_BUILD_APP=OFF`) until Phase 4 makes it real.
+  Update (2026-09-27): Phase 4.1 made it real, and it is now on by default
+  (`MILKDAWP_BUILD_APP=ON`), so CI builds and tests the app on every platform.

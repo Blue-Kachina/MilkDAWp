@@ -1785,17 +1785,61 @@ rework:
   shell.
 - `SystemAudioCapture` is an interface with one implementation per platform (§4.7).
 
-- [ ] 4.1 (M) `milkdawp_app` shell with `juce_add_gui_app`: video-first main window with the
+- [x] 4.1 (M) `milkdawp_app` shell with `juce_add_gui_app`: video-first main window with the
       shared `ControlDrawer` (auto-hide default in fullscreen, pinned otherwise), menu bar with
       the shared `Shortcuts` table (§4.9) plus app-only `Space`, single-instance guard. Main window can fullscreen directly; ⛶ opens the `OutputWindow`
       for a second display; "float controls" for the projector-plus-laptop setup. Per the
       boundary rules above, the menu bar and single-instance guard are desktop-shell code.
-- [ ] 4.2 (M) Audio input: `AudioDeviceManager` device selector, input channel pair choice,
+      Note (2026-09-27):
+      - Structure: `app/` is now `milkdawp_app_lib` (everything testable) plus `Main.cpp`.
+        `MainComponent` is the shell-neutral content: `OutputSurface` with the drawer,
+        transition popover, diagnostics and input hint as children. Every action is a
+        public method, shared by the drawer, the shortcuts, the settings popup and the menu
+        bar. `MainWindow` is the desktop part: menu bar (File / Playback / View, with shortcut
+        hints; macOS uses the system menu bar), kiosk-mode fullscreen with the menu bar
+        hidden, and geometry.
+      - The plugin's parameter→engine mapping moved to `engine::toEngineControls` over
+        `engine::ParameterValues`, so both shells share one mapping (`ControlMappingTests`
+        pin its defaults to `ParameterModel`).
+      - The app binds the shared widgets through `ParameterBinding`, its stand-in for APVTS
+        attachments, with ranges from `ParameterModel`.
+      - Built by default now (`MILKDAWP_BUILD_APP=ON`, as ADR-0003 planned). Identity
+        follows D1; dev-identity builds are "MilkDAWp2 Dev" with their own settings folder.
+      - F11 fullscreens the Output window if it is open, else the main window; Esc leaves
+        fullscreen. The drawer unpins in fullscreen and returns to the user's pin choice
+        after.
+      - Verified on Windows: menus, F11/Esc round trip at 1920×1080 60 fps, and a second
+        launch bringing the running window forward.
+- [x] 4.2 (M) Audio input: `AudioDeviceManager` device selector, input channel pair choice,
       level meter, "no signal" hint. Startup restores the last device; graceful fallback when
       it is missing.
-- [ ] 4.3 (S) Preferences (`PropertiesFile`): device, preset library root, output display,
+      Note (2026-09-27):
+      - `AudioInput` opens up to one stereo input pair and no outputs, so nothing can feed
+        back. Its callback hands blocks to `Visualizer::processAudio`, as a plugin would.
+        A saved device that is gone falls back to the default input (JUCE's
+        `selectDefaultDeviceOnFailure`).
+      - File > Audio input... is JUCE's `AudioDeviceSelectorComponent` (inputs as stereo
+        pairs) with a live meter and the current input described.
+      - `SignalMonitor` (unit-tested) drives the hint over the video: "No audio input" at
+        once, or "No signal from <device>" after 3 s under -60 dBFS; either one opens the
+        dialog. Each reader of the input peak has its own slot, so the meter and the hint
+        don't steal each other's peaks.
+      - Verified with a USB microphone on Windows.
+- [x] 4.3 (S) Preferences (`PropertiesFile`): device, preset library root, output display,
       quality, logging toggle, last window geometry. (`PropertiesFile` works on Android too;
       output display and window geometry are desktop-only keys.)
+      Note (2026-09-27):
+      - `AppState` ↔ `PropertySet` in `AppPreferences` (unit-tested round trip; saved
+        parameters are clamped to the model's ranges on load).
+      - Stored in `<app data>/MilkDAWp/app.settings`, saved a second after each change and
+        on quit.
+      - Covers every engine parameter (quality included), preset folder and current preset,
+        device XML, main window bounds and fullscreen, Output window open/bounds/fullscreen
+        (the bounds pick the display), floating controls and their bounds, drawer pin,
+        diagnostics, and logging (File > Write a log file, via `juce::FileLogger`; File >
+        Show log file).
+      - Verified by relaunching: preset, mode, folder, Output window and fullscreen all come
+        back as left.
 - [ ] 4.4 (M) MIDI learn: map CC/notes to any parameter; persisted; UI affordance on each
       control.
 - [ ] 4.5 (M) Preset library browser: tree of the library root, search, favourites, recently

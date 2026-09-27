@@ -11,6 +11,7 @@
 #include "PluginEditor.h"
 #include "milkdawp/core/ParameterModel.h"
 #include "milkdawp/core/StateSchema.h"
+#include "milkdawp/engine/ControlMapping.h"
 
 namespace milkdawp::plugin {
 
@@ -35,19 +36,6 @@ core::TransportInfo extractTransportInfo(juce::AudioPlayHead* playHead) {
 
 float load(const std::atomic<float>* value, float fallback) noexcept {
   return value != nullptr ? value->load(std::memory_order_relaxed) : fallback;
-}
-
-// qualityOverride choices: Auto / Low / Medium / High. Auto is full
-// resolution until adaptive quality (5.3) drives the scale itself.
-float qualityScaleFor(int choice) noexcept {
-  switch (choice) {
-  case 1:
-    return 0.5f;
-  case 2:
-    return 0.75f;
-  default:
-    return 1.0f;
-  }
 }
 
 core::WindowBounds toWindowBounds(juce::Rectangle<int> r) noexcept {
@@ -167,27 +155,27 @@ void MilkDAWpAudioProcessor::parameterChanged(const juce::String& parameterId, f
 }
 
 engine::EngineControls MilkDAWpAudioProcessor::readControls() const noexcept {
-  engine::EngineControls controls;
-  controls.transitionMode = static_cast<core::TransitionMode>(
-      std::clamp(static_cast<int>(load(raw_.transitionMode, 2.0f)), 0, static_cast<int>(core::TransitionMode::Energy)));
-  controls.transitionBars = static_cast<std::uint32_t>(std::max(1.0f, load(raw_.transitionBars, 4.0f)));
-  controls.timedDurationSeconds = load(raw_.transitionDurationSeconds, 5.0f);
-  controls.jitterEnabled = load(raw_.transitionJitterEnabled, 0.0f) > 0.5f;
-  controls.jitterMinSeconds = load(raw_.transitionDurationMin, 3.0f);
-  controls.jitterMaxSeconds = load(raw_.transitionDurationMax, 15.0f);
-  controls.cutStyle = load(raw_.hardCutEnabled, 0.0f) > 0.5f ? core::CutStyle::Hard : core::CutStyle::Soft;
-  controls.blendSeconds = load(raw_.softCutDuration, 3.0f);
-  controls.energyThreshold = load(raw_.energyThreshold, 2.0f);
-  controls.locked = load(raw_.lockCurrentPreset, 0.0f) > 0.5f;
-  // v1's Shuffle toggle wins over the v2 policy choice when on.
-  controls.policy = load(raw_.shuffle, 0.0f) > 0.5f
-                        ? core::PlaylistPolicy::ShuffleNoRepeat
-                        : static_cast<core::PlaylistPolicy>(
-                              std::clamp(static_cast<int>(load(raw_.presetSelectionPolicy, 0.0f)), 0, 2));
-  controls.presetIndex = static_cast<std::int32_t>(std::lround(load(raw_.presetIndex, 0.0f)));
-  controls.beatSensitivity = load(raw_.beatSensitivity, 1.0f);
-  controls.qualityScale = qualityScaleFor(static_cast<int>(load(raw_.qualityOverride, 0.0f)));
-  return controls;
+  // The mapping itself is shared with the app (engine::toEngineControls);
+  // this only copies the APVTS atomics into it, keeping the model's defaults
+  // for any parameter that is missing.
+  engine::ParameterValues values;
+  const auto copy = [](float& field, const std::atomic<float>* value) { field = load(value, field); };
+  copy(values.beatSensitivity, raw_.beatSensitivity);
+  copy(values.transitionDurationSeconds, raw_.transitionDurationSeconds);
+  copy(values.shuffle, raw_.shuffle);
+  copy(values.lockCurrentPreset, raw_.lockCurrentPreset);
+  copy(values.presetIndex, raw_.presetIndex);
+  copy(values.transitionJitterEnabled, raw_.transitionJitterEnabled);
+  copy(values.transitionDurationMin, raw_.transitionDurationMin);
+  copy(values.transitionDurationMax, raw_.transitionDurationMax);
+  copy(values.hardCutEnabled, raw_.hardCutEnabled);
+  copy(values.softCutDuration, raw_.softCutDuration);
+  copy(values.qualityOverride, raw_.qualityOverride);
+  copy(values.transitionMode, raw_.transitionMode);
+  copy(values.transitionBars, raw_.transitionBars);
+  copy(values.presetSelectionPolicy, raw_.presetSelectionPolicy);
+  copy(values.energyThreshold, raw_.energyThreshold);
+  return engine::toEngineControls(values);
 }
 
 void MilkDAWpAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {

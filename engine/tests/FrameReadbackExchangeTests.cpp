@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <thread>
 #include <vector>
@@ -117,7 +118,11 @@ TEST_CASE("FrameReadbackExchange readers never see a torn frame under contention
     });
   }
 
-  for (std::uint64_t n = 1; n <= 2000; ++n) {
+  // At least 2000 frames, and on until the readers have really contended
+  // (under a sanitizer the writer can finish before a reader is scheduled).
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  for (std::uint64_t n = 1; n <= 2000 || (framesRead.load() < 200 && std::chrono::steady_clock::now() < deadline);
+       ++n) {
     const int size = 16 + static_cast<int>(n % 3) * 8; // sizes change too
     (void)writeFrame(exchange, size, size, n);
   }

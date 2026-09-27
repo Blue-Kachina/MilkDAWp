@@ -21,6 +21,8 @@ add_library(milkdawp_engine STATIC
   include/milkdawp/engine/FrameReadbackExchange.h
   include/milkdawp/engine/PresetHandoff.h
   include/milkdawp/engine/Director.h
+  include/milkdawp/engine/ControlMapping.h
+  src/ControlMapping.cpp
   src/Director.cpp
   include/milkdawp/engine/Visualizer.h
   src/Visualizer.cpp
