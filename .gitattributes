@@ -1,0 +1,24 @@
+# Line endings: the repository stores LF. Checkouts use LF too (matching .editorconfig),
+# except Windows batch/PowerShell scripts, which get CRLF. Files written with CRLF by a
+# Windows tool are normalized on add, so they no longer show up as whole-file changes.
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary content: never normalized or diffed as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.wav binary
+*.flac binary
+*.mp3 binary
+*.ttf binary
+*.otf binary
+
+# Fixture annotations are compared byte for byte by the metric gate.
+fixtures/**/beats.txt text eol=lf
