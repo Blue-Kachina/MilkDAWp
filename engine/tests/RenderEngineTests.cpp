@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <thread>
 
 #include "milkdawp/core/AudioRing.h"
@@ -122,4 +123,43 @@ TEST_CASE("RenderEngine sizes its frames to the largest visible surface times th
   CHECK(sized);
   engine->unregisterSurface(small);
   engine->unregisterSurface(large);
+}
+
+TEST_CASE("RenderEngine publishes CPU copies of its frames while a readback client is registered (ADR-0009)",
+          "[engine][RenderEngine][readback]") {
+  milkdawp::core::AudioRing ring(1 << 14, 2);
+  const auto engine = RenderEngine::create(ring);
+  waitForStartup(*engine);
+  if (!engine->isAvailable()) {
+    SUCCEED("projectM or a GL context is unavailable here: " + engine->unavailableReason());
+    return;
+  }
+
+  const int slot = engine->registerSurface();
+  engine->reportSurfaceSize(slot, 320, 180, /*visible=*/true);
+  std::this_thread::sleep_for(200ms);
+  CHECK_FALSE(engine->latestReadbackFrame()); // no client, no readback work
+
+  engine->addReadbackClient();
+  std::uint64_t firstNumber = 0;
+  for (int i = 0; i < 300 && firstNumber == 0; ++i) {
+    std::this_thread::sleep_for(10ms);
+    if (const auto frame = engine->latestReadbackFrame()) {
+      CHECK(frame->width == 320);
+      CHECK(frame->height == 180);
+      CHECK(frame->rgba.size() == 320U * 180U * 4U);
+      firstNumber = frame->number;
+    }
+  }
+  REQUIRE(firstNumber != 0);
+  std::this_thread::sleep_for(200ms);
+  REQUIRE(engine->latestReadbackFrame());
+  CHECK(engine->latestReadbackFrame()->number > firstNumber); // keeps up with rendering
+  // One frame of latency: the CPU copy trails the GPU frame, never leads it.
+  CHECK(engine->latestReadbackFrame()->number <= engine->latestFrame()->number);
+
+  engine->removeReadbackClient();
+  std::this_thread::sleep_for(200ms);
+  CHECK_FALSE(engine->latestReadbackFrame()); // stale frames are withdrawn
+  engine->unregisterSurface(slot);
 }

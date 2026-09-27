@@ -65,14 +65,23 @@ Per platform:
 | Platform | Offscreen context | Sharing | Status |
 |---|---|---|---|
 | Windows | hidden window + WGL | `wglShareLists` handshake from the surface | Verified: plugin editor, JUCE Standalone, `mdw-view`, two surfaces at once |
-| Linux | EGL surfaceless (`EGL_KHR_surfaceless_context`, GL 3.3 core) | Not wired: EGL only shares at creation, and JUCE 9's X11/EGL display differs from `EGL_DEFAULT_DISPLAY` | Headless render (2.7) only; windows show black until a sharing path exists. Untested (no hardware) |
+| Linux | EGL surfaceless (`EGL_KHR_surfaceless_context`, GL 3.3 core) | Not wired: EGL only shares at creation, and JUCE 9's X11/EGL display differs from `EGL_DEFAULT_DISPLAY` | Headless render (2.7). Windows use the readback fallback below (previously black); engine-side readback verified in the devcontainer, windows untested (no hardware) |
 | macOS | Not implemented; `create()` reports why | Would need an `NSOpenGLContext` created for sharing (JUCE's `setNativeSharedContext` takes one) | Untested (no hardware) |
+| Android (ADR-0010) | Not implemented; needs an ES 3.x branch (Android defines `__linux__`) | Impossible on stock JUCE 9: its Android context ignores the share context | Readback fallback planned from day one (Phase 7) |
 
-Fallback if sharing fails on some Windows driver (e.g. AMD, or a surface on
-a monitor driven by a different GPU in a hybrid system): not implemented.
-The planned fallback is a PBO readback of each frame on the render thread
-plus a texture upload in the surface (§4.5). The surface already detects the
-failure and says so.
+Fallback when a surface can't share (a refusing driver, e.g. AMD or a
+monitor on a different GPU in a hybrid system; Linux; Android), **built in
+2.15 (2026-09-27)**: the surface's `glIsTexture` probe fails, and it
+registers as a readback client (`RenderEngine::addReadbackClient`). While
+there is at least one, the render thread also reads each frame into one of
+two pixel-pack buffers and maps the other, filled a frame earlier, into a
+`FrameReadbackExchange`. That is a triple-buffered CPU copy where readers
+pin what they upload, so the render thread never stalls on the frame just
+drawn. The surface uploads the newest copy into a texture of its own and
+draws it the same way. Cost: one frame of latency and one GPU→CPU→GPU copy
+per frame, only while a readback surface exists. `MILKDAWP_FORCE_FRAME_READBACK`
+forces the path; verified on Windows with `mdw-view` (60 fps at 1280×720,
+same image as the shared path).
 
 ## Consequences
 
@@ -84,9 +93,10 @@ failure and says so.
   thread idles (20 ms sleep, no GL calls) while nothing is visible.
 - Frames are published after `glFinish`, costing some GPU/CPU overlap on the
   render thread; it is our own thread, so nothing else waits on it.
-- Linux and macOS lose the (never-tested) in-editor rendering they would
-  have had with the old design until their sharing paths exist. That is
-  recorded under 2.3, since there is no hardware to build them against here.
+- macOS loses the (never-tested) in-editor rendering it would have had with
+  the old design until it has an offscreen context. That is recorded under
+  2.3, since there is no hardware to build against here. Linux windows use
+  the readback fallback until a sharing path exists.
 - Ruled out: an engine context attached to a hidden JUCE component (JUCE
   only keeps contexts for visible, on-screen components); JUCE's
   `setNativeSharedContext` (the failure in finding 3); `glBlitFramebuffer` to

@@ -56,8 +56,11 @@ live set or a streaming session without babysitting.
 
 - Authoring or editing `.milk` presets. We consume presets; we do not write them.
 - Video/media playback, camera input, or non-projectM render backends.
-- AAX (Avid signing program), iOS/Android, or web builds. The video-first UI (§4.9) is
-  deliberately touch-compatible so a mobile shell is not ruled out later, but none is built.
+- AAX (Avid signing program), iOS, or web builds.
+- Android in 1.0. **Android is a planned post-1.0 target** for the standalone app (Phase 7,
+  ADR-0010, D16). Until then, 1.0 work keeps it cheap: the video-first UI (§4.9) stays
+  touch-compatible, surfaces work without a shared GL context (2.15), and Phase 4 follows
+  ADR-0010's shell boundary rules.
 - A general-purpose VJ mixer. Scenes, setlists, OSC, and texture sharing (Spout/Syphon/NDI)
   are post-1.0 (see §3).
 
@@ -189,6 +192,7 @@ validator runs.
 | AU plugin (macOS) | | ✔ | |
 | CLAP / LV2 | | | ✔ |
 | Standalone app (Win/macOS/Linux) | ✔ (JUCE Standalone wrapper) | ✔ (full app shell) | |
+| Standalone app (Android, Phase 7) | | | ✔ |
 | Audio input: device / interface | ✔ | ✔ | |
 | Audio input: system loopback | documented virtual-cable workaround | Windows + macOS native | Linux native |
 | Own onset + tempo tracking | ✔ | ✔ | |
@@ -341,9 +345,10 @@ thread as soon as the *next* preset is chosen, which happens one transition ahea
   detach without affecting the engine. Each surface is its own JUCE GL context, linked to
   the engine's at creation by a handshake the surface runs itself (`wglShareLists` with the
   render thread parked). JUCE's `setNativeSharedContext` fails on NVIDIA, see ADR-0009. It
-  draws the engine's latest texture with JUCE's `copyTexture`. The PBO-readback fallback for
-  drivers that refuse to share is still planned, not built; a surface detects and reports a
-  failed share.
+  draws the engine's latest texture with JUCE's `copyTexture`. A surface that can't share
+  (a driver that refuses, Linux until EGL sharing exists, Android under stock JUCE) detects
+  it and falls back to CPU copies of each frame, read back through two pixel-pack buffers
+  and uploaded into a texture of its own, one frame behind (2.15, ADR-0009).
 - Context ownership when no surface is visible (plugin editor closed, no Output window): the
   engine keeps its context, its projectM instance and all logical state (current preset,
   playlist position, scheduler), and does no GPU work. Rendering resumes on the next visible
@@ -372,6 +377,10 @@ replace the in-process queues later without touching the shells. Post-1.0 item.
   taps (macOS 14.2+) with ScreenCaptureKit audio as fallback (13+), each requiring a permission
   prompt handled in the app. Linux stays on PulseAudio/PipeWire monitor sources exposed through
   the device list.
+- `SystemAudioCapture` is an interface owned by the app shell, with one implementation file
+  per platform chosen at runtime, so Android's `AudioPlaybackCapture` module (Phase 7,
+  ADR-0010) plugs in without touching the others. Microphone input through
+  `AudioDeviceManager` is always available, and is Android's first tier.
 
 ### 4.8 State and compatibility
 
@@ -533,6 +542,7 @@ call from Matthew before the phase that depends on them.
 | D13 | Window model | Decided | Video-first primary window with a hover/tap/pinned control drawer; a separately owned Output window for fullscreen on another display; detached-controls window as a secondary feature (§4.9). Replaces v1's control-strip-plus-pop-out-video layout. |
 | D14 | Development environment | Decided | Single container image (devcontainer + CI + agent sessions) covering core, CLI, headless render, and lint; CI as the Windows/macOS build farm; idempotent native bootstrap with a doctor mode for those who want local builds (§4.10). No Nix. |
 | D15 | projectM version | Recommended | Minimum projectM **4.2**, built from a pinned upstream `master` commit through a vcpkg overlay port until 4.2.0 is tagged. 4.1.7 draws its final image to framebuffer 0 whatever FBO is bound, which breaks §4.5. It also uses GLEW without initializing it, and times presets only by the wall clock. 4.2 adds `render_frame_fbo`, a GL-loader create call (no GLEW) and `set_frame_time`. Amends D4. See ADR-0008. |
+| D16 | Android | Recommended | Android standalone app is a planned **post-1.0** target (Phase 7): Android 10+ (API 29), OpenGL ES 3.0, arm64-v8a. A Gradle project builds our CMake tree through the NDK (JUCE's CMake API has no Android support). Surfaces use CPU readback (JUCE 9 cannot share an Android GL context). Audio is microphone first, `AudioPlaybackCapture` second. Presets are imported into app storage. Phase 4 follows ADR-0010's shell boundary rules so none of this needs rework. See ADR-0010. |
 
 ---
 
@@ -559,6 +569,7 @@ MilkDAWp2/
 ├── ui/                            # milkdawp_ui: ControlDrawer, scrim, OutputWindow, LAF
 ├── plugin/                        # milkdawp_plugin: processor, editor, state migration
 ├── app/                           # milkdawp_app: standalone shell, capture modules
+├── android/                       # Phase 7: Gradle project wrapping the CMake tree (ADR-0010)
 ├── tools/
 │   └── mdw-analyze/               # offline CLI: WAV in → onsets/beats/transitions out
 ├── resources/                     # icons, logo, bundled presets (git-lfs or fetched)
@@ -1079,7 +1090,8 @@ file with beat-aligned transitions.
       belongs to a window. **Stays `[~]`:** macOS (no offscreen context yet) and Linux (EGL
       offscreen context exists for headless use, but no sharing with JUCE's windows) need
       hardware; the PBO-readback fallback for drivers that refuse to share is designed, not
-      built (ADR-0009).
+      built (ADR-0009). Update (2026-09-27): the fallback is built (2.15), and Linux windows
+      now use it instead of showing black. macOS still needs an offscreen context.
 - [x] 2.4 (M) `OutputSurface` implementations: embedded component (primary window) and
       `OutputWindow` (owned top-level window, borderless fullscreen on a chosen display,
       remembers its display). Attach/detach without engine restart; both surfaces show the
@@ -1366,6 +1378,21 @@ file with beat-aligned transitions.
       (newest `max` frames only), and reset. Related fix: the processor's ring is now
       created once (stereo, 2^16 frames) instead of being replaced in every `prepareToPlay`,
       which would have raced the threads now reading it.
+- [x] 2.15 (M) Readback fallback for surfaces that can't share the engine's context
+      (ADR-0009's plan, pulled forward by ADR-0010: it is also how Linux windows and Android
+      get a picture). Note (2026-09-27): `OutputSurface` registers as a readback client
+      when its `glIsTexture` probe fails. While any client exists, the render thread reads
+      each frame into one of two pixel-pack buffers and maps the other, filled a frame
+      earlier, into `FrameReadbackExchange`. That is a triple-buffered CPU copy where readers
+      pin the buffer they upload, and the writer drops a frame rather than wait. The surface
+      uploads the newest copy into its own texture and draws it like the shared path. No
+      clients, no cost; the buffers are freed when the last one goes. Tests:
+      `FrameReadbackExchangeTests` (publish, pinning, reuse, clear, and a 3-reader stress test
+      for torn frames) and an engine test that runs the real render thread with a readback
+      client (right size, keeps up, trails the GPU frame by one, withdrawn when the client
+      leaves). `MILKDAWP_FORCE_FRAME_READBACK=1` forces the path: verified on Windows with
+      `mdw-view` (60 fps at 1280×720, same image as the shared path). Diagnostics now say
+      "shared" or "readback (no shared context)".
 
 Hand test: `mdw-view` with a folder of presets and a track with a clear drop. Transitions
 should land on downbeats in Beat-quantized mode; no hitch longer than one frame on most presets.
@@ -1378,7 +1405,7 @@ here):
    badge should show the host tempo with "host".
 2. **Close and reopen the editor** several times while it plays: the visual must *not*
    reset (same preset, trails intact). Diagnostics (Set > Show diagnostics) should keep
-   saying the surface is "ok".
+   saying the surface is "shared" (it said "ok" before 2.15).
 3. **Output window:** Out opens it; F11 (in it, or in the editor) toggles borderless
    fullscreen; Esc leaves it. Drag it to the second display, F11, and check it fills that
    display. Close the editor: the Output window keeps running. Remove the plugin: it closes.
@@ -1747,22 +1774,39 @@ window fullscreen on the capture display, editor with pinned drawer on the other
 visual within 10 seconds on a clean machine with a bundled preset and default input; all
 features of the plugin editor are available; preferences persist.
 
+**Shell boundary rules (ADR-0010).** These keep Phase 7 (Android) a port of the shell, not a
+rework:
+- `milkdawp_ui` holds only what every shell shares.
+- The menu bar, single-instance guard, window geometry, file associations, and the
+  second-display Output window live in the desktop app shell (`app/`), not in shared code.
+- Keyboard shortcuts stay shared, but no action is keyboard-only.
+- The preset library root is always a real directory the app can scan; how it gets filled
+  (pick a folder on desktop, import or extract into app storage on Android) belongs to the
+  shell.
+- `SystemAudioCapture` is an interface with one implementation per platform (§4.7).
+
 - [ ] 4.1 (M) `milkdawp_app` shell with `juce_add_gui_app`: video-first main window with the
       shared `ControlDrawer` (auto-hide default in fullscreen, pinned otherwise), menu bar with
       the shared `Shortcuts` table (§4.9) plus app-only `Space`, single-instance guard. Main window can fullscreen directly; ⛶ opens the `OutputWindow`
-      for a second display; "float controls" for the projector-plus-laptop setup.
+      for a second display; "float controls" for the projector-plus-laptop setup. Per the
+      boundary rules above, the menu bar and single-instance guard are desktop-shell code.
 - [ ] 4.2 (M) Audio input: `AudioDeviceManager` device selector, input channel pair choice,
       level meter, "no signal" hint. Startup restores the last device; graceful fallback when
       it is missing.
 - [ ] 4.3 (S) Preferences (`PropertiesFile`): device, preset library root, output display,
-      quality, logging toggle, last window geometry.
+      quality, logging toggle, last window geometry. (`PropertiesFile` works on Android too;
+      output display and window geometry are desktop-only keys.)
 - [ ] 4.4 (M) MIDI learn: map CC/notes to any parameter; persisted; UI affordance on each
       control.
 - [ ] 4.5 (M) Preset library browser: tree of the library root, search, favourites, recently
       played, right-click add to blacklist.
-- [ ] 4.6 (S) File associations and drag-and-drop for `.milk` files and folders.
+- [ ] 4.6 (S) File associations and drag-and-drop for `.milk` files and folders
+      (desktop-shell code, per the boundary rules).
 - [ ] 4.7 (L) Windows WASAPI loopback capture module behind `SystemAudioCapture`, selectable as
-      "System audio" in the device list.
+      "System audio" in the device list. Defines the interface: start/stop, a permission
+      state the UI can explain ("needs permission", "denied", "unsupported on this OS"), and
+      audio delivered into the same `AudioRing` path as a device input. Phase 7's Android
+      module implements it too, so nothing Windows-specific goes in the interface.
 - [ ] 4.8 (L) macOS system audio capture via Core Audio process taps (14.2+) with
       ScreenCaptureKit fallback (13+); permission flow and messaging.
 - [ ] 4.9 (S) Linux: verify PipeWire/Pulse monitor sources appear; document.
@@ -1838,6 +1882,63 @@ docs live; v1 repo archived with a pointer.
 - [ ] 6.9 (S) 1.0 release, archive the v1 repository with a README pointer to this one, transfer
       open v1 issues that still apply, announce.
 
+### Phase 7 — Android standalone app (post-1.0)
+
+**Goal:** the standalone app on Android phones and tablets, built from the same core, engine
+and UI (ADR-0010, D16). **Exit:** a signed build installs on Android 10+ and shows a working
+visual from a bundled preset within 10 seconds of first launch, reacting to the microphone
+after one permission prompt. The visual survives backgrounding and rotation without
+resetting. The CI matrix builds the APK on every push.
+
+Starts after 1.0, but 7.1 can run any time as a time-boxed spike: it is the biggest unknown
+and decides how the rest is built.
+
+- [ ] 7.1 (L) **Spike:** Gradle project under `android/` building our CMake tree through the
+      NDK (`externalNativeBuild`), vcpkg chainloaded for `arm64-android` (plus
+      `x64-android` for the emulator). Do the projectM overlay port, projectm-eval and glm
+      build? Does `libprojectM-4.so` load from the APK by bare name? Does JUCE's Android
+      activity glue work without `juce_add_gui_app` (JUCE's CMake API has no Android
+      support)? Done when the headless render test (2.7) passes on a device or emulator.
+      Write the result into ADR-0010; if Gradle can't work, decide on an Android-only
+      Projucer project there.
+- [ ] 7.2 (S) `OffscreenGLContext` Android branch, checked before `__linux__` (Android
+      defines it): `EGL_OPENGL_ES_API`, ES 3.x, surfaceless where
+      `EGL_KHR_surfaceless_context` exists, else a 1×1 pbuffer. The `GL_TIME_ELAPSED` query
+      is used only with `EXT_disjoint_timer_query`; otherwise `gpuFrameMs` stays -1.
+- [ ] 7.3 (M) Android app shell: one fullscreen activity whose main view is an
+      `OutputSurface` on the readback path (2.15; JUCE 9 cannot share an Android GL
+      context). Drawer auto-hides, tap reveals, touch targets sized for fingers, and no
+      desktop-shell features (Phase 4's boundary rules). Lifecycle: on suspend the surface
+      goes invisible and the engine pauses (2.10); it resumes without a reset. Rotation and
+      split-screen resize the surface only.
+- [ ] 7.4 (S) Microphone input through `AudioDeviceManager` (Oboe), with the `RECORD_AUDIO`
+      runtime permission, a rationale screen, and a "denied" state that explains how to fix
+      it.
+- [ ] 7.5 (L) Android `SystemAudioCapture` (§4.7) over `AudioPlaybackCapture`: Kotlin +
+      JNI, MediaProjection consent, foreground service with its notification. Tell the user
+      that some apps block capture. Measure our onset/tempo quality on this path against
+      the fixtures before calling it done.
+- [ ] 7.6 (M) Presets: extract the bundled pack (6.1) from APK assets into app storage on
+      first run and after an app update; "Import presets" copies a Storage Access Framework
+      folder (textures included) into app storage, and the engine scans that as it does any
+      folder. Includes the searchable, touch-friendly preset browser from the post-1.0
+      backlog: the drawer's popup menu does not work on a phone.
+- [ ] 7.7 (M) Mobile performance: tune adaptive quality (5.3) and the preset-cost cache
+      (5.4) on at least one low-end and one high-end phone. Pick a phone-safe default subset
+      of the bundled pack. Watch thermal throttling over a 30-minute run.
+- [ ] 7.8 (M) Optional: a JUCE patch that passes the share context through on Android
+      (`juce_OpenGL_android.h` ignores it, `juce_OpenGLContext.cpp` hard-codes
+      `EGL_NO_CONTEXT`), offered upstream first. Removes the per-frame copy; readback stays
+      as the fallback.
+- [ ] 7.9 (M) CI and release: an Android build job, plus an emulator smoke run of the
+      engine tests where practical. Signed AAB/APK from the tag workflow; Play listing with
+      the AGPL source offer and projectM's LGPL notice. The Play upload key is a new
+      decision next to D11.
+
+Hand test: on a mid-range phone, install, grant the microphone, play music from a speaker,
+confirm the visuals react; switch to another app and back (visual intact); rotate; import a
+preset folder; then try playback capture with a music app.
+
 ### Post-1.0 backlog (unscheduled)
 
 - Texture sharing output: Spout (Windows), Syphon (macOS), NDI (all) so OBS/Resolume can
@@ -1856,7 +1957,7 @@ docs live; v1 repo archived with a pointer.
   beat phase, so the drawer's (currently empty) progress track fills in Timed/Hybrid modes
   and shows beat pips in BeatQuantized, with "next in 0:11" in the preset detail line.
 - Searchable preset browser panel (filter-as-you-type, favourites) to replace the drawer's
-  click-the-preset-name popup menu for large libraries.
+  click-the-preset-name popup menu for large libraries. Required by Phase 7.6 on Android.
 - **Layers: several inputs, several visuals, one canvas.** N projectM instances in the
   engine's one GL context, each fed its own audio input and rendering to its own FBO
   (`render_frame_fbo`, D15), mixed onto the output by our own compositor pass. Mix options:
@@ -1886,6 +1987,7 @@ docs live; v1 repo archived with a pointer.
 | Plugin validation | `pluginval` strictness 5 (VST3 all platforms, AU macOS), `auval` | every push |
 | Soak / stress | scripted 4-hour app run, memory sampling | nightly / pre-release |
 | Manual DAW matrix | `docs/daw-checklist.md` | before each beta and release |
+| Android build (Phase 7) | Gradle + NDK APK build; engine tests on an emulator where practical | every push, once 7.9 lands |
 
 Coverage expectation: core ≥ 80% line coverage reported in CI; engine and shells covered by
 smoke tests and validators rather than a percentage.
@@ -1903,6 +2005,9 @@ smoke tests and validators rather than a percentage.
   documented.
 - **Linux:** AppImage for the app (bundles the shared libraries), `.tar.gz` for the VST3 with
   `Contents/Resources/lib` rpath layout from v1; `.deb` stretch.
+- **Android (Phase 7):** signed AAB for Play and APK for sideloading, arm64-v8a;
+  `libprojectM-4.so` as its own library in the APK (LGPL, dynamic); bundled presets in APK
+  assets, extracted to app storage on first run. Play upload key alongside D11.
 - **Presets:** bundled pack installed to a shared location per platform; user library root
   defaults there but is changeable.
 - **Licences:** AGPL-3.0 for MilkDAWp, LGPL-2.1 for projectM (dynamically linked, notices and
@@ -1929,6 +2034,8 @@ smoke tests and validators rather than a percentage.
 | Duplicate zlib/libpng between JUCE 9's C-mode bundled copies and vcpkg's | ODR violations, odd crashes on one platform only | single-copy rule decided in 0.1 and checked at link time in CI |
 | Scope creep from post-1.0 ideas (Spout, scenes, OSC) | 1.0 slips | tiers in §3 are the contract; new ideas go to the backlog section, not into phases |
 | Preset pack licensing | cannot bundle content | D12 resolved before Phase 6; ship with a downloader as fallback |
+| Android build path (JUCE's CMake API has no Android support; our projectM overlay has never built for an Android triplet) | Phase 7 costs much more than estimated, or needs a second build system | 7.1 spike first, time-boxed, before anything else is scheduled; Phase 4 follows ADR-0010's boundary rules so the shell isn't the problem too |
+| Readback surfaces (Linux, Android, refusing drivers) cost a full-frame GPU→CPU→GPU copy per surface | lower frame rate on weak GPUs, especially phones | only while a readback surface exists; adaptive quality (5.3) shrinks the frame; JUCE sharing patch (7.8) removes it on Android |
 
 ---
 

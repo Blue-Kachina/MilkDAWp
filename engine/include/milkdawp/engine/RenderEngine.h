@@ -19,6 +19,7 @@
 #include "milkdawp/core/AudioRing.h"
 #include "milkdawp/core/Messages.h"
 #include "milkdawp/core/SeqlockSnapshot.h"
+#include "milkdawp/engine/FrameReadbackExchange.h"
 #include "milkdawp/engine/PresetHandoff.h"
 #include "milkdawp/engine/ProjectMLibrary.h"
 #include "milkdawp/engine/TransitionExecutor.h"
@@ -69,6 +70,8 @@ struct RenderEngineConfig {
 /// published texture (`latestFrame()`). So opening, closing and moving
 /// windows never touches projectM's state (§2.4's v1 bug), and several
 /// windows show the same frame (the primary-window mirror + Output window).
+/// A surface that cannot share (a refusing driver, Linux EGL, Android) gets
+/// CPU copies of the frames instead (addReadbackClient()).
 ///
 /// Paused when no surface is visible: the thread keeps the context and the
 /// projectM instance (preset, playlist position and visual state all
@@ -160,6 +163,17 @@ public:
     return sharedContextHandle() != nullptr ? textureNames_[0].load(std::memory_order_relaxed) : 0;
   }
 
+  // ---- readback fallback (any thread; ADR-0009, ADR-0010) ----
+  /// A surface whose context cannot see the engine's textures registers as a
+  /// readback client. While there is at least one, the render thread also
+  /// copies every frame to the CPU (two pixel-pack buffers, one frame of
+  /// latency) and publishes it through latestReadbackFrame(). Balanced calls.
+  void addReadbackClient() noexcept { readbackClients_.fetch_add(1); }
+  void removeReadbackClient() noexcept { readbackClients_.fetch_sub(1); }
+  /// The newest CPU copy, pinned until the returned lock goes away; empty
+  /// when there are no readback clients or no frame yet.
+  [[nodiscard]] FrameReadbackExchange::ReadLock latestReadbackFrame() const { return readback_.acquireLatest(); }
+
 private:
   RenderEngine(const core::AudioRing& audio, const Config& config, std::unique_ptr<ProjectMLibrary> library,
                std::string unavailableReason);
@@ -199,6 +213,9 @@ private:
   // 34-63 frame number.
   std::atomic<std::uint64_t> publishedFrame_{0};
   std::array<std::atomic<std::uint32_t>, kFrameCount> textureNames_{};
+
+  std::atomic<int> readbackClients_{0};
+  FrameReadbackExchange readback_;
 
   // Share handshake (shareIntoCurrentContext): one requester at a time; the
   // render thread releases its context while shareRequested_ is set.

@@ -18,6 +18,7 @@ add_library(milkdawp_engine STATIC
   include/milkdawp/engine/GlFrameTarget.h
   src/GlFrameTarget.cpp
   include/milkdawp/engine/PcmFeeder.h
+  include/milkdawp/engine/FrameReadbackExchange.h
   include/milkdawp/engine/PresetHandoff.h
   include/milkdawp/engine/Director.h
   src/Director.cpp

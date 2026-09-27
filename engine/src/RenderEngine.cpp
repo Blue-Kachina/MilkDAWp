@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 
 #include <juce_opengl/juce_opengl.h>
 
@@ -43,6 +44,86 @@ struct LoadFailureFlag {
 void onPresetSwitchFailed(const char*, const char*, void* userData) {
   static_cast<LoadFailureFlag*>(userData)->failed = true;
 }
+
+// The readback fallback's GPU half (ADR-0009): two pixel-pack buffers used in
+// turn. Each frame's glReadPixels goes into one while the other, filled a
+// frame earlier and completed by that frame's glFinish, is mapped and copied
+// into the exchange. So readback never stalls on the frame just rendered, at
+// the cost of one frame of latency on readback surfaces. All calls on the
+// render thread with its context current; also valid in OpenGL ES 3.0.
+class PixelPackReadback {
+public:
+  PixelPackReadback() {
+    using namespace ::juce::gl;
+    std::array<GLuint, 2> names{};
+    glGenBuffers(2, names.data());
+    slots_[0].buffer = names[0];
+    slots_[1].buffer = names[1];
+  }
+
+  ~PixelPackReadback() {
+    using namespace ::juce::gl;
+    std::array<GLuint, 2> names{slots_[0].buffer, slots_[1].buffer};
+    glDeleteBuffers(2, names.data());
+  }
+
+  PixelPackReadback(const PixelPackReadback&) = delete;
+  PixelPackReadback& operator=(const PixelPackReadback&) = delete;
+
+  void readAndPublish(const GlFrameTarget& target, std::uint64_t frameNumber, FrameReadbackExchange& exchange) {
+    using namespace ::juce::gl;
+    auto& write = slots_[writeIndex_];
+    write.width = target.width();
+    write.height = target.height();
+    write.number = frameNumber;
+    const auto bytes = byteSize(write);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, write.buffer);
+    if (write.capacity < bytes) {
+      glBufferData(GL_PIXEL_PACK_BUFFER, static_cast<GLsizeiptr>(bytes), nullptr, GL_STREAM_READ);
+      write.capacity = bytes;
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, target.framebuffer());
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, write.width, write.height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    write.pending = true;
+
+    writeIndex_ ^= 1U;
+    auto& read = slots_[writeIndex_];
+    if (read.pending) {
+      read.pending = false;
+      glBindBuffer(GL_PIXEL_PACK_BUFFER, read.buffer);
+      const auto readBytes = byteSize(read);
+      const auto* pixels = static_cast<const std::uint8_t*>(
+          glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, static_cast<GLsizeiptr>(readBytes), GL_MAP_READ_BIT));
+      if (pixels != nullptr) {
+        if (auto* destination = exchange.beginWrite(read.width, read.height)) {
+          std::memcpy(destination, pixels, readBytes);
+          exchange.commitWrite(read.number);
+        }
+        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+      }
+    }
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+  }
+
+private:
+  struct Slot {
+    GLuint buffer = 0;
+    std::size_t capacity = 0;
+    int width = 0;
+    int height = 0;
+    std::uint64_t number = 0;
+    bool pending = false;
+  };
+
+  static std::size_t byteSize(const Slot& slot) noexcept {
+    return static_cast<std::size_t>(slot.width) * static_cast<std::size_t>(slot.height) * 4;
+  }
+
+  std::array<Slot, 2> slots_{};
+  unsigned writeIndex_ = 0;
+};
 
 } // namespace
 
@@ -226,6 +307,7 @@ void RenderEngine::run() {
 
   GLuint timerQuery = 0;
   glGenQueries(1, &timerQuery);
+  std::unique_ptr<PixelPackReadback> pixelPack; // only while a surface needs readback
 
   RenderStats stats;
   stats.running = true;
@@ -354,6 +436,18 @@ void RenderEngine::run() {
     publishedFrame_.store(packFrame(index, targets[index]->width(), targets[index]->height(), frameNumber),
                           std::memory_order_release);
 
+    if (readbackClients_.load() > 0) {
+      if (!pixelPack) {
+        pixelPack = std::make_unique<PixelPackReadback>();
+      }
+      pixelPack->readAndPublish(*targets[index], frameNumber, readback_);
+    } else if (pixelPack) {
+      // Last readback surface went away: free the buffers, and don't offer
+      // a stale frame to the next one.
+      pixelPack.reset();
+      readback_.clear();
+    }
+
     ++framesInWindow;
     const double windowMs = millisecondsBetween(fpsWindowStart, renderEnd);
     if (windowMs >= 1000.0) {
@@ -372,6 +466,8 @@ void RenderEngine::run() {
   available_.store(false, std::memory_order_release);
   sharedContextHandle_.store(nullptr, std::memory_order_release);
   glDeleteQueries(1, &timerQuery);
+  pixelPack.reset();
+  readback_.clear();
   instance.reset();
   targets = {};
   stats.running = false;

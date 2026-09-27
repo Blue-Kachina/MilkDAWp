@@ -330,7 +330,7 @@ void MilkDAWpAudioProcessorEditor::timerCallback() {
            << (reason.empty() ? juce::String("starting...") : juce::String("unavailable (" + reason + ")")) << "\n";
     }
     text << "presets: " << juce::String(status.playlistSize) << " in folder, " << juce::String(stats.presetsLoaded) << " loaded, "
-         << juce::String(status.presetsSkipped) << " skipped; surface " << (outputSurface.isSharingWorking() ? "ok" : "NOT SHARING")
+         << juce::String(status.presetsSkipped) << " skipped; surface " << (outputSurface.isSharingWorking() ? "shared" : "readback (no shared context)")
          << " (context x" << outputSurface.contextCreationCount() << ")\n";
     text << engine.glDescription();
     diagnosticsLabel.setText(text, juce::dontSendNotification);

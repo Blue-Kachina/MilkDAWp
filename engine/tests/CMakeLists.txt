@@ -8,6 +8,7 @@ add_executable(milkdawp_engine_tests
   HeadlessRenderTests.cpp
   PcmFeederTests.cpp
   PresetHandoffTests.cpp
+  FrameReadbackExchangeTests.cpp
   DirectorTests.cpp
 )
 target_compile_definitions(milkdawp_engine_tests PRIVATE
