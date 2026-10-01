@@ -141,6 +141,23 @@ TEST_CASE("StateSchemaV2 round-trips the window layout", "[core][StateSchema]") 
   CHECK(roundTripped.windows == original.windows);
 }
 
+TEST_CASE("StateSchemaV2 round-trips the Output settings", "[core][StateSchema]") {
+  StateSchemaV2 original;
+  original.windows.outputDefaultFullscreen = true;
+  original.windows.outputTargetDisplay = {1920, -120, 2560, 1440}; // a display right of and above the primary
+
+  const auto roundTripped = deserializeStateSchemaV2(serializeStateSchemaV2(original));
+  CHECK(roundTripped.windows.outputDefaultFullscreen);
+  CHECK(roundTripped.windows.outputTargetDisplay == original.windows.outputTargetDisplay);
+}
+
+TEST_CASE("StateSchemaV2 without Output settings keys defaults to windowed on an automatic display",
+          "[core][StateSchema]") {
+  const auto state = deserializeStateSchemaV2("schemaVersion=2\noutputWindowOpen=1\n");
+  CHECK_FALSE(state.windows.outputDefaultFullscreen);
+  CHECK(state.windows.outputTargetDisplay.isEmpty());
+}
+
 TEST_CASE("StateSchemaV2 without window keys loads with every window closed", "[core][StateSchema]") {
   const auto state = deserializeStateSchemaV2("schemaVersion=2\neditorWidth=800\n");
   CHECK(state.editorWidth == 800);

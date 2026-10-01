@@ -31,6 +31,7 @@ struct ParameterValues {
   float transitionBars = 4.0f;
   float presetSelectionPolicy = 0.0f;
   float energyThreshold = 2.0f;
+  float useHostTempo = 0.0f;
 };
 
 /// The field for a `ParameterModel` id, or nullptr for parameters the engine

@@ -39,7 +39,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
     if (processorRef.isOutputWindowOpen()) {
       processorRef.closeOutputWindow();
     } else {
-      processorRef.openOutputWindow(/*fullscreen=*/false);
+      processorRef.popOutOutputWindow();
     }
   };
   controlDrawer.settingsButton.onClick = [this] { showSettingsMenu(); };
@@ -71,8 +71,18 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
   transitionButtonAttachments_.push_back(
       std::make_unique<ButtonAttachment>(apvts, "transitionJitterEnabled", transitionSettings.jitterToggle));
   transitionButtonAttachments_.push_back(
-      std::make_unique<ButtonAttachment>(apvts, "hardCutEnabled", transitionSettings.hardCutToggle));
-  transitionSettings.refreshRelevance();
+      std::make_unique<ButtonAttachment>(apvts, "hardCutEnabled", transitionSettings.hardCutToggle));  transitionSettings.refreshRelevance();
+
+  // Settings -> Output, same compositing rules as the transition popover.
+  outputSurface.addChildComponent(outputSettings);
+  outputSettings.onCloseRequested = [this] { setOutputSettingsVisible(false); };
+  outputSettings.onPreferredSizeChanged = [this] { layoutOutputSettings(); };
+  outputSettings.onDefaultFullscreenChanged = [this](bool fullscreen) {
+    processorRef.setOutputDefaultFullscreen(fullscreen);
+  };
+  outputSettings.onTargetDisplayChanged = [this](const milkdawp::core::WindowBounds& display) {
+    processorRef.setOutputTargetDisplay(display);
+  };
 
   // Plugin build keeps EDITOR_WANTS_KEYBOARD_FOCUS FALSE (carried over from
   // v1, which received keys fine in practice) -- that only affects the
@@ -118,6 +128,7 @@ void MilkDAWpAudioProcessorEditor::resized() {
     controlDrawer.setBounds(outputSurface.getLocalBounds().removeFromBottom(kDrawerHeight));
   }
   layoutTransitionSettings();
+  layoutOutputSettings();
   processorRef.setEditorSize(getWidth(), getHeight());
 }
 
@@ -154,6 +165,7 @@ void MilkDAWpAudioProcessorEditor::setControlsFloating(bool floating) {
     controlDrawer.setFloating(false);
     outputSurface.addAndMakeVisible(controlDrawer);
     transitionSettings.toFront(false); // the popover stays above the drawer
+    outputSettings.toFront(false);
     grabKeyboardFocus();
   }
   resized();
@@ -170,7 +182,35 @@ void MilkDAWpAudioProcessorEditor::layoutTransitionSettings() {
   transitionSettings.setBounds(area.removeFromBottom(height).removeFromRight(width));
 }
 
+void MilkDAWpAudioProcessorEditor::layoutOutputSettings() {
+  // Same slot as the transition popover: above the drawer, right-aligned.
+  const int drawerHeight = controlsWindow_ != nullptr ? 0 : milkdawp::ui::ControlDrawer::controlsHeight;
+  auto area = outputSurface.getLocalBounds().withTrimmedBottom(drawerHeight).reduced(6);
+  const auto width = std::min(milkdawp::ui::OutputSettingsPanel::preferredWidth, area.getWidth());
+  const auto height = std::min(outputSettings.preferredHeight(), area.getHeight());
+  outputSettings.setBounds(area.removeFromBottom(height).removeFromRight(width));
+}
+
+void MilkDAWpAudioProcessorEditor::setOutputSettingsVisible(bool visible) {
+  if (visible) {
+    setTransitionSettingsVisible(false);
+    const auto layout = processorRef.windowLayout();
+    outputSettings.refresh(layout.outputDefaultFullscreen, layout.outputTargetDisplay);
+    layoutOutputSettings();
+  }
+  outputSettings.setVisible(visible);
+  if (visible) {
+    outputSettings.toFront(false);
+    controlDrawer.reveal();
+  } else {
+    grabKeyboardFocus(); // the panel's widgets may have taken it; shortcuts need it back
+  }
+}
+
 void MilkDAWpAudioProcessorEditor::setTransitionSettingsVisible(bool visible) {
+  if (visible && outputSettings.isVisible()) {
+    setOutputSettingsVisible(false);
+  }
   transitionSettings.setVisible(visible);
   if (visible) {
     transitionSettings.refreshRelevance();
@@ -193,8 +233,10 @@ bool MilkDAWpAudioProcessorEditor::keyPressed(const juce::KeyPress& key) {
   using milkdawp::ui::ShortcutAction;
   switch (milkdawp::ui::mapKeyPress(key, /*isAppShell=*/false)) {
   case ShortcutAction::ExitFullscreenOrRevealDrawer:
-    if (transitionSettings.isVisible()) {
-      setTransitionSettingsVisible(false); // Esc closes the popover first
+    if (outputSettings.isVisible()) {
+      setOutputSettingsVisible(false); // Esc closes the popover first
+    } else if (transitionSettings.isVisible()) {
+      setTransitionSettingsVisible(false);
     } else {
       controlDrawer.reveal();
     }
@@ -258,10 +300,19 @@ void MilkDAWpAudioProcessorEditor::showSettingsMenu() {
   menu.addSeparator();
   menu.addItem("Transition settings...", true, transitionSettings.isVisible(),
                [this] { setTransitionSettingsVisible(!transitionSettings.isVisible()); });
+  menu.addItem("Output settings...", true, outputSettings.isVisible(),
+               [this] { setOutputSettingsVisible(!outputSettings.isVisible()); });
   const bool floating = controlsWindow_ != nullptr;
   menu.addItem(floating ? "Dock controls" : "Float controls in a window",
                [this, floating] { setControlsFloating(!floating); });
   menu.addItem("Output window fullscreen (F11)", [this] { processorRef.toggleOutputFullscreen(); });
+  menu.addItem("BPM from DAW", true, processorRef.apvts.getRawParameterValue("useHostTempo")->load() > 0.5f, [this] {
+    if (auto* param = processorRef.apvts.getParameter("useHostTempo")) {
+      param->beginChangeGesture();
+      param->setValueNotifyingHost(param->getValue() > 0.5f ? 0.0f : 1.0f);
+      param->endChangeGesture();
+    }
+  });
   menu.addItem("Show diagnostics", true, diagnosticsLabel.isVisible(),
                [this] { diagnosticsLabel.setVisible(!diagnosticsLabel.isVisible()); });
   menu.setLookAndFeel(&controlDrawer.getLookAndFeel());

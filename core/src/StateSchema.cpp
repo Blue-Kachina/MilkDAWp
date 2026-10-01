@@ -116,6 +116,8 @@ std::string serializeStateSchemaV2(const StateSchemaV2& state) {
   out << "outputWindowBounds=" << formatBounds(state.windows.outputWindowBounds) << "\n";
   out << "controlsFloating=" << (state.windows.controlsFloating ? 1 : 0) << "\n";
   out << "controlsWindowBounds=" << formatBounds(state.windows.controlsWindowBounds) << "\n";
+  out << "outputDefaultFullscreen=" << (state.windows.outputDefaultFullscreen ? 1 : 0) << "\n";
+  out << "outputTargetDisplay=" << formatBounds(state.windows.outputTargetDisplay) << "\n";
   for (const auto& [id, value] : state.paramValues) {
     out << "param." << id << "=" << value << "\n";
   }
@@ -157,6 +159,10 @@ StateSchemaV2 deserializeStateSchemaV2(const std::string& text) {
       parseBool(value, state.windows.controlsFloating);
     } else if (key == "controlsWindowBounds") {
       parseBounds(value, state.windows.controlsWindowBounds);
+    } else if (key == "outputDefaultFullscreen") {
+      parseBool(value, state.windows.outputDefaultFullscreen);
+    } else if (key == "outputTargetDisplay") {
+      parseBounds(value, state.windows.outputTargetDisplay);
     } else if (key.rfind("param.", 0) == 0) {
       float parsed = 0.0f;
       if (parseFloat(value, parsed)) {

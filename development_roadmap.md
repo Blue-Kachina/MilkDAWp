@@ -2001,6 +2001,26 @@ energy mode demonstrably cuts on drops in the fixture set; adaptive quality keep
         exercise Hard cutStyle end to end) pass unchanged and are the regression guard.
       - Verified on Windows: `milkdawp_engine_tests` (52 cases/633 assertions) and the full
         project's `ctest` (212 tests) pass; VST3, Standalone, and app targets still build clean.
+      Follow-up note (2026-09-27, same day): the freeze was still visibly happening after the
+      above landed -- reported as smooth animation up to a preset switch, then all animation
+      stopping for roughly half a second to a second, on transitions the fix above never
+      touched. Root cause of the gap: `RenderEngine::run()` calls `loadPresetData()` inline on
+      the render thread with no rendered frames produced until it returns, on *every* cut style
+      -- the "soft/timed cuts don't bother, since the blend hides a hitch either way" reasoning
+      above was wrong. projectM's blend only blends *rendered frames* after loading finishes;
+      no frames render at all during the synchronous compile, so a soft cut stalls exactly like
+      a hard cut. (A real fix -- a second live `ProjectMInstance` loading off the render thread
+      entirely, crossfaded in once ready -- was scoped and then set aside: making it correct
+      requires a symmetric dual-pipeline where either thread's context can become the one
+      publishing frames, since a `ProjectMInstance`'s internal VAOs/FBOs are not shareable
+      across GL contexts and so can never be handed from the thread that created it to another
+      one; that's a bigger change than this pass, left for a future session.) The narrower fix
+      landed instead: `step()`'s cost-aware candidate scan no longer checks `cutStyle` at all,
+      only `playlist->policy()` -- every cut style now benefits from steering toward a
+      confirmed-cheap candidate under a randomized policy, not just hard cuts. Sequential is
+      still excluded, unchanged, for the reason above (order is user-visible). This narrows how
+      often the freeze is hit but does not eliminate it: it still happens on the first-ever load
+      of any preset in a session, and whenever no cheap alternative has been measured yet.
 - [ ] 5.5 (S) Beat sensitivity semantics: one knob that scales both our detector's threshold
       and `projectm_set_beat_sensitivity`, documented. The two are different things:
       projectM's value only rescales the bass/mid/treb levels presets animate from (clamped
@@ -2188,7 +2208,7 @@ smoke tests and validators rather than a percentage.
 | Hosts swallow hover or mouse-move events so the drawer never reveals | controls unreachable in that host | tap/click reveal as well as hover; pinned is the plugin default; DAW checklist (3.11) tests drawer reveal per host |
 | A host intercepts some keys before the editor sees them | shortcuts silently dead in that host | every action is also pointer-reachable; Output and detached-controls windows are ours and always get keys; per-host results in the DAW checklist; `EDITOR_WANTS_KEYBOARD_FOCUS` experiment (3.14) |
 | Devcontainer image drifts from what CI runs, or grows stale against the vcpkg baseline | "works in the container, fails in CI" | CI runs *inside* the published image; image rebuild is triggered by manifest changes; image tag recorded in CI logs |
-| projectM preset compile hitches on the render thread | visible stutter on transitions | measure and cache per-preset cost (5.4), prefetch, prefer cheap presets for hard cuts, consider upstream async load contribution |
+| projectM preset compile hitches on the render thread | visible stutter on transitions | measure and cache per-preset cost (5.4), prefetch, prefer cheap presets on any cut style under a randomized policy, consider upstream async load contribution or a dual-instance/crossfade redesign |
 | Hosts that dislike OpenGL (some macOS hosts, sandboxed AUv3 not in scope) | plugin unusable in that host | pluginval + DAW matrix early (Phase 3); engine can run with zero surfaces; out-of-process renderer is the long-term escape hatch |
 | macOS system audio capture APIs require newer OS and permissions | standalone loopback on older macOS | feature-gate at runtime; document BlackHole fallback; MVP ships without native loopback |
 | Beat tracking on non-electronic or rubato material | wrong-feeling transitions | confidence-gated fallback to Timed mode; host transport wins in the DAW; fixtures include hard cases so the gate is honest |

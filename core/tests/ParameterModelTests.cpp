@@ -50,7 +50,8 @@ TEST_CASE("findParameter finds an existing id and returns null for an unknown on
 
 TEST_CASE("v2-only parameters have an empty v1 alias", "[core][ParameterModel]") {
   const auto& params = allParameters();
-  for (const auto& newId : {"transitionMode", "transitionBars", "presetSelectionPolicy", "energyThreshold"}) {
+  for (const auto& newId : {"transitionMode", "transitionBars", "presetSelectionPolicy", "energyThreshold",
+                           "useHostTempo"}) {
     auto* p = findParameter(params, newId);
     REQUIRE(p != nullptr);
     CHECK(p->v1Alias.empty());

@@ -11,6 +11,8 @@ add_library(milkdawp_ui STATIC
   src/Shortcuts.cpp
   include/milkdawp/ui/TransitionSettings.h
   src/TransitionSettings.cpp
+  include/milkdawp/ui/OutputSettings.h
+  src/OutputSettings.cpp
   include/milkdawp/ui/DetachedControlsWindow.h
   src/DetachedControlsWindow.cpp
   include/milkdawp/ui/Icons.h

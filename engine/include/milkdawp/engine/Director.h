@@ -37,6 +37,9 @@ struct EngineControls {
   float blendSeconds = 3.0f;
   /// Energy mode: standard deviations above the rolling mean that count as a drop.
   float energyThreshold = 2.0f;
+  /// Plugin only: let the host's tempo/beat grid drive the beat modes while
+  /// it plays. Off: the audio-detected tempo always does.
+  bool useHostTempo = false;
   bool locked = false;
   core::PlaylistPolicy policy = core::PlaylistPolicy::Sequential;
   /// Jump to this playlist index whenever the value changes (host

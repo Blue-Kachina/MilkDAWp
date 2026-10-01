@@ -61,7 +61,6 @@ public:
   juce::Slider energyThresholdSlider;
   juce::ToggleButton hardCutToggle{"Hard cuts"};
   juce::Slider blendSlider;
-
 private:
   struct Row {
     juce::Label label;

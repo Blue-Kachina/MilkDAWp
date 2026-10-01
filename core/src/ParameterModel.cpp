@@ -46,6 +46,9 @@ const std::vector<ParameterSpec>& allParameters() {
       // Energy mode: a drop is broadband energy this many standard deviations
       // above the rolling mean (TransitionSchedulerConfig::energyThresholdMultiplier).
       {"energyThreshold", "Energy Threshold (sd)", ParameterType::Float, 0.5f, 4.0f, 2.0f, true, "", {}},
+      // Off: the audio-detected tempo always drives the beat modes, even while the host plays
+      // (no click, or a host tempo that doesn't match the music). On: the host's beat grid wins.
+      {"useHostTempo", "BPM From DAW", ParameterType::Bool, 0.0f, 1.0f, 0.0f, true, "", {}},
   };
   return params;
 }

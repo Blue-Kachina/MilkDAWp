@@ -45,6 +45,13 @@ struct WindowLayout {
   WindowBounds outputWindowBounds;
   bool controlsFloating = false;
   WindowBounds controlsWindowBounds;
+  /// Settings -> Output (M0 in layers_like_shrek.md): the pop-out button opens
+  /// fullscreen when set.
+  bool outputDefaultFullscreen = false;
+  /// The display the Output window opens on, identified by that display's
+  /// own bounds (JUCE has no stable monitor id). Empty means automatic. Kept
+  /// even while that display is unplugged, so it is used again when it returns.
+  WindowBounds outputTargetDisplay;
 
   bool operator==(const WindowLayout&) const = default;
 };

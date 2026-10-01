@@ -16,6 +16,7 @@ add_executable(milkdawp_core_tests
   PresetLibraryTests.cpp
   TransitionSchedulerTests.cpp
   StateSchemaTests.cpp
+  DisplayLayoutTests.cpp
   WavTests.cpp
   ScoringTests.cpp
   SeqlockSnapshotTests.cpp

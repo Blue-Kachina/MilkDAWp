@@ -109,6 +109,15 @@ public:
   /// Message thread. F11 from the editor: open fullscreen, or toggle
   /// fullscreen if already open (§4.9).
   void toggleOutputFullscreen();
+  /// Message thread. The drawer's pop-out button: opens the Output window,
+  /// fullscreen if Settings -> Output says to default to fullscreen.
+  void popOutOutputWindow();
+
+  /// Message thread. Settings -> Output. Saved with the state.
+  void setOutputDefaultFullscreen(bool fullscreen);
+  /// An empty `display` means automatic. Otherwise it is the chosen display's
+  /// own bounds. If the Output window is already open it moves to that display.
+  void setOutputTargetDisplay(const core::WindowBounds& display);
 
   /// The session's window layout (Phase 3.12/3.13), saved with the plugin
   /// state. Any thread may read it (getStateInformation can run off the
@@ -125,6 +134,9 @@ private:
   /// message thread, whatever thread setStateInformation ran on.
   void handleAsyncUpdate() override;
   void updateOutputLayout();
+  /// Windowed bounds for a new Output window: the saved ones, moved onto the
+  /// chosen target display when Settings -> Output picked one that is connected.
+  [[nodiscard]] juce::Rectangle<int> outputOpenBounds() const;
 
   static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
   void parameterChanged(const juce::String& parameterId, float newValue) override;
@@ -156,6 +168,7 @@ private:
     std::atomic<float>* transitionBars = nullptr;
     std::atomic<float>* presetSelectionPolicy = nullptr;
     std::atomic<float>* energyThreshold = nullptr;
+    std::atomic<float>* useHostTempo = nullptr;
   } raw_;
 
   int editorWidth_ = 480;

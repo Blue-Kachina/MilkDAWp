@@ -13,6 +13,7 @@
 #include "milkdawp/engine/OutputSurface.h"
 #include "milkdawp/ui/ControlDrawer.h"
 #include "milkdawp/ui/DetachedControlsWindow.h"
+#include "milkdawp/ui/OutputSettings.h"
 #include "milkdawp/ui/TransitionSettings.h"
 
 namespace milkdawp::plugin {
@@ -54,6 +55,10 @@ private:
   void choosePresetFolder();
   void setTransitionSettingsVisible(bool visible);
   void layoutTransitionSettings();
+  /// Settings -> Output: fullscreen default and target screen. Shares the
+  /// popover slot with the transition settings, so only one shows at a time.
+  void setOutputSettingsVisible(bool visible);
+  void layoutOutputSettings();
   /// Phase 3.13: moves `controlDrawer` into its own window, or back.
   void setControlsFloating(bool floating);
 
@@ -66,6 +71,7 @@ private:
   juce::Label diagnosticsLabel;
   milkdawp::ui::ControlDrawer controlDrawer;
   milkdawp::ui::TransitionSettingsPanel transitionSettings;
+  milkdawp::ui::OutputSettingsPanel outputSettings;
   // Shared across every open editor: one per editor would show each tooltip
   // once per plugin instance.
   juce::SharedResourcePointer<juce::TooltipWindow> tooltipWindow_;

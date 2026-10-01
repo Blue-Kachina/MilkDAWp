@@ -197,16 +197,19 @@ void Director::run() {
 
   // Steps the playlist until an entry loads (skipping blacklisted or
   // unreadable ones), at most once around. Sequential order is a
-  // user-visible sequence, so it always takes the very next entry. For the
-  // randomized policies -- where any of several candidates is an equally
-  // valid pick -- a hard cut (no crossfade to hide a slow compile) prefers
-  // one this session has already measured as cheap, when the scan turns one
-  // up (5.4); soft/timed cuts don't bother, since the blend hides a hitch
-  // either way.
+  // user-visible sequence, so it always takes the very next entry -- cost
+  // never overrides that guarantee. For the randomized policies -- where any
+  // of several candidates is an equally valid pick -- prefer one this
+  // session has already measured as cheap, when the scan turns one up (5.4).
+  // This applies to every cut style, not just hard cuts: projectM compiles a
+  // preset's shaders synchronously inside the load call regardless of
+  // smoothTransition, so a soft/timed cut's blend has no rendered frames to
+  // blend *during* that call either -- it stalls exactly like a hard cut,
+  // the blend only smooths what happens once loading is done.
   auto step = [&](bool forward, core::CutStyle cutStyle, float blendSeconds, std::int64_t dueAtSample) {
     const std::size_t attempts = std::min<std::size_t>(playlist->size(), 16);
 
-    if (cutStyle == core::CutStyle::Hard && playlist->policy() != core::PlaylistPolicy::Sequential) {
+    if (playlist->policy() != core::PlaylistPolicy::Sequential) {
       constexpr float kCheapEnoughMs = 20.0f; // only switch to a candidate confirmed at least this cheap
       std::optional<std::size_t> firstValidIndex;
       std::optional<std::size_t> cheapIndex;
@@ -409,7 +412,8 @@ void Director::run() {
       // Host transport (plugin): the host's beat grid wins while it plays
       // (§4.3); the detector keeps running for energy and for when it stops.
       const auto transport = transport_.read();
-      const bool hostDrives = followHostTransport_ && transport.isPlaying && transport.bpm > 0.0;
+      const bool hostDrives =
+          controls.useHostTempo && followHostTransport_ && transport.isPlaying && transport.bpm > 0.0;
       const auto beat = hostDrives ? pipeline->hostTransport.processTransport(transport) : detected;
       const bool playing = followHostTransport_ ? transport.isPlaying : true;
 

@@ -25,3 +25,4 @@ The canonical parameter surface (Phase 1.13), shared by the plugin's APVTS layou
 | `transitionBars` | Transition Bars (N) | Int | 1 .. 16 | 4 | yes | *(new in v2)* |
 | `presetSelectionPolicy` | Preset Selection | Choice | Sequential / ShuffleNoRepeat / Weighted | Sequential | yes | *(new in v2)* |
 | `energyThreshold` | Energy Threshold (sd) | Float | 0.5 .. 4 | 2 | yes | *(new in v2)* |
+| `useHostTempo` | BPM From DAW | Bool | true / false | false | yes | *(new in v2)* |

@@ -33,6 +33,7 @@ const float* parameterField(const ParameterValues& values, std::string_view id) 
       {"transitionBars", &ParameterValues::transitionBars},
       {"presetSelectionPolicy", &ParameterValues::presetSelectionPolicy},
       {"energyThreshold", &ParameterValues::energyThreshold},
+      {"useHostTempo", &ParameterValues::useHostTempo},
   };
   for (const auto& entry : kFields) {
     if (entry.id == id) {
@@ -65,6 +66,7 @@ EngineControls toEngineControls(const ParameterValues& values) noexcept {
   controls.cutStyle = values.hardCutEnabled > 0.5f ? core::CutStyle::Hard : core::CutStyle::Soft;
   controls.blendSeconds = values.softCutDuration;
   controls.energyThreshold = values.energyThreshold;
+  controls.useHostTempo = values.useHostTempo > 0.5f;
   controls.locked = values.lockCurrentPreset > 0.5f;
   // v1's Shuffle toggle wins over the v2 policy choice when on.
   controls.policy = values.shuffle > 0.5f ? core::PlaylistPolicy::ShuffleNoRepeat

@@ -28,6 +28,8 @@ add_library(milkdawp_core STATIC
   src/TransitionScheduler.cpp
   include/milkdawp/core/StateSchema.h
   src/StateSchema.cpp
+  include/milkdawp/core/DisplayLayout.h
+  src/DisplayLayout.cpp
   include/milkdawp/core/Wav.h
   src/Wav.cpp
   include/milkdawp/core/Scoring.h

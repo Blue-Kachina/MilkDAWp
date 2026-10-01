@@ -7,15 +7,22 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 
 #include "PluginEditor.h"
+#include "milkdawp/core/DisplayLayout.h"
 #include "milkdawp/core/ParameterModel.h"
 #include "milkdawp/core/StateSchema.h"
 #include "milkdawp/engine/ControlMapping.h"
+#include "milkdawp/ui/OutputSettings.h"
 
 namespace milkdawp::plugin {
 
 namespace {
+
+// Size of a new Output window with nothing saved (matches engine::OutputWindow).
+constexpr int kDefaultOutputWidth = 1280;
+constexpr int kDefaultOutputHeight = 720;
 
 core::TransportInfo extractTransportInfo(juce::AudioPlayHead* playHead) {
   core::TransportInfo info; // defaults: not playing, 0 bpm/ppq, 4/4, sample 0
@@ -124,6 +131,7 @@ MilkDAWpAudioProcessor::MilkDAWpAudioProcessor()
   raw_.transitionBars = apvts.getRawParameterValue("transitionBars");
   raw_.presetSelectionPolicy = apvts.getRawParameterValue("presetSelectionPolicy");
   raw_.energyThreshold = apvts.getRawParameterValue("energyThreshold");
+  raw_.useHostTempo = apvts.getRawParameterValue("useHostTempo");
 
   // Momentary commands: react to the 0 -> 1 edge wherever it comes from
   // (editor pulse, host automation, MIDI learn later). A per-block poll
@@ -175,6 +183,7 @@ engine::EngineControls MilkDAWpAudioProcessor::readControls() const noexcept {
   copy(values.transitionBars, raw_.transitionBars);
   copy(values.presetSelectionPolicy, raw_.presetSelectionPolicy);
   copy(values.energyThreshold, raw_.energyThreshold);
+  copy(values.useHostTempo, raw_.useHostTempo);
   return engine::toEngineControls(values);
 }
 
@@ -228,8 +237,57 @@ void MilkDAWpAudioProcessor::openOutputWindow(bool fullscreen) {
         });
   };
   outputWindow_->onLayoutChanged = [this] { updateOutputLayout(); };
-  outputWindow_->show(toRectangle(windowLayout().outputWindowBounds), fullscreen);
+  outputWindow_->show(outputOpenBounds(), fullscreen);
   updateOutputLayout();
+}
+
+juce::Rectangle<int> MilkDAWpAudioProcessor::outputOpenBounds() const {
+  const auto layout = windowLayout();
+  if (layout.outputTargetDisplay.isEmpty()) {
+    return toRectangle(layout.outputWindowBounds); // automatic: where it was, or the primary display
+  }
+  std::vector<core::WindowBounds> displays;
+  for (const auto& display : ui::currentDisplays()) {
+    displays.push_back(display.id);
+  }
+  const auto index = core::findDisplay(displays, layout.outputTargetDisplay);
+  if (index < 0) {
+    // The chosen display is unplugged. Fall back to automatic, but keep the
+    // choice in the state: it applies again when the display returns.
+    return toRectangle(layout.outputWindowBounds);
+  }
+  const auto placed = core::placeOnDisplay(layout.outputWindowBounds, displays[static_cast<std::size_t>(index)],
+                                           kDefaultOutputWidth, kDefaultOutputHeight);
+  return toRectangle(placed);
+}
+
+void MilkDAWpAudioProcessor::popOutOutputWindow() { openOutputWindow(windowLayout().outputDefaultFullscreen); }
+
+void MilkDAWpAudioProcessor::setOutputDefaultFullscreen(bool fullscreen) {
+  const std::lock_guard lock(layoutMutex_);
+  layout_.outputDefaultFullscreen = fullscreen;
+}
+
+void MilkDAWpAudioProcessor::setOutputTargetDisplay(const core::WindowBounds& display) {
+  {
+    const std::lock_guard lock(layoutMutex_);
+    if (layout_.outputTargetDisplay == display) {
+      return;
+    }
+    layout_.outputTargetDisplay = display;
+  }
+  if (outputWindow_ != nullptr) {
+    // A native window can't change display while keeping its GL context, so
+    // reopen it where the user asked, in the same mode. Its windowed bounds are
+    // dropped so it is centred on the new display, not left where it was.
+    const bool wasFullscreen = outputWindow_->isFullscreen();
+    {
+      const std::lock_guard lock(layoutMutex_);
+      layout_.outputWindowBounds = {};
+    }
+    outputWindow_.reset();
+    openOutputWindow(wasFullscreen);
+  }
 }
 
 void MilkDAWpAudioProcessor::closeOutputWindow() {
