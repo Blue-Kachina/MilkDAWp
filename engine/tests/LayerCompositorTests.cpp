@@ -24,7 +24,28 @@
 
 using namespace milkdawp::engine;
 
+// ThreadSanitizer cannot see inside Mesa. Where there is no GPU these tests run
+// on llvmpipe, a software renderer made of several libraries (libgallium,
+// libEGL_mesa, libLLVM) with worker threads of its own; TSan instruments none of
+// it and reports "races" and lock-order "inversions" inside Mesa's own teardown,
+// in a different test each run. Suppressing the libraries is unsound (ignoring
+// some of a lock/unlock pair makes TSan flag the rest), so under TSan the GL
+// tests stand down. They still run in the ASan, plain Linux and Windows jobs.
+#if defined(__SANITIZE_THREAD__)
+#define MILKDAWP_UNDER_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define MILKDAWP_UNDER_TSAN 1
+#endif
+#endif
+
 namespace {
+
+#ifdef MILKDAWP_UNDER_TSAN
+constexpr bool kUnderTsan = true;
+#else
+constexpr bool kUnderTsan = false;
+#endif
 
 constexpr int kSize = 8;
 
@@ -41,6 +62,10 @@ struct CompositorRig {
   std::string skipReason;
 
   CompositorRig() {
+    if (kUnderTsan) {
+      skipReason = "ThreadSanitizer cannot analyse Mesa's software renderer";
+      return; // before any GL object exists: nothing of Mesa's runs
+    }
     auto created = OffscreenGLContext::create();
     if (!created.context) {
       skipReason = created.error;
@@ -88,6 +113,10 @@ struct CompositorRig {
 };
 
 void reportUnavailable(const std::string& reason) {
+  if (kUnderTsan) {
+    SUCCEED("skipped under ThreadSanitizer: " + reason); // never a failure, whatever the environment says
+    return;
+  }
   if (juce::SystemStats::getEnvironmentVariable("MILKDAWP_REQUIRE_HEADLESS_RENDER", {}).isNotEmpty()) {
     FAIL("headless render required (MILKDAWP_REQUIRE_HEADLESS_RENDER) but unavailable: " + reason);
   }
