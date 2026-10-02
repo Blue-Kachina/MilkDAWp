@@ -9,8 +9,8 @@
 
 namespace milkdawp::ui {
 
-TransitionSettingsRelevance transitionSettingsRelevance(core::TransitionMode mode, bool jitterEnabled,
-                                                        bool hardCuts) noexcept {
+TransitionSettingsRelevance transitionSettingsRelevance(core::TransitionMode mode, bool jitterEnabled, bool hardCuts,
+                                                        bool gridSync) noexcept {
   using core::TransitionMode;
   TransitionSettingsRelevance r;
   r.bars = mode == TransitionMode::BeatQuantized || mode == TransitionMode::Hybrid || mode == TransitionMode::Energy;
@@ -20,6 +20,8 @@ TransitionSettingsRelevance transitionSettingsRelevance(core::TransitionMode mod
   r.jitterRange = r.jitter && jitterEnabled;
   r.timedDuration = r.timedDuration && !jitterEnabled; // jitter picks the duration instead
   r.energyThreshold = mode == TransitionMode::Energy;
+  r.grid = mode == TransitionMode::BeatQuantized || mode == TransitionMode::Energy;
+  r.gridOffset = r.grid && gridSync;
   // Manual prev/next steps use the cut style too, so these apply in every mode.
   r.blend = !hardCuts;
   return r;
@@ -54,9 +56,16 @@ TransitionSettingsPanel::TransitionSettingsPanel() {
   }
 
   for (auto* slider : {&barsSlider, &timedDurationSlider, &jitterMinSlider, &jitterMaxSlider, &energyThresholdSlider,
-                       &blendSlider}) {
+                       &blendSlider, &gridOffsetSlider}) {
     styleSlider(*slider);
   }
+  gridToggle.setTooltip("Cut on a fixed beat grid instead of counting bars from this instance's start. "
+                        "With the host's tempo, instances using the same bars and offset cut together");
+  gridOffsetSlider.setTooltip("Which beat of the bars-long cycle to cut on (0 = the first beat). "
+                              "Different offsets on different instances stagger their cuts");
+  addAndMakeVisible(gridToggle);
+  addAndMakeVisible(gridOffsetSlider);
+  gridToggle.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
   barsSlider.setTooltip("Bars between beat-quantized transitions");
   timedDurationSlider.setTooltip("Seconds between timed transitions");
   jitterToggle.setTooltip("Pick each timed interval at random from the jitter range");
@@ -85,6 +94,7 @@ TransitionSettingsPanel::TransitionSettingsPanel() {
   modeCombo.onChange = [this] { refreshRelevance(); };
   jitterToggle.onStateChange = [this] { refreshRelevance(); };
   hardCutToggle.onStateChange = [this] { refreshRelevance(); };
+  gridToggle.onStateChange = [this] { refreshRelevance(); };
 
   setSize(preferredWidth, preferredHeight);
   refreshRelevance();
@@ -104,7 +114,8 @@ void TransitionSettingsPanel::addRow(Row& row, const juce::String& text, juce::C
 void TransitionSettingsPanel::refreshRelevance() {
   const auto modeIndex = std::max(modeCombo.getSelectedItemIndex(), 0);
   const auto r = transitionSettingsRelevance(static_cast<core::TransitionMode>(modeIndex),
-                                             jitterToggle.getToggleState(), hardCutToggle.getToggleState());
+                                             jitterToggle.getToggleState(), hardCutToggle.getToggleState(),
+                                             gridToggle.getToggleState());
   // Dimmed, not disabled: a setting that does nothing in this mode can still
   // be prepared for the next one.
   const auto dim = [](juce::Component& c, bool relevant) { c.setAlpha(relevant ? 1.0f : 0.4f); };
@@ -119,6 +130,8 @@ void TransitionSettingsPanel::refreshRelevance() {
   dim(jitterMaxSlider, r.jitterRange);
   dim(energyRow.label, r.energyThreshold);
   dim(energyThresholdSlider, r.energyThreshold);
+  dim(gridToggle, r.grid);
+  dim(gridOffsetSlider, r.gridOffset);
   dim(blendRow.label, r.blend);
   dim(blendSlider, r.blend);
 }
@@ -161,6 +174,11 @@ void TransitionSettingsPanel::resized() {
   place(left, barsRow);
   place(left, timedRow);
   place(left, energyRow);
+  {
+    auto line = left.removeFromTop(rowHeight);
+    gridToggle.setBounds(line.removeFromLeft(line.getWidth() * 45 / 100));
+    gridOffsetSlider.setBounds(line);
+  }
 
   placeToggle(right, jitterToggle);
   place(right, jitterMinRow);

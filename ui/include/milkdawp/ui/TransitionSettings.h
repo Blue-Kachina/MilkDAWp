@@ -19,10 +19,12 @@ struct TransitionSettingsRelevance {
   bool jitterRange = false;    // jitter relevant and switched on
   bool energyThreshold = false; // Energy only
   bool blend = false;          // soft cuts only
+  bool grid = false;           // BeatQuantized, and Energy's fallback to it: cut on a fixed beat grid
+  bool gridOffset = false;     // grid relevant and switched on
 };
 
 [[nodiscard]] TransitionSettingsRelevance transitionSettingsRelevance(core::TransitionMode mode, bool jitterEnabled,
-                                                                      bool hardCuts) noexcept;
+                                                                      bool hardCuts, bool gridSync = false) noexcept;
 
 /// Phase 3.4: the transition settings popover's widgets -- mode, bars (N),
 /// timed duration, jitter and its range, energy threshold, hard cuts, blend.
@@ -59,6 +61,10 @@ public:
   juce::Slider jitterMinSlider;
   juce::Slider jitterMaxSlider;
   juce::Slider energyThresholdSlider;
+  /// Layers: cut on the beats where beat % (bars x 4) == the offset, so
+  /// instances following the host's tempo cut together (or staggered).
+  juce::ToggleButton gridToggle{"Bar grid"};
+  juce::Slider gridOffsetSlider;
   juce::ToggleButton hardCutToggle{"Hard cuts"};
   juce::Slider blendSlider;
 private:

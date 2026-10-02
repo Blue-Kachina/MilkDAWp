@@ -31,6 +31,12 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
   // exactly the "overlapping sibling peer" risk §4.11 flagged for the
   // drawer, hit here for real on Windows.
   outputSurface.addAndMakeVisible(diagnosticsLabel);
+  // Same rule as above: a child of outputSurface, or the GL buffer swap paints over it.
+  sendingLabel.setJustificationType(juce::Justification::centred);
+  sendingLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+  sendingLabel.setColour(juce::Label::backgroundColourId, juce::Colours::black.withAlpha(0.6f));
+  sendingLabel.setInterceptsMouseClicks(false, false);
+  outputSurface.addChildComponent(sendingLabel);
   outputSurface.addAndMakeVisible(controlDrawer);
 
   controlDrawer.prevButton.onClick = [this] { pulseTrigger("triggerPrev"); };
@@ -71,7 +77,12 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
   transitionButtonAttachments_.push_back(
       std::make_unique<ButtonAttachment>(apvts, "transitionJitterEnabled", transitionSettings.jitterToggle));
   transitionButtonAttachments_.push_back(
-      std::make_unique<ButtonAttachment>(apvts, "hardCutEnabled", transitionSettings.hardCutToggle));  transitionSettings.refreshRelevance();
+      std::make_unique<ButtonAttachment>(apvts, "hardCutEnabled", transitionSettings.hardCutToggle));
+  transitionButtonAttachments_.push_back(
+      std::make_unique<ButtonAttachment>(apvts, "transitionGridSync", transitionSettings.gridToggle));
+  transitionSliderAttachments_.push_back(
+      std::make_unique<SliderAttachment>(apvts, "transitionGridOffset", transitionSettings.gridOffsetSlider));
+  transitionSettings.refreshRelevance();
 
   // Settings -> Output, same compositing rules as the transition popover.
   outputSurface.addChildComponent(outputSettings);
@@ -83,6 +94,22 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
   outputSettings.onTargetDisplayChanged = [this](const milkdawp::core::WindowBounds& display) {
     processorRef.setOutputTargetDisplay(display);
   };
+  outputSettings.onTargetInstanceChanged = [this](const std::string& instanceId) {
+    processorRef.setOutputTargetInstance(instanceId);
+    refreshOutputSettingsInstances();
+  };
+  outputSettings.onInstanceLabelChanged = [this](const std::string& label) {
+    processorRef.setInstanceLabel(label);
+    refreshOutputSettingsInstances();
+  };
+  outputSettings.onSourceParameterChanged = [this](const std::string& senderId, const std::string& parameterId,
+                                                   float value) {
+    processorRef.setLayerSenderParameter(senderId, parameterId, value);
+  };
+  layerSliderAttachments_.push_back(std::make_unique<SliderAttachment>(apvts, "layerOpacity", outputSettings.opacitySlider));
+  layerSliderAttachments_.push_back(std::make_unique<SliderAttachment>(apvts, "layerOrder", outputSettings.orderSlider));
+  layerBlendAttachment_ = std::make_unique<ComboBoxAttachment>(apvts, "layerBlend", outputSettings.blendCombo);
+  layerMuteAttachment_ = std::make_unique<ButtonAttachment>(apvts, "layerMute", outputSettings.muteToggle);
 
   // Plugin build keeps EDITOR_WANTS_KEYBOARD_FOCUS FALSE (carried over from
   // v1, which received keys fine in practice) -- that only affects the
@@ -124,6 +151,9 @@ void MilkDAWpAudioProcessorEditor::resized() {
   outputSurface.setBounds(getLocalBounds());
   // Relative to outputSurface's own local bounds now that it's the parent.
   diagnosticsLabel.setBounds(outputSurface.getLocalBounds().removeFromTop(80).reduced(8));
+  sendingLabel.setBounds(outputSurface.getLocalBounds()
+                             .withTrimmedBottom(kDrawerHeight)
+                             .withSizeKeepingCentre(std::min(getWidth() - 16, 360), 56));
   if (controlsWindow_ == nullptr) {
     controlDrawer.setBounds(outputSurface.getLocalBounds().removeFromBottom(kDrawerHeight));
   }
@@ -191,11 +221,30 @@ void MilkDAWpAudioProcessorEditor::layoutOutputSettings() {
   outputSettings.setBounds(area.removeFromBottom(height).removeFromRight(width));
 }
 
+void MilkDAWpAudioProcessorEditor::refreshOutputSettingsInstances() {
+  milkdawp::ui::InstanceState state;
+  for (const auto& info : processorRef.otherInstances()) {
+    state.choices.push_back({info.id, info.name, info.canBeTarget});
+  }
+  state.target = processorRef.windowLayout().outputTargetInstance;
+  state.sending = processorRef.isSendingToOtherInstance();
+  state.canChooseTarget = processorRef.canChooseOutputTarget();
+  state.label = processorRef.instanceLabel();
+  state.defaultName = processorRef.instanceDisplayName();
+  state.senderCount = processorRef.layerSenderCount();
+  for (const auto& sender : processorRef.layerSenders()) {
+    state.sources.push_back(
+        {sender.id, sender.name, sender.opacity, sender.blend, sender.mute, sender.order, sender.gpuMs});
+  }
+  outputSettings.setInstanceState(state);
+}
+
 void MilkDAWpAudioProcessorEditor::setOutputSettingsVisible(bool visible) {
   if (visible) {
     setTransitionSettingsVisible(false);
     const auto layout = processorRef.windowLayout();
     outputSettings.refresh(layout.outputDefaultFullscreen, layout.outputTargetDisplay);
+    refreshOutputSettingsInstances();
     layoutOutputSettings();
   }
   outputSettings.setVisible(visible);
@@ -419,6 +468,22 @@ void MilkDAWpAudioProcessorEditor::timerCallback() {
   // Host automation moves the attached widgets but not their dimming.
   if (transitionSettings.isVisible()) {
     transitionSettings.refreshRelevance();
+  }
+  // Other instances come and go (and link up) while the panel is open.
+  if (outputSettings.isVisible()) {
+    refreshOutputSettingsInstances();
+  }
+
+  // While this instance's picture lives in another instance's Output window,
+  // its own surface has nothing new to show: say where the picture went.
+  const bool sending = processorRef.isSendingToOtherInstance();
+  if (sending) {
+    sendingLabel.setText("Shown in \"" + juce::String(processorRef.outputTargetName()) +
+                             "\"'s Output window.\nUse the pop-out button to open it.",
+                         juce::dontSendNotification);
+  }
+  if (sendingLabel.isVisible() != sending) {
+    sendingLabel.setVisible(sending);
   }
 }
 

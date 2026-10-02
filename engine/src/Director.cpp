@@ -50,6 +50,8 @@ core::TransitionSchedulerConfig schedulerConfigFor(const EngineControls& control
   core::TransitionSchedulerConfig config;
   config.mode = controls.transitionMode;
   config.bars = std::max<std::uint32_t>(controls.transitionBars, 1);
+  config.gridAnchored = controls.gridAnchored;
+  config.gridOffsetBeats = controls.gridOffsetBeats;
   config.timedDurationSeconds = std::max(controls.timedDurationSeconds, 0.1f);
   config.jitterEnabled = controls.jitterEnabled;
   config.jitterMinSeconds = std::min(controls.jitterMinSeconds, controls.jitterMaxSeconds);
@@ -166,6 +168,8 @@ void Director::run() {
   std::int32_t appliedPresetIndex = INT_MIN;
   std::uint32_t seenNext = nextRequests_.load();
   std::uint32_t seenPrevious = previousRequests_.load();
+  std::uint32_t seenReissue = reissueRequests_.load();
+  bool reissuePending = false; // kept until a handoff slot is free to send it through
 
   bool haveLastTransport = false;
   core::TransportInfo lastTransport;
@@ -385,6 +389,20 @@ void Director::run() {
       if (!issue(index, controls.cutStyle, controls.blendSeconds, static_cast<std::int64_t>(ring_.samplePosition()))) {
         manualStep(true, controls); // unreadable or blacklisted: the next one that loads
       }
+    }
+    if (const auto reissue = reissueRequests_.load(); reissue != seenReissue) {
+      seenReissue = reissue;
+      reissuePending = true;
+    }
+    if (reissuePending) {
+      // The current preset again, as a hard cut now, without moving the playlist.
+      const auto current = status.currentIndex;
+      if (!playlist || current < 0 || static_cast<std::size_t>(current) >= playlist->size()) {
+        reissuePending = false; // nothing is playing: there is nothing to repeat
+      } else if (issue(static_cast<std::size_t>(current), core::CutStyle::Hard, 0.0f,
+                       static_cast<std::int64_t>(ring_.samplePosition()))) {
+        reissuePending = false;
+      } // else: no free handoff slot this instant; try again next loop
     }
 
     const double rate = sampleRate_.load();

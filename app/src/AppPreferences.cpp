@@ -19,6 +19,8 @@ constexpr const char* kMainFullscreen = "mainWindowFullscreen";
 constexpr const char* kOutputOpen = "outputWindowOpen";
 constexpr const char* kOutputBounds = "outputWindowBounds";
 constexpr const char* kOutputFullscreen = "outputWindowFullscreen";
+constexpr const char* kOutputDefaultFullscreen = "outputDefaultFullscreen";
+constexpr const char* kOutputTargetDisplay = "outputTargetDisplay";
 constexpr const char* kControlsFloating = "controlsFloating";
 constexpr const char* kControlsBounds = "controlsWindowBounds";
 constexpr const char* kDrawerPinned = "drawerPinned";
@@ -84,6 +86,8 @@ AppState loadAppState(const juce::PropertySet& properties) {
   state.outputWindowOpen = properties.getBoolValue(kOutputOpen, false);
   state.outputWindowBounds = readBounds(properties, kOutputBounds);
   state.outputWindowFullscreen = properties.getBoolValue(kOutputFullscreen, false);
+  state.outputDefaultFullscreen = properties.getBoolValue(kOutputDefaultFullscreen, false);
+  state.outputTargetDisplay = readBounds(properties, kOutputTargetDisplay);
   state.controlsFloating = properties.getBoolValue(kControlsFloating, false);
   state.controlsWindowBounds = readBounds(properties, kControlsBounds);
   state.drawerPinned = properties.getBoolValue(kDrawerPinned, true);
@@ -110,6 +114,8 @@ void saveAppState(const AppState& state, juce::PropertySet& properties) {
   properties.setValue(kOutputOpen, state.outputWindowOpen);
   writeBounds(properties, kOutputBounds, state.outputWindowBounds);
   properties.setValue(kOutputFullscreen, state.outputWindowFullscreen);
+  properties.setValue(kOutputDefaultFullscreen, state.outputDefaultFullscreen);
+  writeBounds(properties, kOutputTargetDisplay, state.outputTargetDisplay);
   properties.setValue(kControlsFloating, state.controlsFloating);
   writeBounds(properties, kControlsBounds, state.controlsWindowBounds);
   properties.setValue(kDrawerPinned, state.drawerPinned);

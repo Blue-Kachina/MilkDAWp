@@ -59,6 +59,8 @@ private:
   /// popover slot with the transition settings, so only one shows at a time.
   void setOutputSettingsVisible(bool visible);
   void layoutOutputSettings();
+  /// Hands the panel the Layers state (other instances, this one's target and name).
+  void refreshOutputSettingsInstances();
   /// Phase 3.13: moves `controlDrawer` into its own window, or back.
   void setControlsFloating(bool floating);
 
@@ -69,6 +71,9 @@ private:
   MilkDAWpAudioProcessor& processorRef;
   engine::OutputSurface outputSurface;
   juce::Label diagnosticsLabel;
+  /// Shown instead of a (frozen) picture while this instance's picture is part
+  /// of another instance's canvas.
+  juce::Label sendingLabel;
   milkdawp::ui::ControlDrawer controlDrawer;
   milkdawp::ui::TransitionSettingsPanel transitionSettings;
   milkdawp::ui::OutputSettingsPanel outputSettings;
@@ -82,6 +87,10 @@ private:
   std::vector<std::unique_ptr<SliderAttachment>> transitionSliderAttachments_;
   std::vector<std::unique_ptr<ButtonAttachment>> transitionButtonAttachments_;
   std::unique_ptr<ComboBoxAttachment> transitionSettingsModeAttachment_;
+  // The Output panel's layer controls (opacity, order, blend, mute).
+  std::vector<std::unique_ptr<SliderAttachment>> layerSliderAttachments_;
+  std::unique_ptr<ComboBoxAttachment> layerBlendAttachment_;
+  std::unique_ptr<ButtonAttachment> layerMuteAttachment_;
   std::unique_ptr<juce::FileChooser> folderChooser_;
   // Declared after controlDrawer so it is destroyed first: it only borrows
   // the drawer, and hands it back in its destructor.

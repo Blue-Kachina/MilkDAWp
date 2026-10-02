@@ -34,6 +34,12 @@ const float* parameterField(const ParameterValues& values, std::string_view id) 
       {"presetSelectionPolicy", &ParameterValues::presetSelectionPolicy},
       {"energyThreshold", &ParameterValues::energyThreshold},
       {"useHostTempo", &ParameterValues::useHostTempo},
+      {"layerOpacity", &ParameterValues::layerOpacity},
+      {"layerBlend", &ParameterValues::layerBlend},
+      {"layerMute", &ParameterValues::layerMute},
+      {"layerOrder", &ParameterValues::layerOrder},
+      {"transitionGridSync", &ParameterValues::transitionGridSync},
+      {"transitionGridOffset", &ParameterValues::transitionGridOffset},
   };
   for (const auto& entry : kFields) {
     if (entry.id == id) {
@@ -59,6 +65,8 @@ EngineControls toEngineControls(const ParameterValues& values) noexcept {
   controls.transitionMode = static_cast<core::TransitionMode>(
       std::clamp(static_cast<int>(values.transitionMode), 0, static_cast<int>(core::TransitionMode::Energy)));
   controls.transitionBars = static_cast<std::uint32_t>(std::max(1.0f, values.transitionBars));
+  controls.gridAnchored = values.transitionGridSync > 0.5f;
+  controls.gridOffsetBeats = static_cast<std::uint32_t>(std::max(0.0f, std::round(values.transitionGridOffset)));
   controls.timedDurationSeconds = values.transitionDurationSeconds;
   controls.jitterEnabled = values.transitionJitterEnabled > 0.5f;
   controls.jitterMinSeconds = values.transitionDurationMin;

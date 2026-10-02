@@ -39,6 +39,8 @@ unset(_mdw_bundle_id)
 unset(_mdw_product_name)
 
 target_sources(milkdawp_plugin PRIVATE
+  src/LayerRegistry.h
+  src/LayerRegistry.cpp
   src/PluginProcessor.h
   src/PluginProcessor.cpp
   src/PluginEditor.h

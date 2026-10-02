@@ -48,6 +48,22 @@ TEST_CASE("Hard cuts make the blend time irrelevant", "[ui][TransitionSettings]"
   CHECK_FALSE(transitionSettingsRelevance(TransitionMode::Hybrid, false, true).blend);
 }
 
+TEST_CASE("The bar grid applies to the beat-quantized modes, and its offset only once it is on",
+          "[ui][TransitionSettings][layers]") {
+  const auto off = transitionSettingsRelevance(TransitionMode::BeatQuantized, false, false, false);
+  CHECK(off.grid);
+  CHECK_FALSE(off.gridOffset);
+  const auto on = transitionSettingsRelevance(TransitionMode::BeatQuantized, false, false, true);
+  CHECK(on.grid);
+  CHECK(on.gridOffset);
+
+  CHECK(transitionSettingsRelevance(TransitionMode::Energy, false, false, true).gridOffset); // its fallback
+  for (const auto mode : {TransitionMode::Manual, TransitionMode::Timed, TransitionMode::Hybrid}) {
+    CHECK_FALSE(transitionSettingsRelevance(mode, false, false, true).grid);
+    CHECK_FALSE(transitionSettingsRelevance(mode, false, false, true).gridOffset);
+  }
+}
+
 TEST_CASE("Beat badge shows the source and confidence", "[ui][BeatBadge]") {
   CHECK(describeBeat(BeatBadgeSource::None, 120.0f, 1.0f).text.endsWith("--"));
   CHECK(describeBeat(BeatBadgeSource::Detected, 0.0f, 1.0f).text.endsWith("--"));

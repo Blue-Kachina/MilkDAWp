@@ -3,6 +3,7 @@
 
 #include "milkdawp/core/StateSchema.h"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <locale>
@@ -86,6 +87,13 @@ bool parseBool(const std::string& text, bool& out) {
   return true;
 }
 
+// The format is one "key=value" per line, so a value cannot hold a line break.
+std::string singleLine(std::string text) {
+  std::replace_if(
+      text.begin(), text.end(), [](char c) { return c == '\n' || c == '\r'; }, ' ');
+  return text;
+}
+
 bool parseBounds(const std::string& text, WindowBounds& out) {
   WindowBounds b;
   int* fields[] = {&b.x, &b.y, &b.width, &b.height};
@@ -118,6 +126,9 @@ std::string serializeStateSchemaV2(const StateSchemaV2& state) {
   out << "controlsWindowBounds=" << formatBounds(state.windows.controlsWindowBounds) << "\n";
   out << "outputDefaultFullscreen=" << (state.windows.outputDefaultFullscreen ? 1 : 0) << "\n";
   out << "outputTargetDisplay=" << formatBounds(state.windows.outputTargetDisplay) << "\n";
+  out << "outputTargetInstance=" << singleLine(state.windows.outputTargetInstance) << "\n";
+  out << "instanceId=" << singleLine(state.instanceId) << "\n";
+  out << "instanceLabel=" << singleLine(state.instanceLabel) << "\n";
   for (const auto& [id, value] : state.paramValues) {
     out << "param." << id << "=" << value << "\n";
   }
@@ -163,6 +174,12 @@ StateSchemaV2 deserializeStateSchemaV2(const std::string& text) {
       parseBool(value, state.windows.outputDefaultFullscreen);
     } else if (key == "outputTargetDisplay") {
       parseBounds(value, state.windows.outputTargetDisplay);
+    } else if (key == "outputTargetInstance") {
+      state.windows.outputTargetInstance = value;
+    } else if (key == "instanceId") {
+      state.instanceId = value;
+    } else if (key == "instanceLabel") {
+      state.instanceLabel = value;
     } else if (key.rfind("param.", 0) == 0) {
       float parsed = 0.0f;
       if (parseFloat(value, parsed)) {

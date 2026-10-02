@@ -151,6 +151,37 @@ TEST_CASE("StateSchemaV2 round-trips the Output settings", "[core][StateSchema]"
   CHECK(roundTripped.windows.outputTargetDisplay == original.windows.outputTargetDisplay);
 }
 
+TEST_CASE("StateSchemaV2 round-trips the instance identity and Output target (Layers)", "[core][StateSchema]") {
+  StateSchemaV2 original;
+  original.instanceId = "7f1c2f0e-6a64-4d1e-8a5e-0f1b2c3d4e5f";
+  original.instanceLabel = "Kick drum";
+  original.windows.outputTargetInstance = "0a9b8c7d-1111-2222-3333-444455556666";
+
+  const auto roundTripped = deserializeStateSchemaV2(serializeStateSchemaV2(original));
+  CHECK(roundTripped.instanceId == original.instanceId);
+  CHECK(roundTripped.instanceLabel == original.instanceLabel);
+  CHECK(roundTripped.windows.outputTargetInstance == original.windows.outputTargetInstance);
+}
+
+TEST_CASE("StateSchemaV2 keeps a label with a line break from corrupting the lines after it", "[core][StateSchema]") {
+  StateSchemaV2 original;
+  original.instanceLabel = "Lead\nsynth\r\nbus";
+  original.windows.outputDefaultFullscreen = true;
+  original.editorWidth = 640;
+
+  const auto roundTripped = deserializeStateSchemaV2(serializeStateSchemaV2(original));
+  CHECK(roundTripped.instanceLabel == "Lead synth  bus");
+  CHECK(roundTripped.windows.outputDefaultFullscreen); // keys after the label still parse
+  CHECK(roundTripped.editorWidth == 640);
+}
+
+TEST_CASE("StateSchemaV2 from before Layers has no identity and no target", "[core][StateSchema]") {
+  const auto state = deserializeStateSchemaV2("schemaVersion=2\neditorWidth=800\n");
+  CHECK(state.instanceId.empty());
+  CHECK(state.instanceLabel.empty());
+  CHECK(state.windows.outputTargetInstance.empty());
+}
+
 TEST_CASE("StateSchemaV2 without Output settings keys defaults to windowed on an automatic display",
           "[core][StateSchema]") {
   const auto state = deserializeStateSchemaV2("schemaVersion=2\noutputWindowOpen=1\n");

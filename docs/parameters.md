@@ -26,3 +26,9 @@ The canonical parameter surface (Phase 1.13), shared by the plugin's APVTS layou
 | `presetSelectionPolicy` | Preset Selection | Choice | Sequential / ShuffleNoRepeat / Weighted | Sequential | yes | *(new in v2)* |
 | `energyThreshold` | Energy Threshold (sd) | Float | 0.5 .. 4 | 2 | yes | *(new in v2)* |
 | `useHostTempo` | BPM From DAW | Bool | true / false | false | yes | *(new in v2)* |
+| `layerOpacity` | Layer Opacity | Float | 0 .. 1 | 1 | yes | *(new in v2)* |
+| `layerBlend` | Layer Blend | Choice | Normal / Add / Screen / Multiply / Luma key | Normal | yes | *(new in v2)* |
+| `layerMute` | Layer Mute | Bool | true / false | false | yes | *(new in v2)* |
+| `layerOrder` | Layer Order | Int | 0 .. 7 | 0 | yes | *(new in v2)* |
+| `transitionGridSync` | Sync Cuts to Bar Grid | Bool | true / false | false | yes | *(new in v2)* |
+| `transitionGridOffset` | Grid Offset (beats) | Int | 0 .. 15 | 0 | yes | *(new in v2)* |

@@ -19,6 +19,7 @@
 #include "milkdawp/engine/Visualizer.h"
 #include "milkdawp/ui/ControlDrawer.h"
 #include "milkdawp/ui/DetachedControlsWindow.h"
+#include "milkdawp/ui/OutputSettings.h"
 #include "milkdawp/ui/TransitionSettings.h"
 
 namespace milkdawp::app {
@@ -56,6 +57,11 @@ public:
   /// drop (§4.6). Ignored if `path` is neither.
   void openPath(const juce::String& path);
   void setTransitionSettingsVisible(bool visible);
+  /// Settings -> Output: fullscreen default and which screen the window opens on.
+  void setOutputSettingsVisible(bool visible);
+  /// The drawer's Output button: closes the window if open, else opens it
+  /// (fullscreen if Settings -> Output says to).
+  void toggleOutputWindowFromDrawer();
   void toggleOutputWindow(bool fullscreen);
   void setControlsFloating(bool floating);
   void setDiagnosticsVisible(bool visible);
@@ -64,6 +70,7 @@ public:
   [[nodiscard]] ui::ControlDrawer& drawer() noexcept { return drawer_; }
 
   [[nodiscard]] bool isTransitionSettingsVisible() const { return transitionSettings_.isVisible(); }
+  [[nodiscard]] bool isOutputSettingsVisible() const { return outputSettings_.isVisible(); }
   [[nodiscard]] bool isOutputWindowOpen() const noexcept { return outputWindow_ != nullptr; }
   [[nodiscard]] bool areControlsFloating() const noexcept { return controlsWindow_ != nullptr; }
   [[nodiscard]] bool isDiagnosticsVisible() const { return diagnosticsLabel_.isVisible(); }
@@ -96,6 +103,7 @@ private:
   void timerCallback() override;
   void publishControls();
   void layoutTransitionSettings();
+  void layoutOutputSettings();
   void updateInputHint();
   void updateStatusText();
   void notifyStateChanged();
@@ -115,6 +123,7 @@ private:
   juce::TextButton inputHint_;
   ui::ControlDrawer drawer_;
   ui::TransitionSettingsPanel transitionSettings_;
+  ui::OutputSettingsPanel outputSettings_;
   juce::SharedResourcePointer<juce::TooltipWindow> tooltipWindow_;
   // After every widget it binds: destroyed first.
   ParameterBinding binding_;

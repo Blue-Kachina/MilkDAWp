@@ -49,6 +49,22 @@ const std::vector<ParameterSpec>& allParameters() {
       // Off: the audio-detected tempo always drives the beat modes, even while the host plays
       // (no click, or a host tempo that doesn't match the music). On: the host's beat grid wins.
       {"useHostTempo", "BPM From DAW", ParameterType::Bool, 0.0f, 1.0f, 0.0f, true, "", {}},
+
+      // --- Layers (layers_like_shrek.md §2.3): how this instance's picture is mixed when its Output
+      // targets another instance's canvas. They do nothing while an instance shows its own window.
+      {"layerOpacity", "Layer Opacity", ParameterType::Float, 0.0f, 1.0f, 1.0f, true, "", {}},
+      {"layerBlend", "Layer Blend", ParameterType::Choice, 0.0f, 4.0f, 0.0f, true, "",
+       {"Normal", "Add", "Screen", "Multiply", "Luma key"}},
+      {"layerMute", "Layer Mute", ParameterType::Bool, 0.0f, 1.0f, 0.0f, true, "", {}},
+      // Lower draws first (bottom). Equal values keep the order the layers joined the canvas.
+      {"layerOrder", "Layer Order", ParameterType::Int, 0.0f, 7.0f, 0.0f, true, "", {}},
+
+      // --- Layers: cutting together (layers_like_shrek.md L7) ---
+      // On: beat-quantized cuts land on the beats where beat % (bars x 4) == the offset, instead of every N bars
+      // counted from when this instance started. With "BPM From DAW" every instance shares the host's beat
+      // numbers, so equal settings cut together and different offsets stagger ("kick on 1, vocal on 3").
+      {"transitionGridSync", "Sync Cuts to Bar Grid", ParameterType::Bool, 0.0f, 1.0f, 0.0f, true, "", {}},
+      {"transitionGridOffset", "Grid Offset (beats)", ParameterType::Int, 0.0f, 15.0f, 0.0f, true, "", {}},
   };
   return params;
 }

@@ -7,10 +7,12 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 #include <juce_opengl/juce_opengl.h>
 
 #include "milkdawp/engine/GlFrameTarget.h"
+#include "milkdawp/engine/LayerCompositor.h"
 #include "milkdawp/engine/OffscreenGLContext.h"
 #include "milkdawp/engine/PcmFeeder.h"
 #include "milkdawp/engine/ProjectMInstance.h"
@@ -44,6 +46,30 @@ struct LoadFailureFlag {
 void onPresetSwitchFailed(const char*, const char*, void* userData) {
   static_cast<LoadFailureFlag*>(userData)->failed = true;
 }
+
+// Render-thread state for one layer: its projectM instance, the cursor it
+// reads its channel's audio with, and its load-failure flag. Always held by
+// unique_ptr: projectM keeps a pointer to `loadFailure`, so a Layer must never
+// move. The channel is the director-side half (LayerChannel.h) and outlives it.
+struct Layer {
+  Layer(LayerChannel& channelRef, std::unique_ptr<ProjectMInstance> instanceRef, float beatSensitivity)
+      : channel(channelRef), instance(std::move(instanceRef)),
+        feeder(std::max(instance->maxPcmSamples(), 1U), channelRef.audio().numChannels()),
+        appliedBeatSensitivity(beatSensitivity) {
+    instance->setPresetSwitchFailedCallback(&onPresetSwitchFailed, &loadFailure);
+  }
+  Layer(const Layer&) = delete;
+  Layer& operator=(const Layer&) = delete;
+
+  LayerChannel& channel;
+  std::unique_ptr<ProjectMInstance> instance;
+  PcmFeeder feeder;
+  LoadFailureFlag loadFailure;
+  float appliedBeatSensitivity;
+  // Where this layer draws before the compositor mixes it. Only exists while
+  // there is more than one layer: a lone layer draws straight into the output.
+  std::unique_ptr<GlFrameTarget> target;
+};
 
 // The readback fallback's GPU half (ADR-0009): two pixel-pack buffers used in
 // turn. Each frame's glReadPixels goes into one while the other, filled a
@@ -140,8 +166,8 @@ std::unique_ptr<RenderEngine> RenderEngine::create(const core::AudioRing& audio,
 
 RenderEngine::RenderEngine(const core::AudioRing& audio, const Config& config,
                            std::unique_ptr<ProjectMLibrary> library, std::string unavailableReason)
-    : audio_(audio), config_(config), library_(std::move(library)), unavailableReason_(std::move(unavailableReason)),
-      sampleRate_(config.sampleRate), executor_(config.sampleRate) {}
+    : config_(config), library_(std::move(library)), unavailableReason_(std::move(unavailableReason)),
+      sampleRate_(config.sampleRate), primary_(audio, config.sampleRate) {}
 
 RenderEngine::~RenderEngine() {
   stopRequested_.store(true);
@@ -169,6 +195,46 @@ std::string RenderEngine::projectMVersion() const { return library_ ? library_->
 void RenderEngine::setUnavailable(std::string reason) {
   const std::lock_guard lock(textMutex_);
   unavailableReason_ = std::move(reason);
+}
+
+bool RenderEngine::submitLayerOp(LayerOp::Kind kind, LayerChannel& channel) {
+  std::future<bool> outcome;
+  {
+    const std::lock_guard lock(layerOpsMutex_);
+    if (layerOpsClosed_ || !thread_.joinable()) {
+      return false;
+    }
+    layerOps_.push_back({kind, &channel, {}});
+    outcome = layerOps_.back().result.get_future();
+  }
+  // The render thread answers every queued request, including on its way out.
+  return outcome.get();
+}
+
+bool RenderEngine::addLayer(LayerChannel& channel) {
+  if (!isAvailable()) {
+    return false;
+  }
+  return submitLayerOp(LayerOp::Kind::Add, channel);
+}
+
+void RenderEngine::removeLayer(LayerChannel& channel) {
+  if (&channel == &primary_) {
+    return;
+  }
+  submitLayerOp(LayerOp::Kind::Remove, channel);
+}
+
+void RenderEngine::yieldPrimaryLayer(bool yield) {
+  primaryYielded_.store(yield);
+  if (!yield || !isAvailable()) {
+    return;
+  }
+  // The render thread checks the flag at the top of every iteration (at worst
+  // a slow frame or a 20 ms idle sleep apart). Give up if it exits instead.
+  for (int i = 0; i < 500 && !primaryIdle_.load() && isAvailable(); ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
 }
 
 int RenderEngine::registerSurface() noexcept {
@@ -259,9 +325,19 @@ void RenderEngine::run() {
   struct ExitSignal {
     RenderEngine& engine;
     ~ExitSignal() {
-      const std::lock_guard lock(engine.shareMutex_);
-      engine.renderThreadExited_ = true;
-      engine.shareCondition_.notify_all();
+      {
+        const std::lock_guard lock(engine.shareMutex_);
+        engine.renderThreadExited_ = true;
+        engine.shareCondition_.notify_all();
+      }
+      // Anyone blocked in addLayer()/removeLayer() gets an answer, and later
+      // requests are refused rather than queued for a thread that is gone.
+      const std::lock_guard lock(engine.layerOpsMutex_);
+      engine.layerOpsClosed_ = true;
+      for (auto& op : engine.layerOps_) {
+        op.result.set_value(false);
+      }
+      engine.layerOps_.clear();
     }
   } exitSignal{*this};
 
@@ -293,26 +369,67 @@ void RenderEngine::run() {
   settings.height = config_.initialHeight;
   settings.beatSensitivity = beatSensitivity_.load();
   std::string error;
-  auto instance = ProjectMInstance::create(*library_, settings, error);
-  if (!instance) {
+  auto primaryInstance = ProjectMInstance::create(*library_, settings, error);
+  if (!primaryInstance) {
     targets = {};
     setUnavailable(error);
     return;
   }
-  LoadFailureFlag loadFailure;
-  instance->setPresetSwitchFailedCallback(&onPresetSwitchFailed, &loadFailure);
-  float appliedBeatSensitivity = settings.beatSensitivity;
+  // The layers this thread renders. Exactly one for now, the primary one a
+  // solo Visualizer drives; the loops below already run per layer.
+  std::vector<std::unique_ptr<Layer>> layers;
+  layers.push_back(std::make_unique<Layer>(primary_, std::move(primaryInstance), settings.beatSensitivity));
+  Layer& primary = *layers.front();
+  // Mixes the layers once there are several; a lone layer never uses it. If it
+  // fails to build, several layers degrade to showing the primary one.
+  LayerCompositor compositor;
 
-  PcmFeeder feeder(std::max(instance->maxPcmSamples(), 1U), audio_.numChannels());
+  // addLayer()/removeLayer() requests, answered between frames. Creating and
+  // destroying a projectM instance needs this thread's context, hence here.
+  const auto applyLayerOps = [&] {
+    std::vector<LayerOp> ops;
+    {
+      const std::lock_guard lock(layerOpsMutex_);
+      if (layerOps_.empty()) {
+        return;
+      }
+      ops.swap(layerOps_);
+    }
+    for (auto& op : ops) {
+      bool done = false;
+      const auto existing = std::find_if(layers.begin(), layers.end(),
+                                         [&](const auto& layer) { return &layer->channel == op.channel; });
+      if (op.kind == LayerOp::Kind::Add) {
+        if (existing == layers.end() && layers.size() < static_cast<std::size_t>(kMaxLayers)) {
+          ProjectMInstance::Settings added = settings;
+          added.width = primary.instance->width();
+          added.height = primary.instance->height();
+          added.beatSensitivity = beatSensitivity_.load();
+          std::string layerError;
+          if (auto instance = ProjectMInstance::create(*library_, added, layerError)) {
+            layers.push_back(std::make_unique<Layer>(*op.channel, std::move(instance), added.beatSensitivity));
+            done = true;
+          }
+        }
+      } else if (existing != layers.end() && existing->get() != &primary) {
+        layers.erase(existing); // its instance and target go with this thread's context current
+        done = true;
+      }
+      op.result.set_value(done);
+    }
+  };
 
   GLuint timerQuery = 0;
   glGenQueries(1, &timerQuery);
+  // One per layer plus one for the mix: see the render section.
+  std::array<GLuint, kMaxLayers + 1> layerQueries{};
+  glGenQueries(static_cast<GLsizei>(layerQueries.size()), layerQueries.data());
   std::unique_ptr<PixelPackReadback> pixelPack; // only while a surface needs readback
 
   RenderStats stats;
   stats.running = true;
-  stats.width = instance->width();
-  stats.height = instance->height();
+  stats.width = primary.instance->width();
+  stats.height = primary.instance->height();
   stats_.publish(stats);
 
   // Surfaces may attach from here on: textures exist and the handle is live.
@@ -330,6 +447,7 @@ void RenderEngine::run() {
   while (!stopRequested_.load()) {
     context.pumpPlatformEvents();
     serviceShareRequest(context);
+    applyLayerOps();
 
     int surfaces = 0;
     int widest = 0;
@@ -349,10 +467,15 @@ void RenderEngine::run() {
       tallest = std::max(tallest, static_cast<int>(packed & 0xFFFFU));
     }
     stats.surfaces = surfaces;
+    stats.layers = static_cast<int>(layers.size());
+    const bool multiLayer = layers.size() > 1;
 
-    if (!anyVisible) {
+    const bool yielded = primaryYielded_.load();
+    primaryIdle_.store(yielded);
+    if (!anyVisible || yielded) {
       // 2.10: nothing to show, so no GPU work. Context, instance, preset and
       // visual state all stay as they are until a surface is visible again.
+      // (A yielded primary layer idles the same way: see yieldPrimaryLayer.)
       if (!stats.paused) {
         stats.paused = true;
         stats.framesPerSecond = 0.0f;
@@ -373,63 +496,149 @@ void RenderEngine::run() {
     }
 
     const float beatSensitivity = beatSensitivity_.load();
-    if (beatSensitivity != appliedBeatSensitivity) {
-      instance->setBeatSensitivity(beatSensitivity);
-      appliedBeatSensitivity = beatSensitivity;
+    for (auto& layer : layers) {
+      if (beatSensitivity != layer->appliedBeatSensitivity) {
+        layer->instance->setBeatSensitivity(beatSensitivity);
+        layer->appliedBeatSensitivity = beatSensitivity;
+      }
     }
 
     const float scale = std::clamp(qualityScale_.load(), 0.25f, 1.0f);
     const int width = std::clamp(static_cast<int>(std::lround(widest * scale)), 16, config_.maxDimension);
     const int height = std::clamp(static_cast<int>(std::lround(tallest * scale)), 16, config_.maxDimension);
-    if (width != instance->width() || height != instance->height()) {
+    if (width != primary.instance->width() || height != primary.instance->height()) {
       for (auto& target : targets) {
         target->resize(width, height);
       }
-      instance->setOutputSize(width, height);
+      for (auto& layer : layers) {
+        layer->instance->setOutputSize(width, height);
+      }
     }
 
-    presetHandoff_.receive();
-    executor_.setSampleRate(sampleRate_.load());
-    executor_.onTick(static_cast<std::int64_t>(audio_.samplePosition()),
-                     [&](const TransitionExecutor::DueTransition& due) {
-                       const auto slot = presetHandoff_.find(due.request.presetId);
-                       if (!slot) {
-                         return; // superseded, or never delivered
-                       }
-                       const bool soft = due.request.cutStyle == core::CutStyle::Soft;
-                       if (soft) {
-                         instance->setSoftCutDuration(std::max(static_cast<double>(due.request.blendSeconds), 0.1));
-                       }
-                       loadFailure.failed = false;
-                       const auto loadStart = Clock::now();
-                       instance->loadPresetData(presetHandoff_.text(*slot), soft);
-                       stats.lastPresetLoadMs = static_cast<float>(millisecondsBetween(loadStart, Clock::now()));
-                       presetHandoff_.release(*slot);
-                       stats.lastLandingErrorSamples = due.landingErrorSamples;
-                       if (loadFailure.failed) {
-                         ++stats.presetsFailed;
-                         presetHandoff_.reportFailure(due.request.presetId);
-                       } else {
-                         ++stats.presetsLoaded;
-                         stats.currentPresetId = due.request.presetId;
-                       }
-                     });
+    const double sampleRate = sampleRate_.load();
+    // Loading a preset parses and compiles shaders synchronously on this thread,
+    // so with several layers at most one does it per frame: the others' due
+    // transitions simply wait a frame. The layer serviced first rotates, so no
+    // layer is starved. (With one layer nothing is ever deferred.)
+    bool loadedThisFrame = false;
+    const std::size_t layerTotal = layers.size();
+    for (std::size_t visit = 0; visit < layerTotal; ++visit) {
+      auto& layer = layers[(visit + static_cast<std::size_t>(frameNumber)) % layerTotal];
+      auto& channel = layer->channel;
+      auto& handoff = channel.presetHandoff();
+      handoff.receive();
+      channel.executor().setSampleRate(sampleRate);
+      if (!loadedThisFrame) {
+        channel.executor().onTick(
+          static_cast<std::int64_t>(channel.audio().samplePosition()),
+          [&](const TransitionExecutor::DueTransition& due) {
+            const auto slot = handoff.find(due.request.presetId);
+            if (!slot) {
+              return; // superseded, or never delivered
+            }
+            const bool soft = due.request.cutStyle == core::CutStyle::Soft;
+            if (soft) {
+              layer->instance->setSoftCutDuration(std::max(static_cast<double>(due.request.blendSeconds), 0.1));
+            }
+            layer->loadFailure.failed = false;
+            const auto loadStart = Clock::now();
+            layer->instance->loadPresetData(handoff.text(*slot), soft);
+            const auto loadMs = static_cast<float>(millisecondsBetween(loadStart, Clock::now()));
+            handoff.release(*slot);
+            loadedThisFrame = true;
+            channel.reportPresetLoaded(loadMs);
+            // RenderStats describe the primary layer until per-layer stats exist.
+            const bool isPrimary = layer.get() == &primary;
+            if (isPrimary) {
+              stats.lastPresetLoadMs = loadMs;
+              stats.lastLandingErrorSamples = due.landingErrorSamples;
+            }
+            if (layer->loadFailure.failed) {
+              if (isPrimary) {
+                ++stats.presetsFailed;
+              }
+              handoff.reportFailure(due.request.presetId);
+            } else if (isPrimary) {
+              ++stats.presetsLoaded;
+              stats.currentPresetId = due.request.presetId;
+            }
+          });
+      }
 
-    feeder.feed(audio_, [&](const float* samples, std::size_t frames, int channels) {
-      instance->addPcm(samples, frames, channels);
-    });
+      // A layer that will not be drawn this frame is not fed either: the feeder
+      // only ever hands over the newest audio, so it picks up from "now" later.
+      if (!multiLayer || (channel.visible() && channel.opacity() > 0.0f)) {
+        layer->feeder.feed(channel.audio(), [&](const float* samples, std::size_t frames, int channels) {
+          layer->instance->addPcm(samples, frames, channels);
+        });
+      }
+    }
 
     const std::size_t index = (lastIndex + 1) % kFrameCount;
     const auto renderStart = Clock::now();
-    glBeginQuery(GL_TIME_ELAPSED, timerQuery);
-    instance->renderTo(targets[index]->framebuffer());
-    glEndQuery(GL_TIME_ELAPSED);
+    const bool composited = multiLayer && compositor.ok();
+    // GL allows one GL_TIME_ELAPSED query at a time: a lone layer is timed as a
+    // whole, several are timed layer by layer (and the mix) and summed.
+    std::array<Layer*, kMaxLayers> drawn{};
+    std::size_t drawnCount = 0;
+    if (!composited) {
+      // One layer draws straight into the output frame (so does the primary
+      // alone if the compositor could not be built).
+      glBeginQuery(GL_TIME_ELAPSED, timerQuery);
+      primary.instance->renderTo(targets[index]->framebuffer());
+      glEndQuery(GL_TIME_ELAPSED);
+    } else {
+      // Several: each drawn layer renders into its own target, then the
+      // compositor mixes them bottom to top into the output frame.
+      for (auto& layer : layers) {
+        if (layer->channel.visible() && layer->channel.opacity() > 0.0f) {
+          // Stable insertion by order(): equal orders keep the order added.
+          std::size_t at = drawnCount++;
+          while (at > 0 && drawn[at - 1]->channel.order() > layer->channel.order()) {
+            drawn[at] = drawn[at - 1];
+            --at;
+          }
+          drawn[at] = layer.get();
+        }
+      }
+      std::array<LayerDraw, kMaxLayers> draws{};
+      for (std::size_t i = 0; i < drawnCount; ++i) {
+        Layer& layer = *drawn[i];
+        if (!layer.target) {
+          layer.target = std::make_unique<GlFrameTarget>(targets[index]->width(), targets[index]->height());
+        } else {
+          layer.target->resize(targets[index]->width(), targets[index]->height());
+        }
+        glBeginQuery(GL_TIME_ELAPSED, layerQueries[i]);
+        layer.instance->renderTo(layer.target->framebuffer());
+        glEndQuery(GL_TIME_ELAPSED);
+        draws[i] = {layer.target->texture(), layer.channel.opacity(), layer.channel.blend()};
+      }
+      glBeginQuery(GL_TIME_ELAPSED, layerQueries[kMaxLayers]);
+      compositor.compose(*targets[index], std::span<const LayerDraw>(draws.data(), drawnCount));
+      glEndQuery(GL_TIME_ELAPSED);
+    }
     // Other contexts sample this texture next; it must be complete first.
     glFinish();
     const auto renderEnd = Clock::now();
 
     GLuint64 gpuNanoseconds = 0;
-    glGetQueryObjectui64v(timerQuery, GL_QUERY_RESULT, &gpuNanoseconds);
+    if (!composited) {
+      glGetQueryObjectui64v(timerQuery, GL_QUERY_RESULT, &gpuNanoseconds);
+    } else {
+      for (auto& layer : layers) {
+        layer->channel.reportGpuMs(0.0f); // hidden layers cost nothing; drawn ones are set below
+      }
+      for (std::size_t i = 0; i < drawnCount; ++i) {
+        GLuint64 nanoseconds = 0;
+        glGetQueryObjectui64v(layerQueries[i], GL_QUERY_RESULT, &nanoseconds);
+        drawn[i]->channel.reportGpuMs(static_cast<float>(static_cast<double>(nanoseconds) / 1.0e6));
+        gpuNanoseconds += nanoseconds;
+      }
+      GLuint64 mixNanoseconds = 0;
+      glGetQueryObjectui64v(layerQueries[kMaxLayers], GL_QUERY_RESULT, &mixNanoseconds);
+      gpuNanoseconds += mixNanoseconds;
+    }
 
     ++frameNumber;
     lastIndex = index;
@@ -458,17 +667,18 @@ void RenderEngine::run() {
     stats.framesRendered = frameNumber;
     stats.cpuFrameMs = static_cast<float>(millisecondsBetween(renderStart, renderEnd));
     stats.gpuFrameMs = static_cast<float>(static_cast<double>(gpuNanoseconds) / 1.0e6);
-    stats.width = instance->width();
-    stats.height = instance->height();
+    stats.width = primary.instance->width();
+    stats.height = primary.instance->height();
     stats_.publish(stats);
   }
 
   available_.store(false, std::memory_order_release);
   sharedContextHandle_.store(nullptr, std::memory_order_release);
   glDeleteQueries(1, &timerQuery);
+  glDeleteQueries(static_cast<GLsizei>(layerQueries.size()), layerQueries.data());
   pixelPack.reset();
   readback_.clear();
-  instance.reset();
+  layers.clear(); // projectM instances go before the context, on this thread
   targets = {};
   stats.running = false;
   stats_.publish(stats);

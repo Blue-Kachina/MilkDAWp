@@ -20,6 +20,9 @@ add_library(milkdawp_engine STATIC
   include/milkdawp/engine/PcmFeeder.h
   include/milkdawp/engine/FrameReadbackExchange.h
   include/milkdawp/engine/PresetHandoff.h
+  include/milkdawp/engine/LayerChannel.h
+  include/milkdawp/engine/LayerCompositor.h
+  src/LayerCompositor.cpp
   include/milkdawp/engine/PresetCompileTimeCache.h
   include/milkdawp/engine/Director.h
   include/milkdawp/engine/ControlMapping.h

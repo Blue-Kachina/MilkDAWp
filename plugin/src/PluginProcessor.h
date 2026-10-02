@@ -9,6 +9,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "LayerRegistry.h"
 #include "milkdawp/core/HostTransport.h"
 #include "milkdawp/core/SeqlockSnapshot.h"
 #include "milkdawp/core/StateSchema.h"
@@ -77,6 +78,7 @@ public:
 
   void getStateInformation(juce::MemoryBlock& destData) override;
   void setStateInformation(const void* data, int sizeInBytes) override;
+  void updateTrackProperties(const TrackProperties& properties) override;
 
   /// Message/UI thread. Snapshot of the host transport as of the most
   /// recent processBlock() call (or a default-constructed TransportInfo if
@@ -119,6 +121,41 @@ public:
   /// own bounds. If the Output window is already open it moves to that display.
   void setOutputTargetDisplay(const core::WindowBounds& display);
 
+  // ---- Layers (layers_like_shrek.md): sending this instance's picture to another's Output window ----
+  /// Stable across project reloads; what another instance saves to point at this one.
+  [[nodiscard]] std::string instanceId() const;
+  /// What the target picker calls this instance: the user's own label, else the
+  /// host's track name, else a short form of the id.
+  [[nodiscard]] std::string instanceDisplayName() const;
+  [[nodiscard]] std::string instanceLabel() const;
+  void setInstanceLabel(const std::string& label);
+  /// The instances this one could send to right now (self excluded, instances
+  /// that already send elsewhere marked `canBeTarget = false`).
+  [[nodiscard]] std::vector<InstanceInfo> otherInstances() const;
+  /// False while other instances send to this one: Layers does not chain.
+  [[nodiscard]] bool canChooseOutputTarget() const;
+  /// How many instances currently send to this one.
+  [[nodiscard]] int layerSenderCount() const;
+  /// The instances sending to this one, with how each is mixed: the Sources list.
+  [[nodiscard]] std::vector<LayerRegistry::Entry::SenderInfo> layerSenders() const {
+    return registryEntry_->senders();
+  }
+  /// Edits how one of those senders is mixed (`layerOpacity`, `layerBlend`, `layerMute`, `layerOrder`).
+  void setLayerSenderParameter(const std::string& senderId, const std::string& parameterId, float plainValue) {
+    registryEntry_->setSenderParameter(senderId, parameterId, plainValue);
+  }
+  /// True while this instance's picture is part of another instance's canvas.
+  [[nodiscard]] bool isSendingToOtherInstance() const noexcept { return hub_ != nullptr; }
+  /// The name of the instance this one sends to (empty when it does not).
+  [[nodiscard]] std::string outputTargetName() const { return hub_ != nullptr ? hub_->name() : std::string{}; }
+  /// Empty means this instance has its own Output window. Saved with the state;
+  /// the link is kept while the target does not exist and made when it appears.
+  void setOutputTargetInstance(const std::string& instanceId);
+  /// Attaches to / detaches from the target to match `windowLayout().outputTargetInstance`.
+  /// Message thread. Runs on its own whenever instances come and go; public so
+  /// it can be driven directly.
+  void reconcileLayers();
+
   /// The session's window layout (Phase 3.12/3.13), saved with the plugin
   /// state. Any thread may read it (getStateInformation can run off the
   /// message thread); the message thread keeps it current as windows open,
@@ -142,8 +179,25 @@ private:
   void parameterChanged(const juce::String& parameterId, float newValue) override;
   [[nodiscard]] engine::EngineControls readControls() const noexcept;
 
+  /// This instance's own Output window, whatever the target setting says.
+  void openOwnOutputWindow();
+  void toggleOwnOutputFullscreen();
+  /// Pushes the layer parameters (opacity, blend, mute, order) to the engine's primary layer.
+  void applyLayerParams() noexcept;
+  void attachToHub(const std::shared_ptr<LayerRegistry::Entry>& hub, const std::string& hubId);
+  void detachFromHub();
+  void refreshRegistryName();
+
   std::unique_ptr<engine::Visualizer> visualizer_;
   std::unique_ptr<engine::OutputWindow> outputWindow_;
+  // Layers. `registryEntry_` is this instance in the process-wide registry;
+  // `hub_` is the entry it currently sends its picture to (null: own window).
+  std::shared_ptr<LayerRegistry::Entry> registryEntry_;
+  std::shared_ptr<LayerRegistry::Entry> hub_;
+  std::string hubId_;
+  int registryListener_ = 0;
+  std::string instanceLabel_;  // guarded by layoutMutex_
+  std::string hostTrackName_;  // guarded by layoutMutex_
   mutable std::mutex layoutMutex_; // never taken on the audio thread
   core::WindowLayout layout_;
 
@@ -169,6 +223,12 @@ private:
     std::atomic<float>* presetSelectionPolicy = nullptr;
     std::atomic<float>* energyThreshold = nullptr;
     std::atomic<float>* useHostTempo = nullptr;
+    std::atomic<float>* layerOpacity = nullptr;
+    std::atomic<float>* layerBlend = nullptr;
+    std::atomic<float>* layerMute = nullptr;
+    std::atomic<float>* layerOrder = nullptr;
+    std::atomic<float>* transitionGridSync = nullptr;
+    std::atomic<float>* transitionGridOffset = nullptr;
   } raw_;
 
   int editorWidth_ = 480;

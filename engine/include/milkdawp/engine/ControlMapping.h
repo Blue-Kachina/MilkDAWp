@@ -32,6 +32,15 @@ struct ParameterValues {
   float presetSelectionPolicy = 0.0f;
   float energyThreshold = 2.0f;
   float useHostTempo = 0.0f;
+  // Layers: how this instance is mixed onto another instance's canvas. Not part
+  // of EngineControls (the Director never reads them); a shell applies them to
+  // its `LayerChannel` (opacity, blend, visible = !mute, order).
+  float layerOpacity = 1.0f;
+  float layerBlend = 0.0f;
+  float layerMute = 0.0f;
+  float layerOrder = 0.0f;
+  float transitionGridSync = 0.0f;
+  float transitionGridOffset = 0.0f;
 };
 
 /// The field for a `ParameterModel` id, or nullptr for parameters the engine

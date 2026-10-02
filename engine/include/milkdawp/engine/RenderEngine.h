@@ -8,11 +8,13 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <juce_core/juce_core.h>
 
@@ -20,6 +22,7 @@
 #include "milkdawp/core/Messages.h"
 #include "milkdawp/core/SeqlockSnapshot.h"
 #include "milkdawp/engine/FrameReadbackExchange.h"
+#include "milkdawp/engine/LayerChannel.h"
 #include "milkdawp/engine/PresetHandoff.h"
 #include "milkdawp/engine/ProjectMLibrary.h"
 #include "milkdawp/engine/TransitionExecutor.h"
@@ -40,6 +43,7 @@ struct RenderStats {
   int width = 0;                 // current FBO size
   int height = 0;
   int surfaces = 0;              // attached surfaces (visible or not)
+  int layers = 1;                // projectM layers being rendered (Layers; 1 for a solo engine)
   std::uint32_t currentPresetId = 0;
   std::uint32_t presetsLoaded = 0;
   std::uint32_t presetsFailed = 0;
@@ -116,10 +120,41 @@ public:
   void setSampleRate(double sampleRate) noexcept { sampleRate_.store(sampleRate); }
 
   // ---- director thread (single producer) ----
+  /// Both address the engine's primary layer, the one a solo `Visualizer`
+  /// drives (layers_like_shrek.md L0).
   bool pushTransition(const core::TransitionRequestMessage& request) noexcept {
-    return executor_.pushRequest(request);
+    return primary_.pushTransition(request);
   }
-  [[nodiscard]] PresetHandoff& presetHandoff() noexcept { return presetHandoff_; }
+  [[nodiscard]] PresetHandoff& presetHandoff() noexcept { return primary_.presetHandoff(); }
+  [[nodiscard]] LayerChannel& primaryLayer() noexcept { return primary_; }
+
+  // ---- layers (Layers L0/L2, layers_like_shrek.md §3) ----
+  /// The most layers one engine renders, the primary included.
+  static constexpr int kMaxLayers = 8;
+  /// Adds another projectM instance to this engine's context, fed by `channel`
+  /// and drawn over the layers below it (by `channel.order()`). Blocks until
+  /// the render thread has created it. False if the engine is not running,
+  /// already has `kMaxLayers`, or `channel` is already attached. Not for the
+  /// render thread. `channel` and the ring it reads must outlive the layer,
+  /// i.e. stay alive until `removeLayer()` returns.
+  bool addLayer(LayerChannel& channel);
+  /// Detaches `channel`'s layer, blocking until the render thread has destroyed
+  /// it and can no longer touch the channel. A no-op if it is not attached (and
+  /// the primary layer cannot be removed). Not for the render thread.
+  void removeLayer(LayerChannel& channel);
+  /// Makes this engine stop rendering and consuming its own primary layer
+  /// (it idles like an engine with no visible surface), so that layer's
+  /// `primaryLayer()` channel can be attached to *another* engine with
+  /// `addLayer()`: a channel's queues have a single consumer, so two render
+  /// threads must never drain it. `yield(true)` blocks until the render thread
+  /// has stopped touching the channel (or the engine is not running); pair it
+  /// with `yield(false)` after the channel has been removed from the other
+  /// engine. Not for the render thread.
+  void yieldPrimaryLayer(bool yield);
+  [[nodiscard]] bool isPrimaryLayerYielded() const noexcept { return primaryYielded_.load(); }
+  // With a single layer the output is that layer as is; with several it is
+  // mixed by `LayerCompositor` (opacity, blend, order and visibility come from
+  // each layer's `LayerChannel`).
 
   // ---- surfaces (any thread) ----
   static constexpr int kMaxSurfaces = 8;
@@ -189,7 +224,6 @@ private:
     std::atomic<bool> visible{false};
   };
 
-  const core::AudioRing& audio_;
   const Config config_;
   std::unique_ptr<ProjectMLibrary> library_;
 
@@ -199,12 +233,26 @@ private:
 
   std::atomic<bool> available_{false};
   std::atomic<bool> stopRequested_{false};
+  std::atomic<bool> primaryYielded_{false};
+  std::atomic<bool> primaryIdle_{false}; // the render thread's acknowledgement of primaryYielded_
   std::atomic<float> beatSensitivity_{1.0f};
   std::atomic<float> qualityScale_{1.0f};
   std::atomic<double> sampleRate_;
 
-  TransitionExecutor executor_;
-  PresetHandoff presetHandoff_;
+  LayerChannel primary_;
+
+  // addLayer()/removeLayer() requests, applied by the render thread between
+  // frames. `layerOpsClosed_` is set (under the mutex) when the render thread
+  // ends, after which requests are refused instead of queued.
+  struct LayerOp {
+    enum class Kind { Add, Remove } kind;
+    LayerChannel* channel;
+    std::promise<bool> result;
+  };
+  bool submitLayerOp(LayerOp::Kind kind, LayerChannel& channel);
+  std::mutex layerOpsMutex_;
+  std::vector<LayerOp> layerOps_;
+  bool layerOpsClosed_ = false;
 
   std::array<SurfaceSlot, kMaxSurfaces> surfaces_;
   std::atomic<void*> sharedContextHandle_{nullptr};

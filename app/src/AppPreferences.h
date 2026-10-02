@@ -42,6 +42,10 @@ struct AppState {
   bool outputWindowOpen = false;
   juce::Rectangle<int> outputWindowBounds; // also picks the display it opens on
   bool outputWindowFullscreen = false;
+  /// Settings -> Output: the Output window opens fullscreen from the drawer's
+  /// button, and on this display (identified by its own bounds; empty = automatic).
+  bool outputDefaultFullscreen = false;
+  juce::Rectangle<int> outputTargetDisplay;
 
   bool controlsFloating = false;
   juce::Rectangle<int> controlsWindowBounds;

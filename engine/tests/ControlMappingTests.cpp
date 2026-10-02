@@ -28,6 +28,22 @@ TEST_CASE("ParameterValues defaults match the parameter model", "[engine][Contro
   CHECK(engine::parameterField(defaults, "noSuchParameter") == nullptr);
 }
 
+TEST_CASE("toEngineControls maps the bar-grid sync and offset", "[engine][ControlMapping][layers]") {
+  engine::ParameterValues values;
+  auto controls = engine::toEngineControls(values);
+  CHECK_FALSE(controls.gridAnchored); // off by default: cuts count bars from when the instance started
+  CHECK(controls.gridOffsetBeats == 0);
+
+  values.transitionGridSync = 1.0f;
+  values.transitionGridOffset = 5.0f;
+  controls = engine::toEngineControls(values);
+  CHECK(controls.gridAnchored);
+  CHECK(controls.gridOffsetBeats == 5);
+
+  values.transitionGridOffset = -3.0f; // out of range input never wraps to a huge unsigned value
+  CHECK(engine::toEngineControls(values).gridOffsetBeats == 0);
+}
+
 TEST_CASE("parameterField writes through to the struct", "[engine][ControlMapping]") {
   engine::ParameterValues values;
   *engine::parameterField(values, "transitionBars") = 8.0f;

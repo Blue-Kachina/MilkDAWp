@@ -4,6 +4,7 @@ add_executable(milkdawp_ui_tests
   DrawerStateTests.cpp
   ShortcutsTests.cpp
   TransitionSettingsTests.cpp
+  OutputSettingsTests.cpp
   IconsTests.cpp
   ControlDrawerLayoutTests.cpp
   PresetMenuTests.cpp

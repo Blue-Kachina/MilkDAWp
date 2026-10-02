@@ -219,6 +219,88 @@ TEST_CASE("Headless render: explicit frame time drives time-based preset content
   CHECK(channelDistance(first[1], first[2]) > 10);
 }
 
+TEST_CASE("Headless render: two projectM instances share one context and render to their own FBOs (Layers L1)",
+          "[engine][headless][layers]") {
+  // Layers puts N projectM instances in the engine's one GL context, each
+  // rendering to its own FBO (4.2's render_frame_fbo). This is the risk that
+  // design rests on: that rendering B neither draws into A's target nor
+  // disturbs A's time-driven output. mdw-border's border colour is a pure
+  // function of frame time, so A's corner pixel is reproducible, with or
+  // without B rendering in between.
+  constexpr int frames = 71;
+  constexpr std::size_t corner = (static_cast<std::size_t>(4) * kWidth + 4) * 4;
+  auto colourAt = [&](const std::vector<std::uint8_t>& pixels) {
+    return static_cast<std::uint32_t>(pixels[corner]) << 16U | static_cast<std::uint32_t>(pixels[corner + 1]) << 8U |
+           pixels[corner + 2];
+  };
+
+  // A alone, as the reference.
+  std::vector<std::uint32_t> alone;
+  {
+    HeadlessRig rig;
+    if (!rig.ready()) {
+      reportUnavailable(rig.skipReason);
+      return;
+    }
+    const auto text = readPreset("mdw-border.milk");
+    rig.instance->loadPresetData(text.c_str(), false);
+    for (int n = 0; n < frames; ++n) {
+      alone.push_back(colourAt(rig.renderFrame(n)));
+    }
+  }
+
+  // A and B interleaved in one context.
+  HeadlessRig rig;
+  REQUIRE(rig.ready());
+  ProjectMInstance::Settings settings;
+  settings.width = kWidth;
+  settings.height = kHeight;
+  std::string error;
+  auto second = ProjectMInstance::create(*rig.library, settings, error);
+  REQUIRE(second != nullptr);
+  GlFrameTarget secondTarget(kWidth, kHeight);
+
+  const auto border = readPreset("mdw-border.milk");
+  const auto wave = readPreset("mdw-wave.milk");
+  rig.instance->loadPresetData(border.c_str(), false);
+  second->loadPresetData(wave.c_str(), false);
+
+  std::vector<std::uint32_t> interleaved;
+  std::vector<std::uint8_t> firstPixels;
+  std::vector<std::uint8_t> secondPixels;
+  double secondBrightest = 0.0;
+  for (int n = 0; n < frames; ++n) {
+    firstPixels = rig.renderFrame(n);
+    interleaved.push_back(colourAt(firstPixels));
+
+    constexpr int samplesPerFrame = 800;
+    std::vector<float> pcm(static_cast<std::size_t>(samplesPerFrame) * 2, 0.5f);
+    second->addPcm(pcm.data(), samplesPerFrame, 2);
+    second->setFrameTime(n / kFps);
+    second->renderTo(secondTarget.framebuffer());
+    juce::gl::glFinish();
+    secondTarget.readPixels(secondPixels);
+    secondBrightest = std::max(secondBrightest, meanBrightness(secondPixels));
+  }
+
+  CHECK(secondBrightest > 3.0); // B draws something into its own target
+  CHECK(meanDifference(firstPixels, secondPixels) > 1.0); // and it is not a copy of A's frame
+
+  auto channelDistance = [](std::uint32_t a, std::uint32_t b) {
+    int worst = 0;
+    for (const unsigned shift : {16U, 8U, 0U}) {
+      worst = std::max(worst, std::abs(static_cast<int>((a >> shift) & 0xFFU) - static_cast<int>((b >> shift) & 0xFFU)));
+    }
+    return worst;
+  };
+  for (const int n : {10, 40, 70}) {
+    INFO("frame " << n);
+    CHECK(channelDistance(alone[static_cast<std::size_t>(n)], interleaved[static_cast<std::size_t>(n)]) <= 2);
+  }
+
+  second.reset(); // GL objects before the context, which `rig` destroys
+}
+
 TEST_CASE("Headless render: a preset projectM rejects fires the failure callback", "[engine][headless]") {
   HeadlessRig rig;
   if (!rig.ready()) {

@@ -79,6 +79,18 @@ std::optional<ScheduledTransition> TransitionScheduler::tickBeatQuantized(
     std::size_t nextPlaylistIndex, std::uint32_t nextPresetId) {
   const std::uint64_t beatsPerCycle = static_cast<std::uint64_t>(config_.bars) * 4;
 
+  if (config_.gridAnchored) {
+    if (!beatJustCrossed || crossedBeatIndex % beatsPerCycle != config_.gridOffsetBeats % beatsPerCycle) {
+      return std::nullopt;
+    }
+    if (gridHasCut_ && crossedBeatIndex == gridLastCutBeatIndex_) {
+      return std::nullopt;
+    }
+    gridHasCut_ = true;
+    gridLastCutBeatIndex_ = crossedBeatIndex;
+    return makeTransition(crossedBeatSample, nextPlaylistIndex, nextPresetId);
+  }
+
   if (!beatQuantizedTargetSet_) {
     if (!beatJustCrossed) {
       return std::nullopt;

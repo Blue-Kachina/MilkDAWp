@@ -43,6 +43,8 @@ TEST_CASE("App preferences round-trip through a PropertySet", "[app][preferences
   state.outputWindowOpen = true;
   state.outputWindowBounds = {1920, 0, 1280, 720};
   state.outputWindowFullscreen = true;
+  state.outputDefaultFullscreen = true;
+  state.outputTargetDisplay = {1920, -120, 2560, 1440};
   state.controlsFloating = true;
   state.controlsWindowBounds = {100, 900, 700, 72};
   state.drawerPinned = false;
@@ -70,6 +72,8 @@ TEST_CASE("App preferences round-trip through a PropertySet", "[app][preferences
   CHECK(loaded.outputWindowOpen);
   CHECK(loaded.outputWindowBounds == state.outputWindowBounds);
   CHECK(loaded.outputWindowFullscreen);
+  CHECK(loaded.outputDefaultFullscreen);
+  CHECK(loaded.outputTargetDisplay == state.outputTargetDisplay);
   CHECK(loaded.controlsFloating);
   CHECK(loaded.controlsWindowBounds == state.controlsWindowBounds);
   CHECK_FALSE(loaded.drawerPinned);

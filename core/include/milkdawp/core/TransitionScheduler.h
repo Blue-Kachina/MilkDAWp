@@ -20,6 +20,17 @@ struct TransitionSchedulerConfig {
   TransitionMode mode = TransitionMode::BeatQuantized;
   std::uint32_t bars = 4; // BeatQuantized/Hybrid/Energy-fallback granularity
 
+  // BeatQuantized (and Energy's fallback to it): cut on a fixed beat grid
+  // instead of every `bars` bars counted from whenever this scheduler started.
+  // A cut fires on the beats where `beatIndex % (bars * 4) == gridOffsetBeats`
+  // (the offset wraps). With the host's tempo, beat indices are the host's
+  // absolute ones, so every instance with the same bars and offset cuts on
+  // the same beat, and different offsets stagger them ("kick on 1, vocal on
+  // 3"): layers_like_shrek.md L7. With the detected tempo the indices are
+  // private to each instance, so the grid only means something per instance.
+  bool gridAnchored = false;
+  std::uint32_t gridOffsetBeats = 0;
+
   float timedDurationSeconds = 5.0f;
   bool jitterEnabled = false;
   float jitterMinSeconds = 3.0f;
@@ -128,6 +139,10 @@ private:
   // BeatQuantized state.
   bool beatQuantizedTargetSet_ = false;
   std::uint64_t beatQuantizedTargetBeatIndex_ = 0;
+  // Grid-anchored BeatQuantized: the beat of the last cut, so a beat seen twice
+  // (a loop, or a stalled hop) never cuts twice.
+  bool gridHasCut_ = false;
+  std::uint64_t gridLastCutBeatIndex_ = 0;
   float lowConfidenceSecondsAccumulated_ = 0.0f;
 
   // Energy state.

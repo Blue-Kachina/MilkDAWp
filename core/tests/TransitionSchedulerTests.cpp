@@ -155,6 +155,91 @@ TEST_CASE("TransitionScheduler BeatQuantized fires exactly every N bars on the p
   }
 }
 
+namespace {
+// Beat indices at which a scheduler fires over `clock`, starting at hop `firstHop`.
+std::vector<std::uint64_t> firedBeats(const TransitionSchedulerConfig& config,
+                                      const std::vector<BeatClockState>& clock, std::size_t firstHop = 0) {
+  TransitionScheduler scheduler(kSampleRate, kHopSize);
+  scheduler.setConfig(config);
+  std::vector<std::uint64_t> fired;
+  for (std::size_t hop = firstHop; hop < clock.size(); ++hop) {
+    if (scheduler.tick(hop * kHopSize, true, false, clock[hop], 0.0f, false, 0, 0)) {
+      fired.push_back(clock[hop].beatIndex);
+    }
+  }
+  return fired;
+}
+} // namespace
+
+TEST_CASE("TransitionScheduler grid-anchored BeatQuantized cuts only on its offset within the bar grid",
+          "[core][TransitionScheduler][layers]") {
+  TransitionSchedulerConfig config;
+  config.mode = TransitionMode::BeatQuantized;
+  config.bars = 2; // an 8-beat cycle
+  config.gridAnchored = true;
+  config.gridOffsetBeats = 3;
+  const auto clock = simulateSteadyClock(120.0f, 1.0f, 4000);
+
+  const auto fired = firedBeats(config, clock);
+  REQUIRE(fired.size() >= 3);
+  for (const auto beat : fired) {
+    CHECK(beat % 8 == 3);
+  }
+  for (std::size_t i = 1; i < fired.size(); ++i) {
+    CHECK(fired[i] - fired[i - 1] == 8);
+  }
+}
+
+TEST_CASE("TransitionScheduler grid-anchored instances that started at different times cut on the same beats",
+          "[core][TransitionScheduler][layers]") {
+  TransitionSchedulerConfig config;
+  config.mode = TransitionMode::BeatQuantized;
+  config.bars = 1;
+  config.gridAnchored = true;
+  const auto clock = simulateSteadyClock(120.0f, 1.0f, 6000);
+
+  const auto early = firedBeats(config, clock, 0);
+  const auto late = firedBeats(config, clock, 700); // joined the project later, mid-bar
+  REQUIRE(late.size() >= 3);
+  // Whatever the late one fires, the early one fired on the very same beat.
+  for (const auto beat : late) {
+    CHECK(std::find(early.begin(), early.end(), beat) != early.end());
+  }
+
+  // Un-anchored, the late starter would count its own 4 beats from its own start:
+  // the two would be out of step. This is what the grid fixes.
+  config.gridAnchored = false;
+  const auto earlyFree = firedBeats(config, clock, 0);
+  const auto lateFree = firedBeats(config, clock, 700);
+  REQUIRE(lateFree.size() >= 2);
+  CHECK(std::find(earlyFree.begin(), earlyFree.end(), lateFree.front()) == earlyFree.end());
+}
+
+TEST_CASE("TransitionScheduler grid offsets stagger instances, and wrap around the cycle",
+          "[core][TransitionScheduler][layers]") {
+  TransitionSchedulerConfig config;
+  config.mode = TransitionMode::BeatQuantized;
+  config.bars = 1; // a 4-beat cycle
+  config.gridAnchored = true;
+  const auto clock = simulateSteadyClock(120.0f, 1.0f, 4000);
+
+  config.gridOffsetBeats = 0;
+  const auto onOne = firedBeats(config, clock);
+  config.gridOffsetBeats = 2;
+  const auto onThree = firedBeats(config, clock);
+  config.gridOffsetBeats = 6; // 6 % 4 == 2: the same as 2
+  const auto wrapped = firedBeats(config, clock);
+
+  REQUIRE(onOne.size() >= 3);
+  for (const auto beat : onOne) {
+    CHECK(beat % 4 == 0);
+  }
+  for (const auto beat : onThree) {
+    CHECK(beat % 4 == 2);
+  }
+  CHECK(wrapped == onThree);
+}
+
 TEST_CASE("TransitionScheduler BeatQuantized falls back to Timed after sustained low confidence",
           "[core][TransitionScheduler]") {
   TransitionScheduler scheduler(kSampleRate, kHopSize);

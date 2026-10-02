@@ -29,6 +29,10 @@ namespace milkdawp::engine {
 struct EngineControls {
   core::TransitionMode transitionMode = core::TransitionMode::BeatQuantized;
   std::uint32_t transitionBars = 4;
+  /// Layers: cut on the beats where beat % (bars x 4) == `gridOffsetBeats`
+  /// instead of every N bars from this instance's start (core::TransitionSchedulerConfig).
+  bool gridAnchored = false;
+  std::uint32_t gridOffsetBeats = 0;
   float timedDurationSeconds = 5.0f;
   bool jitterEnabled = false;
   float jitterMinSeconds = 3.0f;
@@ -101,6 +105,13 @@ public:
   /// `presetIndex` control it fires every time, even for the index already
   /// asked for; out-of-range indices are ignored. Works while locked.
   void requestPreset(std::int32_t index) noexcept { presetRequest_.store(index); }
+  /// Sends the preset that is currently playing to the render side again, as a
+  /// hard cut, without moving the playlist. For when the thing drawing this
+  /// director's picture has changed under it: a new projectM instance (Layers
+  /// attaching this instance to another's canvas creates one, which would
+  /// otherwise sit on projectM's idle preset until the next transition) or an
+  /// old one that missed cuts while it stood down. No-op without a current preset.
+  void requestReissueCurrent() noexcept { reissueRequests_.fetch_add(1); }
 
   /// Scans `folder` recursively for .milk presets (on the director thread)
   /// and starts playing: `preferredPresetPath` if it is in the folder,
@@ -150,6 +161,7 @@ private:
   std::atomic<std::uint32_t> nextRequests_{0};
   std::atomic<std::uint32_t> previousRequests_{0};
   std::atomic<std::int32_t> presetRequest_{-1}; // -1: none pending
+  std::atomic<std::uint32_t> reissueRequests_{0};
   core::SeqlockSnapshot<EngineControls> controls_;
   core::SeqlockSnapshot<core::TransportInfo> transport_;
   core::SeqlockSnapshot<DirectorStatus> status_;

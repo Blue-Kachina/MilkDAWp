@@ -24,6 +24,9 @@ namespace {
 constexpr int kDefaultOutputWidth = 1280;
 constexpr int kDefaultOutputHeight = 720;
 
+// The parameters that say how this instance is mixed onto another's canvas.
+constexpr const char* kLayerParameterIds[] = {"layerOpacity", "layerBlend", "layerMute", "layerOrder"};
+
 core::TransportInfo extractTransportInfo(juce::AudioPlayHead* playHead) {
   core::TransportInfo info; // defaults: not playing, 0 bpm/ppq, 4/4, sample 0
   if (playHead == nullptr) {
@@ -132,24 +135,84 @@ MilkDAWpAudioProcessor::MilkDAWpAudioProcessor()
   raw_.presetSelectionPolicy = apvts.getRawParameterValue("presetSelectionPolicy");
   raw_.energyThreshold = apvts.getRawParameterValue("energyThreshold");
   raw_.useHostTempo = apvts.getRawParameterValue("useHostTempo");
+  raw_.layerOpacity = apvts.getRawParameterValue("layerOpacity");
+  raw_.layerBlend = apvts.getRawParameterValue("layerBlend");
+  raw_.layerMute = apvts.getRawParameterValue("layerMute");
+  raw_.layerOrder = apvts.getRawParameterValue("layerOrder");
+  raw_.transitionGridSync = apvts.getRawParameterValue("transitionGridSync");
+  raw_.transitionGridOffset = apvts.getRawParameterValue("transitionGridOffset");
 
   // Momentary commands: react to the 0 -> 1 edge wherever it comes from
   // (editor pulse, host automation, MIDI learn later). A per-block poll
   // would miss a pulse that rises and falls between two blocks.
   apvts.addParameterListener("triggerNext", this);
   apvts.addParameterListener("triggerPrev", this);
+  for (const auto* id : kLayerParameterIds) {
+    apvts.addParameterListener(id, this);
+  }
 
   visualizer_->setControls(readControls());
+
+  // Layers: join the process-wide registry, so other instances can send their
+  // picture here and this one can send its picture elsewhere. Another instance
+  // appearing or going wakes handleAsyncUpdate(), which reconciles the link.
+  {
+    LayerRegistry::Entry::Hooks hooks;
+    hooks.popOut = [this] { openOwnOutputWindow(); };
+    hooks.toggleFullscreen = [this] { toggleOwnOutputFullscreen(); };
+    // What a hub's Sources list reads and writes of this instance's layer.
+    hooks.getParameter = [this](const std::string& id) {
+      const auto* raw = apvts.getRawParameterValue(juce::String(id));
+      return raw != nullptr ? raw->load() : 0.0f;
+    };
+    hooks.setParameter = [this](const std::string& id, float plainValue) {
+      const juce::String jid(id);
+      if (auto* parameter = apvts.getParameter(jid)) {
+        // A gesture, so the host records it as one edit (undo, automation write).
+        parameter->beginChangeGesture();
+        parameter->setValueNotifyingHost(apvts.getParameterRange(jid).convertTo0to1(plainValue));
+        parameter->endChangeGesture();
+      }
+    };
+    registryEntry_ = LayerRegistry::get().add({}, {}, visualizer_->renderEngine(), std::move(hooks));
+  }
+  refreshRegistryName();
+  applyLayerParams();
+  registryListener_ = LayerRegistry::get().addListener([this] { triggerAsyncUpdate(); });
 }
 
 MilkDAWpAudioProcessor::~MilkDAWpAudioProcessor() {
+  // Stop being told about other instances first, then let go of any hub (or any
+  // senders) while this instance's engine, which they use, still exists.
+  LayerRegistry::get().removeListener(registryListener_);
   cancelPendingUpdate();
+  detachFromHub();
+  LayerRegistry::get().remove(registryEntry_);
   apvts.removeParameterListener("triggerNext", this);
   apvts.removeParameterListener("triggerPrev", this);
+  for (const auto* id : kLayerParameterIds) {
+    apvts.removeParameterListener(id, this);
+  }
   outputWindow_.reset();
 }
 
+void MilkDAWpAudioProcessor::applyLayerParams() noexcept {
+  auto& channel = visualizer_->renderEngine().primaryLayer();
+  channel.setOpacity(load(raw_.layerOpacity, 1.0f));
+  const auto blend = std::clamp(static_cast<int>(std::lround(load(raw_.layerBlend, 0.0f))), 0,
+                                engine::kLayerBlendCount - 1);
+  channel.setBlend(static_cast<engine::LayerBlend>(blend));
+  channel.setVisible(load(raw_.layerMute, 0.0f) < 0.5f);
+  channel.setOrder(static_cast<int>(std::lround(load(raw_.layerOrder, 0.0f))));
+}
+
 void MilkDAWpAudioProcessor::parameterChanged(const juce::String& parameterId, float newValue) {
+  for (const auto* id : kLayerParameterIds) {
+    if (parameterId == id) {
+      applyLayerParams(); // a few atomic stores: fine on any thread
+      return;
+    }
+  }
   if (newValue < 0.5f) {
     return;
   }
@@ -184,6 +247,8 @@ engine::EngineControls MilkDAWpAudioProcessor::readControls() const noexcept {
   copy(values.presetSelectionPolicy, raw_.presetSelectionPolicy);
   copy(values.energyThreshold, raw_.energyThreshold);
   copy(values.useHostTempo, raw_.useHostTempo);
+  copy(values.transitionGridSync, raw_.transitionGridSync);
+  copy(values.transitionGridOffset, raw_.transitionGridOffset);
   return engine::toEngineControls(values);
 }
 
@@ -261,7 +326,118 @@ juce::Rectangle<int> MilkDAWpAudioProcessor::outputOpenBounds() const {
   return toRectangle(placed);
 }
 
-void MilkDAWpAudioProcessor::popOutOutputWindow() { openOutputWindow(windowLayout().outputDefaultFullscreen); }
+void MilkDAWpAudioProcessor::popOutOutputWindow() {
+  if (hub_ != nullptr && hub_->isAlive()) {
+    hub_->popOut(); // this instance's picture lives in the hub's window
+    return;
+  }
+  openOwnOutputWindow();
+}
+
+void MilkDAWpAudioProcessor::openOwnOutputWindow() { openOutputWindow(windowLayout().outputDefaultFullscreen); }
+
+std::string MilkDAWpAudioProcessor::instanceId() const { return registryEntry_->id(); }
+
+std::string MilkDAWpAudioProcessor::instanceLabel() const {
+  const std::lock_guard lock(layoutMutex_);
+  return instanceLabel_;
+}
+
+std::string MilkDAWpAudioProcessor::instanceDisplayName() const {
+  {
+    const std::lock_guard lock(layoutMutex_);
+    if (!instanceLabel_.empty()) {
+      return instanceLabel_;
+    }
+    if (!hostTrackName_.empty()) {
+      return hostTrackName_;
+    }
+  }
+  return "Instance " + instanceId().substr(0, 4);
+}
+
+void MilkDAWpAudioProcessor::refreshRegistryName() { registryEntry_->setName(instanceDisplayName()); }
+
+void MilkDAWpAudioProcessor::setInstanceLabel(const std::string& label) {
+  {
+    const std::lock_guard lock(layoutMutex_);
+    instanceLabel_ = label;
+  }
+  refreshRegistryName();
+}
+
+void MilkDAWpAudioProcessor::updateTrackProperties(const TrackProperties& properties) {
+  {
+    const std::lock_guard lock(layoutMutex_);
+    hostTrackName_ = properties.name.has_value() ? properties.name->toStdString() : std::string{};
+  }
+  refreshRegistryName();
+}
+
+std::vector<InstanceInfo> MilkDAWpAudioProcessor::otherInstances() const {
+  return LayerRegistry::get().instances(instanceId());
+}
+
+bool MilkDAWpAudioProcessor::canChooseOutputTarget() const { return registryEntry_->attachedCount() == 0; }
+
+int MilkDAWpAudioProcessor::layerSenderCount() const { return registryEntry_->attachedCount(); }
+
+void MilkDAWpAudioProcessor::setOutputTargetInstance(const std::string& instanceId) {
+  {
+    const std::lock_guard lock(layoutMutex_);
+    layout_.outputTargetInstance = instanceId;
+  }
+  reconcileLayers();
+}
+
+void MilkDAWpAudioProcessor::reconcileLayers() {
+  const auto desired = windowLayout().outputTargetInstance;
+  if (hub_ != nullptr && (desired != hubId_ || !hub_->isAlive())) {
+    detachFromHub();
+  }
+  if (hub_ == nullptr && !desired.empty() && desired != instanceId()) {
+    // Lazy: the target may not exist yet (it loads after us, or the host has
+    // not created it). The registry wakes us again when it appears.
+    const auto target = LayerRegistry::get().find(desired);
+    if (target != nullptr && target->isAlive() && !target->isSender() && registryEntry_->attachedCount() == 0) {
+      attachToHub(target, desired);
+    }
+  }
+}
+
+void MilkDAWpAudioProcessor::attachToHub(const std::shared_ptr<LayerRegistry::Entry>& hub, const std::string& hubId) {
+  auto& renderEngine = visualizer_->renderEngine();
+  // This instance's engine lets go of its primary layer first: the layer's
+  // channel has one consumer, and it is about to be the hub's.
+  renderEngine.yieldPrimaryLayer(true);
+  if (!hub->attach(renderEngine.primaryLayer(), registryEntry_)) {
+    renderEngine.yieldPrimaryLayer(false);
+    return;
+  }
+  hub_ = hub;
+  hubId_ = hubId;
+  registryEntry_->setSender(true);
+  closeOutputWindow(); // this picture is shown in the hub's window now
+  // The hub just made a fresh projectM instance for this layer, which knows
+  // nothing about the preset this instance was showing and would sit on
+  // projectM's idle preset until the next cut. Send the current one again.
+  visualizer_->director().requestReissueCurrent();
+}
+
+void MilkDAWpAudioProcessor::detachFromHub() {
+  if (hub_ == nullptr) {
+    return;
+  }
+  auto& renderEngine = visualizer_->renderEngine();
+  hub_->detach(renderEngine.primaryLayer()); // a no-op if the hub is already gone
+  renderEngine.yieldPrimaryLayer(false);
+  // This instance's own projectM stood down while the hub drew its picture, so
+  // it missed every cut meanwhile: bring it up to the preset now playing.
+  visualizer_->director().requestReissueCurrent();
+  hub_.reset();
+  hubId_.clear();
+  registryEntry_->setSender(false);
+}
 
 void MilkDAWpAudioProcessor::setOutputDefaultFullscreen(bool fullscreen) {
   const std::lock_guard lock(layoutMutex_);
@@ -334,9 +510,20 @@ void MilkDAWpAudioProcessor::handleAsyncUpdate() {
   } else if (outputWindow_->isFullscreen() != layout.outputWindowFullscreen) {
     outputWindow_->setFullscreen(layout.outputWindowFullscreen);
   }
+  // Also what runs when another instance comes or goes: link to (or let go of)
+  // the Output target this instance was told to use.
+  reconcileLayers();
 }
 
 void MilkDAWpAudioProcessor::toggleOutputFullscreen() {
+  if (hub_ != nullptr && hub_->isAlive()) {
+    hub_->toggleFullscreen();
+    return;
+  }
+  toggleOwnOutputFullscreen();
+}
+
+void MilkDAWpAudioProcessor::toggleOwnOutputFullscreen() {
   if (outputWindow_ == nullptr) {
     openOutputWindow(true);
   } else {
@@ -351,6 +538,8 @@ void MilkDAWpAudioProcessor::getStateInformation(juce::MemoryBlock& destData) {
   state.playlistFolderPath = visualizer_->director().presetFolder();
   state.presetAbsolutePath = visualizer_->director().currentPresetPath();
   state.windows = windowLayout();
+  state.instanceId = instanceId();
+  state.instanceLabel = instanceLabel();
   for (const auto& spec : core::allParameters()) {
     if (auto* raw = apvts.getRawParameterValue(juce::String(spec.id))) {
       state.paramValues[spec.id] = raw->load(std::memory_order_relaxed);
@@ -384,8 +573,16 @@ void MilkDAWpAudioProcessor::setStateInformation(const void* data, int sizeInByt
   {
     const std::lock_guard lock(layoutMutex_);
     layout_ = state.windows;
+    instanceLabel_ = state.instanceLabel;
   }
-  triggerAsyncUpdate(); // opens/closes the Output window on the message thread
+  // Take back the identity this instance had when it was saved, so instances
+  // that point at it still find it. (If another live instance already has that
+  // id, e.g. the state was copied to a duplicated track, a fresh one is used.)
+  if (!state.instanceId.empty()) {
+    LayerRegistry::get().claimId(registryEntry_, state.instanceId);
+  }
+  refreshRegistryName();
+  triggerAsyncUpdate(); // opens/closes the Output window, and links to the Output target, on the message thread
 
   // Not publishing controls here: some hosts restore state while audio runs,
   // and processBlock is the controls snapshot's one writer. The next block

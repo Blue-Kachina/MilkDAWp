@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "AudioSettingsPanel.h"
+#include "milkdawp/core/DisplayLayout.h"
 #include "milkdawp/core/ParameterModel.h"
 #include "milkdawp/ui/Icons.h"
 #include "milkdawp/ui/PresetMenu.h"
@@ -22,6 +23,30 @@ constexpr int kDefaultHeight = 720;
 enum MenuIndex { FileMenu = 0, PlaybackMenu = 1, ViewMenu = 2 };
 
 bool isPresetFile(const juce::File& file) { return file.hasFileExtension("milk"); }
+
+core::WindowBounds toWindowBounds(juce::Rectangle<int> r) noexcept {
+  return {r.getX(), r.getY(), r.getWidth(), r.getHeight()};
+}
+
+// Where the Output window opens: where it was, moved onto the display chosen in
+// Settings -> Output when that display is connected. A chosen display that is
+// unplugged falls back to the saved bounds (the choice itself is kept).
+juce::Rectangle<int> outputOpenBounds(const AppState& state) {
+  if (state.outputTargetDisplay.isEmpty()) {
+    return state.outputWindowBounds;
+  }
+  std::vector<core::WindowBounds> displays;
+  for (const auto& display : ui::currentDisplays()) {
+    displays.push_back(display.id);
+  }
+  const auto index = core::findDisplay(displays, toWindowBounds(state.outputTargetDisplay));
+  if (index < 0) {
+    return state.outputWindowBounds;
+  }
+  const auto placed = core::placeOnDisplay(toWindowBounds(state.outputWindowBounds),
+                                           displays[static_cast<std::size_t>(index)], kDefaultWidth, kDefaultHeight);
+  return {placed.x, placed.y, placed.width, placed.height};
+}
 
 juce::PopupMenu::Item makeItem(const juce::String& text, std::function<void()> action, bool ticked = false,
                                const juce::String& shortcut = {}, bool enabled = true) {
@@ -67,7 +92,7 @@ MainComponent::MainComponent(engine::Visualizer& visualizer, AudioSourceRouter& 
   surface_.addAndMakeVisible(drawer_);
   drawer_.prevButton.onClick = [this] { previousPreset(); };
   drawer_.nextButton.onClick = [this] { nextPreset(); };
-  drawer_.outputButton.onClick = [this] { toggleOutputWindow(false); };
+  drawer_.outputButton.onClick = [this] { toggleOutputWindowFromDrawer(); };
   drawer_.settingsButton.onClick = [this] {
     auto menu = createMenu(-1);
     menu.setLookAndFeel(&drawer_.getLookAndFeel());
@@ -78,6 +103,29 @@ MainComponent::MainComponent(engine::Visualizer& visualizer, AudioSourceRouter& 
   // Above the drawer; hidden until chosen.
   surface_.addChildComponent(transitionSettings_);
   transitionSettings_.onCloseRequested = [this] { setTransitionSettingsVisible(false); };
+
+  // Settings -> Output, same slot and compositing rules. The standalone app has no
+  // other instances to link to, so it only gets the window settings.
+  surface_.addChildComponent(outputSettings_);
+  outputSettings_.setLayersAvailable(false);
+  outputSettings_.onCloseRequested = [this] { setOutputSettingsVisible(false); };
+  outputSettings_.onPreferredSizeChanged = [this] { layoutOutputSettings(); };
+  outputSettings_.onDefaultFullscreenChanged = [this](bool fullscreen) {
+    state_.outputDefaultFullscreen = fullscreen;
+    notifyStateChanged();
+  };
+  outputSettings_.onTargetDisplayChanged = [this](const core::WindowBounds& display) {
+    state_.outputTargetDisplay = {display.x, display.y, display.width, display.height};
+    notifyStateChanged();
+    if (outputWindow_ != nullptr) {
+      // A native window cannot change display and keep its GL context: reopen it
+      // on the chosen one, in the same mode, centred (not left where it was).
+      const bool wasFullscreen = outputWindow_->isFullscreen();
+      outputWindow_.reset();
+      state_.outputWindowBounds = {};
+      toggleOutputWindow(wasFullscreen);
+    }
+  };
 
   binding_.bind(drawer_.lockButton, "lockCurrentPreset");
   binding_.bind(drawer_.shuffleButton, "shuffle");
@@ -91,6 +139,8 @@ MainComponent::MainComponent(engine::Visualizer& visualizer, AudioSourceRouter& 
   binding_.bind(transitionSettings_.blendSlider, "softCutDuration");
   binding_.bind(transitionSettings_.jitterToggle, "transitionJitterEnabled");
   binding_.bind(transitionSettings_.hardCutToggle, "hardCutEnabled");
+  binding_.bind(transitionSettings_.gridToggle, "transitionGridSync");
+  binding_.bind(transitionSettings_.gridOffsetSlider, "transitionGridOffset");
   transitionSettings_.refreshRelevance();
 
   input_.device().onDeviceChanged = [this] {
@@ -288,7 +338,35 @@ void MainComponent::showAudioSettings() {
   options.launchAsync();
 }
 
+void MainComponent::setOutputSettingsVisible(bool visible) {
+  if (visible) {
+    setTransitionSettingsVisible(false);
+    outputSettings_.refresh(state_.outputDefaultFullscreen,
+                            {state_.outputTargetDisplay.getX(), state_.outputTargetDisplay.getY(),
+                             state_.outputTargetDisplay.getWidth(), state_.outputTargetDisplay.getHeight()});
+    layoutOutputSettings();
+  }
+  outputSettings_.setVisible(visible);
+  if (visible) {
+    outputSettings_.toFront(false);
+    drawer_.reveal();
+  } else {
+    grabKeyboardFocus();
+  }
+}
+
+void MainComponent::toggleOutputWindowFromDrawer() {
+  if (isOutputWindowOpen()) {
+    toggleOutputWindow(false); // closes it
+  } else {
+    toggleOutputWindow(state_.outputDefaultFullscreen);
+  }
+}
+
 void MainComponent::setTransitionSettingsVisible(bool visible) {
+  if (visible && outputSettings_.isVisible()) {
+    setOutputSettingsVisible(false);
+  }
   transitionSettings_.setVisible(visible);
   if (visible) {
     transitionSettings_.refreshRelevance();
@@ -326,7 +404,7 @@ void MainComponent::toggleOutputWindow(bool fullscreen) {
       notifyStateChanged();
     }
   };
-  outputWindow_->show(state_.outputWindowBounds, fullscreen);
+  outputWindow_->show(outputOpenBounds(state_), fullscreen);
   state_.outputWindowOpen = true;
   state_.outputWindowBounds = outputWindow_->windowedBounds();
   state_.outputWindowFullscreen = outputWindow_->isFullscreen();
@@ -364,6 +442,7 @@ void MainComponent::setControlsFloating(bool floating) {
     drawer_.setFloating(false);
     surface_.addAndMakeVisible(drawer_);
     transitionSettings_.toFront(false); // the popover stays above the drawer
+    outputSettings_.toFront(false);
     grabKeyboardFocus();
   }
   state_.controlsFloating = floating;
@@ -455,9 +534,11 @@ juce::PopupMenu MainComponent::createMenu(int menuIndex) {
         onToggleMainFullscreen();
       }
     }, fullscreen, "F11"));
-    menu.addItem(makeItem("Output window", [this] { toggleOutputWindow(false); }, isOutputWindowOpen()));
+    menu.addItem(makeItem("Output window", [this] { toggleOutputWindowFromDrawer(); }, isOutputWindowOpen()));
     menu.addItem(makeItem("Output window fullscreen", [this] { toggleOutputWindow(true); },
                           isOutputWindowOpen() && outputWindow_->isFullscreen()));
+    menu.addItem(makeItem("Output settings...", [this] { setOutputSettingsVisible(!isOutputSettingsVisible()); },
+                          isOutputSettingsVisible()));
     menu.addItem(makeItem(areControlsFloating() ? "Dock controls" : "Float controls in a window",
                           [this] { setControlsFloating(!areControlsFloating()); }));
     if (!all) {
@@ -510,6 +591,15 @@ void MainComponent::resized() {
     drawer_.setBounds(surface_.getLocalBounds().removeFromBottom(ui::ControlDrawer::preferredHeight));
   }
   layoutTransitionSettings();
+  layoutOutputSettings();
+}
+
+void MainComponent::layoutOutputSettings() {
+  const int drawerHeight = controlsWindow_ != nullptr ? 0 : ui::ControlDrawer::controlsHeight;
+  auto area = surface_.getLocalBounds().withTrimmedBottom(drawerHeight).reduced(6);
+  const auto width = std::min(ui::OutputSettingsPanel::preferredWidth, area.getWidth());
+  const auto height = std::min(outputSettings_.preferredHeight(), area.getHeight());
+  outputSettings_.setBounds(area.removeFromBottom(height).removeFromRight(width));
 }
 
 void MainComponent::layoutTransitionSettings() {
@@ -532,8 +622,10 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
     }
     return true;
   case ShortcutAction::ExitFullscreenOrRevealDrawer:
-    if (transitionSettings_.isVisible()) {
-      setTransitionSettingsVisible(false); // Esc closes the popover first
+    if (outputSettings_.isVisible()) {
+      setOutputSettingsVisible(false); // Esc closes the popover first
+    } else if (transitionSettings_.isVisible()) {
+      setTransitionSettingsVisible(false);
     } else if (isMainFullscreen && isMainFullscreen() && onToggleMainFullscreen) {
       onToggleMainFullscreen();
     } else {

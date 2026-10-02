@@ -52,6 +52,10 @@ struct WindowLayout {
   /// own bounds (JUCE has no stable monitor id). Empty means automatic. Kept
   /// even while that display is unplugged, so it is used again when it returns.
   WindowBounds outputTargetDisplay;
+  /// Layers: the `instanceId` of the instance whose Output window this one's
+  /// picture goes to. Empty means this instance has its own window. Kept even
+  /// while that instance does not exist, so the link comes back with it.
+  std::string outputTargetInstance;
 
   bool operator==(const WindowLayout&) const = default;
 };
@@ -68,6 +72,13 @@ struct StateSchemaV2 {
   std::string playlistFolderPath;
   int editorWidth = 0;
   int editorHeight = 0;
+  /// Layers: a stable identity for this plugin instance, so another instance
+  /// can point at it across project reloads. Empty in states saved before
+  /// Layers; the plugin makes one up and saves it from then on.
+  std::string instanceId;
+  /// What the user calls this instance in the target picker. Empty means "use
+  /// the host's track name".
+  std::string instanceLabel;
   WindowLayout windows; // additive keys: older v2 states load with everything closed
   std::map<std::string, float> paramValues; // keyed by ParameterModel's v2 ids
 };
