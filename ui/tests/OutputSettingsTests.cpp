@@ -30,6 +30,7 @@ std::vector<std::string> itemTexts(const juce::ComboBox& combo) {
 } // namespace
 
 TEST_CASE("OutputSettingsPanel lists New window first, then the other instances", "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   panel.setInstanceState(withOthers());
   CHECK(itemTexts(panel.targetCombo) == std::vector<std::string>{"New window", "Kick", "Bass", "Lead"});
@@ -37,6 +38,7 @@ TEST_CASE("OutputSettingsPanel lists New window first, then the other instances"
 }
 
 TEST_CASE("OutputSettingsPanel greys out an instance that already sends elsewhere", "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   panel.setInstanceState(withOthers());
   CHECK(panel.targetCombo.isItemEnabled(2)); // Kick
@@ -45,6 +47,7 @@ TEST_CASE("OutputSettingsPanel greys out an instance that already sends elsewher
 }
 
 TEST_CASE("OutputSettingsPanel reports the chosen instance, and empty for New window", "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   panel.setInstanceState(withOthers());
   std::vector<std::string> chosen;
@@ -58,6 +61,7 @@ TEST_CASE("OutputSettingsPanel reports the chosen instance, and empty for New wi
 }
 
 TEST_CASE("OutputSettingsPanel shows the saved target as the choice", "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   auto state = withOthers();
   state.target = "id-bass";
@@ -68,6 +72,7 @@ TEST_CASE("OutputSettingsPanel shows the saved target as the choice", "[ui][Outp
 }
 
 TEST_CASE("OutputSettingsPanel keeps showing a saved target that is not loaded", "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   auto state = withOthers();
   state.target = "id-not-loaded-yet";
@@ -82,6 +87,7 @@ TEST_CASE("OutputSettingsPanel keeps showing a saved target that is not loaded",
 
 TEST_CASE("OutputSettingsPanel cannot pick a target while others send to it (no chains)",
           "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   auto state = withOthers();
   state.canChooseTarget = false;
@@ -97,6 +103,7 @@ TEST_CASE("OutputSettingsPanel cannot pick a target while others send to it (no 
 
 TEST_CASE("OutputSettingsPanel only grows for the hint line when there is something to say",
           "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   panel.setInstanceState(withOthers());
   const int plain = panel.preferredHeight();
@@ -113,6 +120,7 @@ TEST_CASE("OutputSettingsPanel only grows for the hint line when there is someth
 
 TEST_CASE("OutputSettingsPanel asks the shell to relayout when its height changes, and only then",
           "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   panel.setInstanceState(withOthers());
   int relayouts = 0;
@@ -132,6 +140,7 @@ TEST_CASE("OutputSettingsPanel asks the shell to relayout when its height change
 
 TEST_CASE("OutputSettingsPanel offers the layer controls only to an instance that is part of a canvas",
           "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   panel.setInstanceState(withOthers());
   const int alone = panel.preferredHeight();
@@ -161,6 +170,7 @@ TEST_CASE("OutputSettingsPanel offers the layer controls only to an instance tha
 
 TEST_CASE("OutputSettingsPanel lists the senders as Sources rows, and grows with them",
           "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   auto hub = withOthers();
   hub.senderCount = 2;
@@ -187,6 +197,7 @@ TEST_CASE("OutputSettingsPanel lists the senders as Sources rows, and grows with
 }
 
 TEST_CASE("OutputSettingsPanel keeps its Sources rows when only their values change", "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   auto hub = withOthers();
   hub.senderCount = 1;
@@ -203,6 +214,7 @@ TEST_CASE("OutputSettingsPanel keeps its Sources rows when only their values cha
 }
 
 TEST_CASE("OutputSettingsPanel without Layers is just the window settings", "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   panel.setInstanceState(withOthers());
   const int withLayers = panel.preferredHeight();
@@ -232,6 +244,7 @@ TEST_CASE("OutputSettingsPanel without Layers is just the window settings", "[ui
 }
 
 TEST_CASE("OutputSettingsPanel's blend choices come from the parameter model", "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   CHECK(panel.blendCombo.getNumItems() == 5);
   CHECK(panel.blendCombo.getItemText(0) == "Normal");
@@ -240,6 +253,7 @@ TEST_CASE("OutputSettingsPanel's blend choices come from the parameter model", "
 }
 
 TEST_CASE("OutputSettingsPanel reports a finished name edit", "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   panel.setInstanceState(withOthers());
   std::vector<std::string> labels;
@@ -256,6 +270,7 @@ TEST_CASE("OutputSettingsPanel reports a finished name edit", "[ui][OutputSettin
 
 TEST_CASE("OutputSettingsPanel shows the user's label, and the default name as a hint when empty",
           "[ui][OutputSettings][layers]") {
+  const juce::ScopedJuceInitialiser_GUI juceInit; // frees JUCE's font singletons at exit (else LeakSanitizer fails the test)
   OutputSettingsPanel panel;
   auto state = withOthers();
   state.label = "Kick";
