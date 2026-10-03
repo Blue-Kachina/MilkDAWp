@@ -489,11 +489,16 @@ juce::PopupMenu MainComponent::createMenu(int menuIndex) {
       menu.addSeparator();
       menu.addItem(makeItem("Write a log file", [this] { setLoggingEnabled(!state_.loggingEnabled); },
                             state_.loggingEnabled));
-      menu.addItem(makeItem("Show log file", [] {
-        if (auto* logger = dynamic_cast<juce::FileLogger*>(juce::Logger::getCurrentLogger())) {
-          logger->getLogFile().revealToUser();
+      menu.addItem(makeItem("Show log file", [this] {
+        if (onShowLogFile) {
+          onShowLogFile();
         }
       }, false, {}, state_.loggingEnabled));
+      menu.addItem(makeItem("Collect logs...", [this] {
+        if (onCollectLogs) {
+          onCollectLogs();
+        }
+      }));
 #if !JUCE_MAC // macOS puts Quit in the application menu
       menu.addSeparator();
       menu.addItem(makeItem("Quit", [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); }));
@@ -708,7 +713,6 @@ void MainComponent::updateInputHint() {
 
 void MainComponent::updateStatusText() {
   auto& director = visualizer_.director();
-  auto& engine = visualizer_.renderEngine();
   const auto status = director.status();
 
   if (status.playlistSize == 0) {
@@ -732,29 +736,36 @@ void MainComponent::updateStatusText() {
   drawer_.bpmLabel.setTooltip(badge.tooltip);
 
   if (diagnosticsLabel_.isVisible()) {
-    const auto stats = engine.stats();
-    juce::String text;
-    if (engine.isAvailable()) {
-      text << "projectM " << engine.projectMVersion() << ": " << juce::String(stats.framesPerSecond, 1) << " fps, "
-           << stats.width << "x" << stats.height << ", render " << juce::String(stats.cpuFrameMs, 1) << " ms (gpu "
-           << juce::String(stats.gpuFrameMs, 1) << " ms), last preset load " << juce::String(stats.lastPresetLoadMs, 1)
-           << " ms\n";
-    } else {
-      const auto reason = engine.unavailableReason();
-      text << "projectM: " << (reason.empty() ? juce::String("starting...") : juce::String("unavailable (" + reason + ")"))
-           << "\n";
-    }
-    text << "presets: " << juce::String(status.playlistSize) << " in folder, " << juce::String(stats.presetsLoaded)
-         << " loaded, " << juce::String(status.presetsSkipped) << " skipped; surface "
-         << (surface_.isSharingWorking() ? "shared" : "readback (no shared context)") << "\n";
-    text << "input: " << input_.describe() << "; beat confidence " << juce::String(status.beatConfidence, 2) << "\n";
-    text << engine.glDescription();
-    diagnosticsLabel_.setText(text, juce::dontSendNotification);
+    diagnosticsLabel_.setText(diagnosticsText(), juce::dontSendNotification);
   }
 
   if (transitionSettings_.isVisible()) {
     transitionSettings_.refreshRelevance();
   }
+}
+
+juce::String MainComponent::diagnosticsText() const {
+  auto& director = visualizer_.director();
+  auto& engine = visualizer_.renderEngine();
+  const auto status = director.status();
+  const auto stats = engine.stats();
+  juce::String text;
+  if (engine.isAvailable()) {
+    text << "projectM " << engine.projectMVersion() << ": " << juce::String(stats.framesPerSecond, 1) << " fps, "
+         << stats.width << "x" << stats.height << ", render " << juce::String(stats.cpuFrameMs, 1) << " ms (gpu "
+         << juce::String(stats.gpuFrameMs, 1) << " ms), last preset load " << juce::String(stats.lastPresetLoadMs, 1)
+         << " ms\n";
+  } else {
+    const auto reason = engine.unavailableReason();
+    text << "projectM: " << (reason.empty() ? juce::String("starting...") : juce::String("unavailable (" + reason + ")"))
+         << "\n";
+  }
+  text << "presets: " << juce::String(status.playlistSize) << " in folder, " << juce::String(stats.presetsLoaded)
+       << " loaded, " << juce::String(status.presetsSkipped) << " skipped; surface "
+       << (surface_.isSharingWorking() ? "shared" : "readback (no shared context)") << "\n";
+  text << "input: " << input_.describe() << "; beat confidence " << juce::String(status.beatConfidence, 2) << "\n";
+  text << engine.glDescription();
+  return text;
 }
 
 } // namespace milkdawp::app

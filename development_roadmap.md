@@ -1951,9 +1951,54 @@ rework:
 - [ ] 4.8 (L) macOS system audio capture via Core Audio process taps (14.2+) with
       ScreenCaptureKit fallback (13+); permission flow and messaging.
 - [ ] 4.9 (S) Linux: verify PipeWire/Pulse monitor sources appear; document.
-- [ ] 4.10 (S) Crash reporting hooks (local minidump/log bundle) and "collect logs" menu item.
-- [ ] 4.11 (S) Retire the JUCE `Standalone` wrapper format once 4.1–4.3 land (or keep it as a
+- [x] 4.10 (S) Crash reporting hooks (local minidump/log bundle) and "collect logs" menu item.
+      Note (2026-10-03):
+      - `RecentLog` (`app/src/RecentLog.h`) is now the app's logger from `initialise()` to
+        `shutdown()`. It timestamps every line, keeps the last 500 in memory, and writes to the
+        log file only while File > Write a log file is on. A crash report or log bundle always
+        has the recent lines, even with file logging off. `tryGetLines()` doesn't wait for the
+        lock, so a crash on a thread that was logging can't deadlock the report.
+      - `CrashReporter` (`app/src/CrashReporter.h`) installs JUCE's crash handler (unhandled SEH
+        exceptions on Windows, fatal signals elsewhere) plus `std::terminate`. A crash writes
+        `crash-<date>_<time>.txt` (reason, OS/CPU/memory, stack trace, recent log) to a
+        `Crashes` folder beside `app.settings`. On Windows it also writes a `.dmp` minidump
+        (`MiniDumpWriteDump`, thread info, unloaded modules; links `dbghelp`), and it writes the
+        minidump first because it needs the least from a damaged process. On macOS/Linux the
+        report is written from a signal handler, so it's best effort. A `session.running` marker
+        exists while the app runs. The next launch finding it means an unclean exit, and a report
+        newer than it means a crash; only the crash case prompts "closed unexpectedly", with
+        [Collect logs...] [Not now]. Keeps the newest 10 reports.
+      - File > Collect logs... (`LogBundle`, `app/src/LogBundle.h`) writes one zip wherever the
+        user picks (default: Desktop, "MilkDAWp logs <date> <time>.zip"). It holds the log
+        file (if one exists), `app.settings`, the newest 5 crash reports with minidumps, and
+        `diagnostics.txt` (version, system, the diagnostics overlay's text, now
+        `MainComponent::diagnosticsText()`, and the recent log). It writes through a
+        `TemporaryFile`, so a failure leaves any existing zip untouched. Nothing is uploaded.
+        File > Show log file no longer depends on the current logger being a `FileLogger`.
+      - Debug builds take `--simulate-crash` (a null write 2 s after the window is up) to check
+        the whole path on each OS.
+      - Tests: `RecentLogTests` (capacity, timestamps, file only while set),
+        `CrashReporterTests` (report contents incl. a real minidump on Windows, clean vs
+        crashed vs killed previous session, pruning), `LogBundleTests` (zip contents, missing
+        files skipped, duplicates stored once).
+      - Verified on Windows (dev identity, Debug): `--simulate-crash` exits with 0xC0000005 and
+        leaves a 2.4 KB report plus a 340 KB minidump. The report's stack shows the faulting
+        lambda under the timer callback, and its recent log has the startup lines. Relaunching
+        shows the prompt. Collect logs saves a zip with `app.settings`, both crash files and
+        diagnostics (projectM 4.2.0, fps, GL vendor/renderer). A clean quit removes the marker.
+        Full `ctest`: 285/285.
+      - Not done: macOS/Linux runs of `--simulate-crash` (no Mac here; Linux needs a desktop).
+        The plugin installs no crash handler on purpose: the process belongs to the host.
+- [x] 4.11 (S) Retire the JUCE `Standalone` wrapper format once 4.1–4.3 land (or keep it as a
       dev convenience behind a CMake option).
+      Note (2026-10-03): kept as a dev convenience. The plugin's Standalone is still the
+      quickest way to run the plugin editor (drawer, Output window, layers) without a DAW, and
+      most of Phase 3's checks used it. New option `MILKDAWP_PLUGIN_STANDALONE` (default ON)
+      adds `Standalone` to the plugin's `FORMATS` and runs the zlib/libpng, projectM-deploy and
+      runtime-layout checks for that target. `release-win`/`release-mac`/`release-linux` set
+      it OFF, so packaging builds ship the VST3 (and AU later) plus `milkdawp_app` only. Dev
+      and CI presets keep it ON so it keeps compiling. Checked by configuring both ways: no
+      `milkdawp_plugin_Standalone` target when OFF, and a full Debug build when ON.
 
 Hand test: fresh user account on each OS: install, launch, play music from a browser, confirm
 visuals react without configuring anything (Windows/macOS via loopback, Linux via monitor

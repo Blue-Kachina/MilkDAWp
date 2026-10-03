@@ -31,6 +31,10 @@ add_library(milkdawp_app_lib STATIC
   src/AudioSettingsPanel.h
   src/AudioSettingsPanel.cpp
   src/AudioSourceRouter.h
+  src/CrashReporter.h
+  src/CrashReporter.cpp
+  src/LogBundle.h
+  src/LogBundle.cpp
   src/MainComponent.h
   src/MainComponent.cpp
   src/MainWindow.h
@@ -41,6 +45,8 @@ add_library(milkdawp_app_lib STATIC
   src/ParameterBinding.cpp
   src/PresetBrowserPanel.h
   src/PresetBrowserPanel.cpp
+  src/RecentLog.h
+  src/RecentLog.cpp
   src/SignalMonitor.h
   src/SystemAudioCapture.h
   ${_mdw_system_audio_capture_src}
@@ -65,8 +71,9 @@ target_link_libraries(milkdawp_app_lib
 milkdawp_link_external_zlib_libpng(milkdawp_app_lib)
 if(WIN32)
   # SystemAudioCaptureWindows.cpp: CoCreateInstance/CoInitializeEx/
-  # PropVariantClear for WASAPI loopback capture.
-  target_link_libraries(milkdawp_app_lib PRIVATE ole32)
+  # PropVariantClear for WASAPI loopback capture. CrashReporter.cpp:
+  # MiniDumpWriteDump.
+  target_link_libraries(milkdawp_app_lib PRIVATE ole32 dbghelp)
 endif()
 
 juce_add_gui_app(milkdawp_app

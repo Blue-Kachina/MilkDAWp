@@ -6,8 +6,11 @@
 #include "AppPreferences.h"
 #include "AudioInput.h"
 #include "AudioSourceRouter.h"
+#include "CrashReporter.h"
+#include "LogBundle.h"
 #include "MainComponent.h"
 #include "MainWindow.h"
+#include "RecentLog.h"
 #include "SystemAudioCapture.h"
 #include "milkdawp/engine/Visualizer.h"
 
@@ -24,6 +27,9 @@ namespace milkdawp::app {
 /// MILKDAWP_DEV_ALT_IDENTITY builds, so a dev build never touches a real
 /// install's settings). It saves itself a moment after each change, and
 /// once more on quit.
+///
+/// Crash reports (4.10) go in a "Crashes" folder beside the settings file;
+/// a launch after a crash offers to collect them (File > Collect logs...).
 class MilkDAWpApplication final : public juce::JUCEApplication {
 public:
   const juce::String getApplicationName() override { return JUCE_APPLICATION_NAME_STRING; }
@@ -42,8 +48,20 @@ public:
     options.millisecondsBeforeSaving = 1000;
     properties_.setStorageParameters(options);
     state_ = loadAppState(*properties_.getUserSettings());
+    juce::Logger::setCurrentLogger(&log_);
     setLogging(state_.loggingEnabled);
     juce::Logger::writeToLog(getApplicationName() + " " + getApplicationVersion() + " starting");
+
+    crashReporter_ = std::make_unique<CrashReporter>(
+        properties_.getUserSettings()->getFile().getSiblingFile("Crashes"),
+        getApplicationName() + " " + getApplicationVersion());
+    const auto previousSession = crashReporter_->beginSession();
+    crashReporter_->install(log_);
+    if (!previousSession.endedCleanly) {
+      juce::Logger::writeToLog(previousSession.crashReport.existsAsFile()
+                                   ? "The last session crashed: " + previousSession.crashReport.getFullPathName()
+                                   : juce::String("The last session didn't shut down cleanly"));
+    }
 
     visualizer_ = std::make_unique<engine::Visualizer>(engine::Visualizer::Config{});
     if (state_.presetFolder.isNotEmpty() && juce::File(state_.presetFolder).isDirectory()) {
@@ -66,13 +84,28 @@ public:
     auto* component = content.get();
     component->onStateChanged = [this] { saveState(); };
     component->onLoggingChanged = [this](bool enabled) { setLogging(enabled); };
+    component->onShowLogFile = [this] { logFile().revealToUser(); };
+    component->onCollectLogs = [this] { collectLogs(); };
     window_ = std::make_unique<MainWindow>(getApplicationName(), std::move(content), state_);
     window_->onStateChanged = [this] { saveState(); };
     component->restoreSecondaryWindows();
     component->grabKeyboardFocus();
 
+#if JUCE_DEBUG
+    // Checks the crash handler end to end: crashes once the window is up.
+    if (commandLine.trim() == "--simulate-crash") {
+      juce::Timer::callAfterDelay(2000, [] {
+        volatile int* nowhere = nullptr;
+        *nowhere = 1; // NOLINT(clang-analyzer-core.NullDereference)
+      });
+    } else
+#endif
     if (const auto path = commandLine.unquoted().trim(); path.isNotEmpty()) {
       component->openPath(path);
+    }
+
+    if (previousSession.crashReport.existsAsFile()) {
+      offerToCollectLogsAfterCrash();
     }
   }
 
@@ -96,8 +129,13 @@ public:
     systemAudio_.reset();
     input_.reset();
     visualizer_.reset();
+    chooser_.reset();
     juce::Logger::writeToLog("Stopped");
     setLogging(false);
+    juce::Logger::setCurrentLogger(nullptr);
+    if (crashReporter_ != nullptr) {
+      crashReporter_->endSession();
+    }
   }
 
   void systemRequestedQuit() override { quit(); }
@@ -122,20 +160,93 @@ private:
     }
   }
 
+  /// Where File > Write a log file writes (whether or not it's on now).
+  static juce::File logFile() {
+    return juce::FileLogger::getSystemLogFileFolder().getChildFile(MILKDAWP_APP_DATA_FOLDER).getChildFile("MilkDAWp.log");
+  }
+
   void setLogging(bool enabled) {
-    if (enabled && logger_ == nullptr) {
-      logger_.reset(juce::FileLogger::createDefaultAppLogger(MILKDAWP_APP_DATA_FOLDER, "MilkDAWp.log",
-                                                             getApplicationName() + " log"));
-      juce::Logger::setCurrentLogger(logger_.get());
-    } else if (!enabled && logger_ != nullptr) {
-      juce::Logger::setCurrentLogger(nullptr);
-      logger_.reset();
+    if (enabled && !log_.isWritingToFile()) {
+      log_.setFileLogger(std::make_unique<juce::FileLogger>(logFile(), getApplicationName() + " log"));
+    } else if (!enabled && log_.isWritingToFile()) {
+      log_.setFileLogger(nullptr);
     }
+  }
+
+  void offerToCollectLogsAfterCrash() {
+    const auto options = juce::MessageBoxOptions()
+                             .withIconType(juce::MessageBoxIconType::WarningIcon)
+                             .withTitle(getApplicationName() + " closed unexpectedly")
+                             .withMessage("A crash report was saved on this computer. To report the problem, "
+                                          "collect the logs into a zip file and attach it to an issue.")
+                             .withButton("Collect logs...")
+                             .withButton("Not now")
+                             .withAssociatedComponent(window_ != nullptr ? &window_->content() : nullptr);
+    juce::AlertWindow::showAsync(options, [this](int result) {
+      if (result == 1) {
+        collectLogs();
+      }
+    });
+  }
+
+  /// File > Collect logs... (4.10): the user picks where the zip goes.
+  void collectLogs() {
+    const auto name = defaultLogBundleName(getApplicationName(), juce::Time::getCurrentTime());
+    chooser_ = std::make_unique<juce::FileChooser>(
+        "Save logs", juce::File::getSpecialLocation(juce::File::userDesktopDirectory).getChildFile(name), "*.zip");
+    constexpr auto flags = juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles |
+                           juce::FileBrowserComponent::warnAboutOverwriting;
+    chooser_->launchAsync(flags, [this](const juce::FileChooser& chooser) {
+      const auto file = chooser.getResult();
+      if (file == juce::File()) {
+        return;
+      }
+      const auto zip = file.hasFileExtension("zip") ? file : file.withFileExtension("zip");
+      const auto result = writeLogBundle(makeLogBundle(), zip);
+      if (result.wasOk()) {
+        juce::Logger::writeToLog("Logs collected: " + zip.getFullPathName());
+        zip.revealToUser();
+      } else {
+        juce::Logger::writeToLog("Collecting logs failed: " + result.getErrorMessage());
+        juce::AlertWindow::showAsync(juce::MessageBoxOptions::makeOptionsOk(juce::MessageBoxIconType::WarningIcon,
+                                                                            "Couldn't save the logs",
+                                                                            result.getErrorMessage()),
+                                     [](int) {});
+      }
+    });
+  }
+
+  [[nodiscard]] LogBundle makeLogBundle() {
+    saveState();
+    properties_.saveIfNeeded(); // the settings file as it is now
+    LogBundle bundle;
+    bundle.files.add({logFile(), {}});
+    if (auto* settings = properties_.getUserSettings()) {
+      bundle.files.add({settings->getFile(), {}});
+    }
+    if (crashReporter_ != nullptr) {
+      bundle.addCrashReports(crashReporter_->reports(), 5);
+    }
+
+    auto& text = bundle.diagnostics;
+    text << getApplicationName() << " " << getApplicationVersion() << "\n";
+    text << "Collected: " << juce::Time::getCurrentTime().toISO8601(true) << "\n\n";
+    text << CrashReporter::describeSystem() << "\n\n";
+    if (window_ != nullptr) {
+      text << window_->content().diagnosticsText() << "\n\n";
+    }
+    text << "Preset folder: " << state_.presetFolder << "\n";
+    text << "Log file: " << (log_.isWritingToFile() ? "on" : "off") << "\n\n";
+    const auto lines = log_.lines();
+    text << "Recent log (" << lines.size() << " lines):\n" << lines.joinIntoString("\n") << "\n";
+    return bundle;
   }
 
   juce::ApplicationProperties properties_;
   AppState state_;
-  std::unique_ptr<juce::FileLogger> logger_;
+  RecentLog log_; // the current logger from initialise() to shutdown()
+  std::unique_ptr<CrashReporter> crashReporter_;
+  std::unique_ptr<juce::FileChooser> chooser_;
   std::unique_ptr<engine::Visualizer> visualizer_;
   std::unique_ptr<AudioInput> input_;
   std::unique_ptr<SystemAudioCapture> systemAudio_;

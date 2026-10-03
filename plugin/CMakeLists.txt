@@ -18,6 +18,11 @@ else()
   set(_mdw_product_name "MilkDAWp")
 endif()
 
+set(_mdw_formats VST3)
+if(MILKDAWP_PLUGIN_STANDALONE)
+  list(APPEND _mdw_formats Standalone)
+endif()
+
 juce_add_plugin(milkdawp_plugin
   COMPANY_NAME                "Otitis Media"
   BUNDLE_ID                   ${_mdw_bundle_id}
@@ -28,15 +33,16 @@ juce_add_plugin(milkdawp_plugin
   EDITOR_WANTS_KEYBOARD_FOCUS FALSE
   PLUGIN_MANUFACTURER_CODE    OMda
   PLUGIN_CODE                 ${_mdw_plugin_code}
-  # D8: the Standalone wrapper gets us an early app for testing, ahead of
-  # Phase 4's real juce_add_gui_app shell.
-  FORMATS                     VST3 Standalone
+  # D8, 4.11: the Standalone wrapper is a dev convenience now (the plugin
+  # editor without a DAW); the shipped app is milkdawp_app.
+  FORMATS                     ${_mdw_formats}
   VST3_CATEGORIES             "Fx" "Analyzer"
   PRODUCT_NAME                "${_mdw_product_name}"
 )
 unset(_mdw_plugin_code)
 unset(_mdw_bundle_id)
 unset(_mdw_product_name)
+unset(_mdw_formats)
 
 target_sources(milkdawp_plugin PRIVATE
   src/LayerRegistry.h
@@ -68,15 +74,18 @@ target_link_libraries(milkdawp_plugin PRIVATE
 )
 milkdawp_link_external_zlib_libpng(milkdawp_plugin)
 
-milkdawp_check_single_zlib_libpng(milkdawp_plugin_VST3)
-milkdawp_check_single_zlib_libpng(milkdawp_plugin_Standalone)
-
-if(MILKDAWP_WITH_PROJECTM)
-  milkdawp_deploy_projectm_runtime(milkdawp_plugin_VST3)
-  milkdawp_deploy_projectm_runtime(milkdawp_plugin_Standalone)
+set(_mdw_format_targets milkdawp_plugin_VST3)
+if(MILKDAWP_PLUGIN_STANDALONE)
+  list(APPEND _mdw_format_targets milkdawp_plugin_Standalone)
 endif()
-milkdawp_check_runtime_layout(milkdawp_plugin_VST3)
-milkdawp_check_runtime_layout(milkdawp_plugin_Standalone)
+foreach(_mdw_target IN LISTS _mdw_format_targets)
+  milkdawp_check_single_zlib_libpng(${_mdw_target})
+  if(MILKDAWP_WITH_PROJECTM)
+    milkdawp_deploy_projectm_runtime(${_mdw_target})
+  endif()
+  milkdawp_check_runtime_layout(${_mdw_target})
+endforeach()
+unset(_mdw_format_targets)
 
 if(BUILD_TESTING)
   add_subdirectory(tests)

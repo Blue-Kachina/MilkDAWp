@@ -95,6 +95,14 @@ public:
   std::function<void()> onStateChanged;
   /// The logging preference changed (the owner starts or stops the log file).
   std::function<void(bool)> onLoggingChanged;
+  /// File > Show log file / Collect logs... (4.10): the owner has the log
+  /// file, the crash reports and the settings file.
+  std::function<void()> onShowLogFile;
+  std::function<void()> onCollectLogs;
+
+  /// The diagnostics overlay's text (engine, presets, input, GL), also put
+  /// in a log bundle.
+  [[nodiscard]] juce::String diagnosticsText() const;
 
   void resized() override;
   bool keyPressed(const juce::KeyPress& key) override;

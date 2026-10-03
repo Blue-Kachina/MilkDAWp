@@ -2,8 +2,11 @@ include(${CMAKE_SOURCE_DIR}/cmake/FetchCatch2.cmake)
 
 add_executable(milkdawp_app_tests
   AppPreferencesTests.cpp
+  CrashReporterTests.cpp
+  LogBundleTests.cpp
   MidiLearnTests.cpp
   ParameterBindingTests.cpp
+  RecentLogTests.cpp
   SignalMonitorTests.cpp
   SystemAudioCaptureTests.cpp
 )
