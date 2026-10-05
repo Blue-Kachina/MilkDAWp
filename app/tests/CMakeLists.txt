@@ -10,6 +10,7 @@ add_executable(milkdawp_app_tests
   SignalMonitorTests.cpp
   SystemAudioCaptureTests.cpp
 )
+milkdawp_test_no_crash_dialogs(milkdawp_app_tests)
 
 target_link_libraries(milkdawp_app_tests PRIVATE
   milkdawp_app_lib

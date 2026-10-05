@@ -18,6 +18,7 @@
 #include "milkdawp/core/Playlist.h"
 #include "milkdawp/core/SeqlockSnapshot.h"
 #include "milkdawp/core/TransitionScheduler.h"
+#include "milkdawp/engine/PresetMetadataStore.h"
 #include "milkdawp/engine/RenderEngine.h"
 
 namespace milkdawp::engine {
@@ -50,7 +51,7 @@ struct EngineControls {
   /// automation, the UI, or state restore).
   std::int32_t presetIndex = 0;
   float beatSensitivity = 1.0f;
-  float qualityScale = 1.0f;
+  float qualityScale = 0.0f; // <= 0: adaptive (Auto, 5.3); else a fixed FBO scale
 };
 
 enum class BeatSource : std::uint8_t { None, Detected, Host };
@@ -66,6 +67,16 @@ struct DirectorStatus {
   std::uint32_t transitionsIssued = 0;
   std::uint32_t presetsSkipped = 0; // failed pre-validation, read, or projectM load
   std::uint64_t playlistGeneration = 0; // bumps on every (re)scan
+  // Energy mode's view (5.1, core::SectionDetector), for the diagnostics overlay.
+  float bassLevelDb = -120.0f;     // the bass, averaged over half a second
+  float bassReferenceDb = -120.0f; // the track's loud bass level
+  bool inBreakdown = false;        // a drop can happen now
+  std::uint32_t dropsDetected = 0;
+  // 5.2: presets automatic picks can choose (not "never auto-select", in the
+  // tag filter). Equal to playlistSize when nothing is filtered, and when
+  // the filter matches nothing (it is then ignored).
+  std::uint32_t autoSelectable = 0;
+  bool tagFilterMatchesNothing = false;
 };
 
 /// The engine's analysis thread (§4.2, Phase 2.6). Consumes the audio ring in
@@ -140,6 +151,16 @@ public:
   /// alike (one lock, for the browser).
   [[nodiscard]] std::vector<std::string> blacklistedPaths() const;
 
+  /// 5.2: ratings (Weighted shuffle's weights) and "never auto-select" come
+  /// from `store`; null (the default, and tests) means none. Any thread.
+  void setPresetMetadata(std::shared_ptr<PresetMetadataStore> store);
+  [[nodiscard]] std::shared_ptr<PresetMetadataStore> presetMetadata() const;
+  /// 5.2: automatic picks (transitions, next/previous) only choose presets
+  /// with one of these tags ("calm, dark"); empty: any. If no preset matches,
+  /// the filter is ignored. Picking a preset by hand always works. Any thread.
+  void setTagFilter(const std::string& commaSeparatedTags);
+  [[nodiscard]] std::string tagFilter() const;
+
   [[nodiscard]] DirectorStatus status() const noexcept { return status_.read(); }
 
 private:
@@ -174,6 +195,9 @@ private:
   std::vector<std::string> presetPaths_; // parallel to presetNames_
   std::vector<std::pair<std::string, std::string>> pendingBlacklistOps_; // path, reason ("": unblacklist
   std::vector<std::string> blacklistedPaths_; // published snapshot of the loader's blacklist
+  std::shared_ptr<PresetMetadataStore> metadataStore_;
+  std::vector<std::string> tagFilter_; // normalised (PresetMetadata::parseTags)
+  std::uint64_t selectionSerial_ = 1;   // bumps when either changes
 
   std::thread thread_;
 };

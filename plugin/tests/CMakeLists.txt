@@ -4,6 +4,7 @@ add_executable(milkdawp_plugin_tests
   PluginProcessorTests.cpp
   LayersTests.cpp
 )
+milkdawp_test_no_crash_dialogs(milkdawp_plugin_tests)
 
 target_include_directories(milkdawp_plugin_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 target_compile_definitions(milkdawp_plugin_tests PRIVATE

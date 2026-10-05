@@ -92,7 +92,7 @@ ControlDrawer::ControlDrawer(DrawerStateMachine::Config config) : state_(config)
   outputButton.setTooltip("Open or close the Output window (F11: fullscreen)");
   addAndMakeVisible(outputButton);
 
-  settingsButton.setTooltip("Settings: preset folder, transitions");
+  settingsButton.setTooltip("Settings: preset folder, transitions, diagnostics (M)");
   addAndMakeVisible(settingsButton);
 
   pinButton.setClickingTogglesState(true);
@@ -226,10 +226,12 @@ void ControlDrawer::setPresetInfo(const juce::String& name, const juce::String& 
   detail_ = detail;
   if (name != title_.name) {
     title_.name = name;
+    title_.setTitle(name.isEmpty() ? juce::String("Browse presets") : "Preset: " + name); // screen readers (5.8)
     title_.repaint();
   }
-  title_.setTooltip(tooltip.isEmpty() ? juce::String("Click to browse presets")
-                                      : tooltip + "\nClick to browse presets");
+  title_.setDescription(detail);
+  title_.setTooltip(tooltip.isEmpty() ? juce::String("Click to browse presets (B)")
+                                      : tooltip + "\nClick to browse presets (B)");
   refreshTitle();
 }
 
@@ -336,6 +338,16 @@ void ControlDrawer::PresetTitle::mouseUp(const juce::MouseEvent& e) {
   if (onClick && getLocalBounds().contains(e.getPosition()) && !e.mouseWasDraggedSinceMouseDown()) {
     onClick();
   }
+}
+
+std::unique_ptr<juce::AccessibilityHandler> ControlDrawer::PresetTitle::createAccessibilityHandler() {
+  return std::make_unique<juce::AccessibilityHandler>(
+      *this, juce::AccessibilityRole::button,
+      juce::AccessibilityActions().addAction(juce::AccessibilityActionType::press, [this] {
+        if (onClick) {
+          onClick();
+        }
+      }));
 }
 
 // --- ProgressTrack -------------------------------------------------------------

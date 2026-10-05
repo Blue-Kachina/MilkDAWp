@@ -129,6 +129,7 @@ std::string serializeStateSchemaV2(const StateSchemaV2& state) {
   out << "outputTargetInstance=" << singleLine(state.windows.outputTargetInstance) << "\n";
   out << "instanceId=" << singleLine(state.instanceId) << "\n";
   out << "instanceLabel=" << singleLine(state.instanceLabel) << "\n";
+  out << "tagFilter=" << singleLine(state.tagFilter) << "\n";
   for (const auto& [id, value] : state.paramValues) {
     out << "param." << id << "=" << value << "\n";
   }
@@ -178,6 +179,8 @@ StateSchemaV2 deserializeStateSchemaV2(const std::string& text) {
       state.windows.outputTargetInstance = value;
     } else if (key == "instanceId") {
       state.instanceId = value;
+    } else if (key == "tagFilter") {
+      state.tagFilter = value;
     } else if (key == "instanceLabel") {
       state.instanceLabel = value;
     } else if (key.rfind("param.", 0) == 0) {

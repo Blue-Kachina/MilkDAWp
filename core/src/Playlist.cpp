@@ -88,65 +88,71 @@ bool Playlist::isInNoRepeatWindow(std::size_t index) const noexcept {
   return false;
 }
 
+void Playlist::setSelectionInfo(std::size_t index, float weight, bool autoSelect) {
+  if (index < entries_.size()) {
+    entries_[index].weight = weight;
+    entries_[index].autoSelect = autoSelect;
+  }
+}
+
+std::vector<bool> Playlist::eligibility() const {
+  std::vector<bool> eligible(entries_.size());
+  bool any = false;
+  for (std::size_t i = 0; i < entries_.size(); ++i) {
+    eligible[i] = entries_[i].autoSelect;
+    any = any || eligible[i];
+  }
+  if (!any) {
+    std::fill(eligible.begin(), eligible.end(), true); // nothing matches: ignore the filter
+  }
+  return eligible;
+}
+
 std::size_t Playlist::advanceNext(std::mt19937& rng) {
   if (locked_ || entries_.empty()) {
     return currentIndex_;
   }
 
+  const auto eligible = eligibility();
   std::size_t newIndex = currentIndex_;
 
   switch (policy_) {
   case PlaylistPolicy::Sequential:
-    newIndex = (currentIndex_ + 1) % entries_.size();
-    break;
-
-  case PlaylistPolicy::ShuffleNoRepeat: {
-    std::vector<std::size_t> candidates;
-    for (std::size_t i = 0; i < entries_.size(); ++i) {
-      if (!isInNoRepeatWindow(i)) {
-        candidates.push_back(i);
+    // The next eligible entry in order (the current one again when it is
+    // the only one).
+    for (std::size_t step = 1; step <= entries_.size(); ++step) {
+      const auto index = (currentIndex_ + step) % entries_.size();
+      if (eligible[index]) {
+        newIndex = index;
+        break;
       }
     }
-    if (candidates.empty()) {
-      // Window covers the whole playlist; the only sensible fallback is to
-      // avoid immediately repeating the current entry.
-      for (std::size_t i = 0; i < entries_.size(); ++i) {
-        if (i != currentIndex_) {
-          candidates.push_back(i);
-        }
-      }
-    }
-    if (candidates.empty()) {
-      newIndex = currentIndex_; // only one entry exists in total
-    } else {
-      std::uniform_int_distribution<std::size_t> dist(0, candidates.size() - 1);
-      newIndex = candidates[dist(rng)];
-    }
     break;
-  }
 
+  case PlaylistPolicy::ShuffleNoRepeat:
   case PlaylistPolicy::Weighted: {
+    const bool weighted = policy_ == PlaylistPolicy::Weighted;
     std::vector<std::size_t> candidates;
     std::vector<double> weights;
-    for (std::size_t i = 0; i < entries_.size(); ++i) {
-      if (!isInNoRepeatWindow(i)) {
-        candidates.push_back(i);
-        weights.push_back(std::max(0.0f, entries_[i].weight));
-      }
-    }
-    if (candidates.empty()) {
+    const auto collect = [&](bool skipHistory) {
       for (std::size_t i = 0; i < entries_.size(); ++i) {
-        if (i != currentIndex_) {
+        if (eligible[i] && (skipHistory ? !isInNoRepeatWindow(i) : i != currentIndex_)) {
           candidates.push_back(i);
           weights.push_back(std::max(0.0f, entries_[i].weight));
         }
       }
+    };
+    collect(true);
+    if (candidates.empty()) {
+      // The window covers every eligible entry; the only sensible fallback
+      // is to avoid immediately repeating the current one.
+      collect(false);
     }
     const double totalWeight = std::accumulate(weights.begin(), weights.end(), 0.0);
     if (candidates.empty()) {
-      newIndex = currentIndex_;
-    } else if (totalWeight <= 0.0) {
-      // All candidate weights are zero; fall back to uniform choice rather
+      newIndex = currentIndex_; // only one eligible entry exists
+    } else if (!weighted || totalWeight <= 0.0) {
+      // Shuffle, or all candidate weights are zero: a uniform choice rather
       // than a degenerate discrete_distribution.
       std::uniform_int_distribution<std::size_t> dist(0, candidates.size() - 1);
       newIndex = candidates[dist(rng)];
@@ -174,7 +180,14 @@ std::size_t Playlist::advancePrevious() {
     return currentIndex_;
   }
 
-  currentIndex_ = (currentIndex_ + entries_.size() - 1) % entries_.size();
+  const auto eligible = eligibility();
+  for (std::size_t step = 1; step <= entries_.size(); ++step) {
+    const auto index = (currentIndex_ + entries_.size() - step) % entries_.size();
+    if (eligible[index]) {
+      currentIndex_ = index;
+      break;
+    }
+  }
   recordHistory(currentIndex_);
   return currentIndex_;
 }

@@ -20,6 +20,9 @@ enum class ShortcutAction : std::uint8_t {
   ToggleShuffle,                // S
   ToggleDrawer,                 // H
   TogglePin,                    // P
+  BrowsePresets,                // B: the preset picker (5.8)
+  OpenSettingsMenu,             // M: the settings menu (5.8)
+  ToggleDiagnostics,            // D: the diagnostics panel (5.8, 5.9)
 };
 
 /// Maps a key press to a logical action (§4.9), shared verbatim by every
@@ -37,7 +40,7 @@ enum class ShortcutAction : std::uint8_t {
 /// plugin must never claim it (§4.9) -- only the standalone app shell
 /// should pass `isAppShell = true`.
 ///
-/// The single-letter shortcuts (L, S, H, P) only fire unmodified, per §4.9's
+/// The single-letter shortcuts (L, S, H, P, B, M, D) only fire unmodified, per §4.9's
 /// "unmodified letters only" rule; F11/Esc/arrows/Space are unaffected by
 /// modifiers, since the table places no such restriction on them.
 ///

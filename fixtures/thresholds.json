@@ -4,5 +4,7 @@
   "minFMeasure": 0.3,
   "toleranceSeconds": 0.070,
   "maxTempoErrorFraction": 0.15,
-  "maxOnsetsForSilence": 5
+  "maxOnsetsForSilence": 5,
+  "$dropsComment": "5.1: every fixture must find exactly the drops in its drops.txt (none without one), each within dropToleranceSeconds. Measured 2026-10-03: breakdown_drop's drop found 10 ms after the annotation; no drops anywhere else.",
+  "dropToleranceSeconds": 0.150
 }

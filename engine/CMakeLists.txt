@@ -18,12 +18,15 @@ add_library(milkdawp_engine STATIC
   include/milkdawp/engine/GlFrameTarget.h
   src/GlFrameTarget.cpp
   include/milkdawp/engine/PcmFeeder.h
+  include/milkdawp/engine/RecentErrors.h
   include/milkdawp/engine/FrameReadbackExchange.h
   include/milkdawp/engine/PresetHandoff.h
   include/milkdawp/engine/LayerChannel.h
   include/milkdawp/engine/LayerCompositor.h
   src/LayerCompositor.cpp
   include/milkdawp/engine/PresetCompileTimeCache.h
+  include/milkdawp/engine/PresetMetadataStore.h
+  src/PresetMetadataStore.cpp
   include/milkdawp/engine/Director.h
   include/milkdawp/engine/ControlMapping.h
   src/ControlMapping.cpp
@@ -82,4 +85,12 @@ endif()
 
 if(BUILD_TESTING)
   add_subdirectory(tests)
+endif()
+
+# PresetMetadataStore (5.2): the user data folder its file lives in, the same
+# one the app's settings use, so the app and plugin share ratings and tags.
+if(MILKDAWP_DEV_ALT_IDENTITY)
+  target_compile_definitions(milkdawp_engine PRIVATE MILKDAWP_USER_DATA_FOLDER="MilkDAWp2 Dev")
+else()
+  target_compile_definitions(milkdawp_engine PRIVATE MILKDAWP_USER_DATA_FOLDER="MilkDAWp")
 endif()

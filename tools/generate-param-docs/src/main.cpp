@@ -15,5 +15,15 @@ int main() {
                "layout, the app's preferences/MIDI-learn targets, and `MigrateFromV1` (via the "
                "v1 alias column).\n\n";
   std::cout << milkdawp::core::renderParameterDocsMarkdown(milkdawp::core::allParameters());
+  std::cout
+      << "\n## Notes\n\n"
+         "- **Beat Sensitivity** (\"Reactivity\" in the Transitions panel) is projectM's own setting: how "
+         "strongly presets react to the bass, mid and treble levels they animate from. 0 is calm, 1 is "
+         "MilkDrop's usual response, 2 is twice as jumpy. It detects no beats and causes no transitions. "
+         "MilkDAWp's beat detector keeps its own fixed threshold: tying it to this knob made beat tracking "
+         "fail on the test fixtures at both ends of the range (roadmap 5.5).\n"
+         "- **How easily MilkDAWp cuts** is set by the transition mode and its settings: Bars, the timed "
+         "interval, and in Energy mode the **Energy Threshold**, how sharply the bass must come back after a "
+         "breakdown to count as a drop (4 + 3 x the value, in dB: 5.5 to 16 dB, default 10).\n";
   return 0;
 }

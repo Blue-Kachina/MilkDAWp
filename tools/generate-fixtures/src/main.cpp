@@ -67,6 +67,90 @@ void writeFixture(const std::filesystem::path& fixturesDir, const std::string& n
   std::printf("wrote %s (%zu beats)\n", dir.string().c_str(), beatTimes.size());
 }
 
+/// fixtures/<name>/drops.txt (5.1): the drops Energy mode must cut on, one
+/// time in seconds per line. A fixture without the file has none.
+void writeDrops(const std::filesystem::path& fixturesDir, const std::string& name,
+                const std::vector<double>& dropTimes) {
+  std::ofstream dropsFile(fixturesDir / name / "drops.txt");
+  for (double t : dropTimes) {
+    dropsFile << t << "\n";
+  }
+}
+
+/// A decaying sine note (a bassline note), mixed additively.
+void addNote(std::vector<float>& buffer, double startSeconds, double freqHz, double decaySeconds, float gain) {
+  const auto start = static_cast<std::size_t>(startSeconds * kSampleRate);
+  const auto length = static_cast<std::size_t>(decaySeconds * 5.0 * kSampleRate);
+  for (std::size_t i = 0; i < length && start + i < buffer.size(); ++i) {
+    const double t = static_cast<double>(i) / kSampleRate;
+    buffer[start + i] +=
+        gain * static_cast<float>(std::exp(-t / decaySeconds) * std::sin(2.0 * 3.14159265358979323846 * freqHz * t));
+  }
+}
+
+/// A short noise burst (a hi-hat), mixed additively.
+void addHat(std::vector<float>& buffer, double startSeconds, std::mt19937& rng, float gain) {
+  constexpr double decaySeconds = 0.015;
+  std::uniform_real_distribution<float> noiseDist(-1.0f, 1.0f);
+  const auto start = static_cast<std::size_t>(startSeconds * kSampleRate);
+  const auto length = static_cast<std::size_t>(decaySeconds * 5.0 * kSampleRate);
+  float previous = 0.0f;
+  for (std::size_t i = 0; i < length && start + i < buffer.size(); ++i) {
+    const double t = static_cast<double>(i) / kSampleRate;
+    const float noise = noiseDist(rng);
+    const float highPassed = noise - previous; // first difference: mostly treble
+    previous = noise;
+    buffer[start + i] += gain * static_cast<float>(std::exp(-t / decaySeconds)) * highPassed;
+  }
+}
+
+/// 5.1's drop case: two full bars (kick, bassline, hats), a two-bar
+/// breakdown (a pad, with a noise riser through its second bar, no kick or
+/// bass), then the drop: everything back on the downbeat. Beats are every
+/// musical beat, including the breakdown's.
+std::vector<double> breakdownDrop(WavAudio& audio, double bpm, double durationSeconds, std::mt19937& rng,
+                                  double& dropTime) {
+  audio = makeSilentBuffer(durationSeconds);
+  auto& buffer = audio.interleavedSamples;
+  const double beat = 60.0 / bpm;
+  constexpr int kBreakdownFirstBeat = 9; // beats are numbered from 1
+  constexpr int kDropBeat = 17;
+  dropTime = kDropBeat * beat;
+
+  std::vector<double> beats;
+  for (int b = 1; b * beat < durationSeconds - beat; ++b) {
+    const double t = b * beat;
+    beats.push_back(t);
+    const bool full = b < kBreakdownFirstBeat || b >= kDropBeat;
+    if (full) {
+      addKick(buffer, static_cast<std::size_t>(t * kSampleRate), rng);
+      addNote(buffer, t, 55.0, 0.12, 0.35f);              // bass on the beat...
+      addNote(buffer, t + beat * 0.5, 55.0, 0.12, 0.3f);  // ...and the off-beat
+      addHat(buffer, t + beat * 0.5, rng, 0.15f);
+    }
+  }
+
+  // The breakdown: a quiet pad chord over its two bars, and a riser (white
+  // noise swelling in) through the second.
+  const double breakdownStart = kBreakdownFirstBeat * beat;
+  const double riserStart = (kBreakdownFirstBeat + 4) * beat;
+  std::uniform_real_distribution<float> noiseDist(-1.0f, 1.0f);
+  for (auto i = static_cast<std::size_t>(breakdownStart * kSampleRate);
+       i < static_cast<std::size_t>(dropTime * kSampleRate) && i < buffer.size(); ++i) {
+    const double t = static_cast<double>(i) / kSampleRate;
+    double pad = 0.0;
+    for (const double freq : {220.0, 277.18, 329.63}) {
+      pad += std::sin(2.0 * 3.14159265358979323846 * freq * t);
+    }
+    buffer[i] += 0.06f * static_cast<float>(pad);
+    if (t >= riserStart) {
+      const auto swell = static_cast<float>((t - riserStart) / (dropTime - riserStart));
+      buffer[i] += 0.25f * swell * swell * noiseDist(rng);
+    }
+  }
+  return beats;
+}
+
 std::vector<double> fourOnTheFloor(WavAudio& audio, double bpm, double durationSeconds, std::mt19937& rng) {
   audio = makeSilentBuffer(durationSeconds);
   const double periodSeconds = 60.0 / bpm;
@@ -189,6 +273,15 @@ int main(int argc, char** argv) {
 
   audio = makeWhiteNoise(5.0, rng);
   writeFixture(fixturesDir, "noise", audio, {}, "5 seconds of white noise at low amplitude.");
+
+  // Last, so the fixtures above keep their random numbers (and their bytes).
+  audio = {};
+  double dropTime = 0.0;
+  beats = breakdownDrop(audio, 128.0, 10.0, rng, dropTime);
+  writeFixture(fixturesDir, "breakdown_drop", audio, beats,
+               "128 BPM: two full bars (kick, bassline, hats), a two-bar breakdown (pad, then a noise riser), "
+               "then the drop on beat 17. drops.txt marks the drop (5.1).");
+  writeDrops(fixturesDir, "breakdown_drop", {dropTime});
 
   std::printf("done.\n");
   return 0;

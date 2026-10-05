@@ -64,7 +64,10 @@ namespace {
 std::vector<PlaylistEntry> makeEntries(std::size_t n) {
   std::vector<PlaylistEntry> entries;
   for (std::size_t i = 0; i < n; ++i) {
-    entries.push_back({"/presets/" + std::to_string(i) + ".milk", std::to_string(i) + ".milk", 1.0f});
+    PlaylistEntry entry;
+    entry.absolutePath = "/presets/" + std::to_string(i) + ".milk";
+    entry.relativePath = std::to_string(i) + ".milk";
+    entries.push_back(entry);
   }
   return entries;
 }
@@ -173,4 +176,66 @@ TEST_CASE("Playlist advancePrevious retraces actual play history, not just index
     const std::size_t expected = path[path.size() - 1 - stepsBack];
     CHECK(playlist.advancePrevious() == expected);
   }
+}
+
+TEST_CASE("Sequential skips presets that aren't auto-selectable", "[core][Playlist]") {
+  Playlist playlist(makeEntries(5));
+  playlist.setSelectionInfo(1, 1.0f, false);
+  playlist.setSelectionInfo(2, 1.0f, false);
+  std::mt19937 rng(1);
+  CHECK(playlist.advanceNext(rng) == 3);
+  CHECK(playlist.advanceNext(rng) == 4);
+  CHECK(playlist.advanceNext(rng) == 0);
+  CHECK(playlist.advanceNext(rng) == 3);
+}
+
+TEST_CASE("Shuffle and Weighted never auto-select an excluded preset", "[core][Playlist]") {
+  for (const auto policy : {PlaylistPolicy::ShuffleNoRepeat, PlaylistPolicy::Weighted}) {
+    Playlist playlist(makeEntries(6));
+    playlist.setPolicy(policy);
+    playlist.setHistoryWindowSize(2);
+    playlist.setSelectionInfo(2, 1.0f, false);
+    playlist.setSelectionInfo(4, 100.0f, false); // a heavy weight doesn't override it
+    std::mt19937 rng(7);
+    for (int i = 0; i < 300; ++i) {
+      const auto index = playlist.advanceNext(rng);
+      CHECK(index != 2);
+      CHECK(index != 4);
+    }
+  }
+}
+
+TEST_CASE("A pick by hand still plays an excluded preset", "[core][Playlist]") {
+  Playlist playlist(makeEntries(3));
+  playlist.setSelectionInfo(1, 1.0f, false);
+  playlist.setCurrentIndex(1);
+  CHECK(playlist.currentIndex() == 1);
+}
+
+TEST_CASE("When nothing is auto-selectable, everything is", "[core][Playlist]") {
+  // A tag filter no preset matches: ignored rather than stopping playback.
+  Playlist playlist(makeEntries(3));
+  for (std::size_t i = 0; i < 3; ++i) {
+    playlist.setSelectionInfo(i, 1.0f, false);
+  }
+  std::mt19937 rng(1);
+  CHECK(playlist.advanceNext(rng) == 1);
+  CHECK(playlist.advancePrevious() == 0);
+}
+
+TEST_CASE("Previous without history skips excluded presets", "[core][Playlist]") {
+  Playlist playlist(makeEntries(4));
+  playlist.setSelectionInfo(3, 1.0f, false);
+  CHECK(playlist.advancePrevious() == 2); // from 0, wrapping past 3
+}
+
+TEST_CASE("Only one auto-selectable preset: shuffle stays on it", "[core][Playlist]") {
+  Playlist playlist(makeEntries(4));
+  playlist.setPolicy(PlaylistPolicy::ShuffleNoRepeat);
+  for (const std::size_t i : {0U, 1U, 3U}) {
+    playlist.setSelectionInfo(i, 1.0f, false);
+  }
+  playlist.setCurrentIndex(2);
+  std::mt19937 rng(3);
+  CHECK(playlist.advanceNext(rng) == 2);
 }

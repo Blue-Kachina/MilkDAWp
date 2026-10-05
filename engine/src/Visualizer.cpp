@@ -59,6 +59,47 @@ void Visualizer::processAudio(const float* const* channels, int numChannels, int
   }
 }
 
+core::DiagnosticsInfo Visualizer::diagnostics() {
+  core::DiagnosticsInfo info;
+  const auto stats = render_->stats();
+  info.engineAvailable = render_->isAvailable();
+  info.engineUnavailableReason = render_->unavailableReason();
+  info.projectMVersion = render_->projectMVersion();
+  info.glDescription = render_->glDescription();
+  info.paused = stats.paused;
+  info.framesPerSecond = stats.framesPerSecond;
+  info.cpuFrameMs = stats.cpuFrameMs;
+  info.gpuFrameMs = stats.gpuFrameMs;
+  info.width = stats.width;
+  info.height = stats.height;
+  info.qualityScale = stats.qualityScale;
+  info.qualityAuto = stats.qualityAuto;
+  info.gpuSharers = stats.gpuSharers;
+  info.layers = stats.layers;
+  info.lastPresetLoadMs = stats.lastPresetLoadMs;
+  info.presetsLoaded = stats.presetsLoaded;
+
+  const auto status = director_->status();
+  switch (status.beatSource) {
+  case BeatSource::Detected: info.beatSource = "detected"; break;
+  case BeatSource::Host: info.beatSource = "host"; break;
+  case BeatSource::None: info.beatSource = "none"; break;
+  }
+  info.bpm = status.bpm;
+  info.beatConfidence = status.beatConfidence;
+  info.playlistSize = status.playlistSize;
+  info.presetsSkipped = status.presetsSkipped;
+  if (status.currentIndex >= 0) {
+    info.currentPreset = director_->presetName(status.currentIndex);
+  }
+  info.bassLevelDb = status.bassLevelDb;
+  info.bassReferenceDb = status.bassReferenceDb;
+  info.inBreakdown = status.inBreakdown;
+  info.dropsDetected = status.dropsDetected;
+  info.recentErrors = render_->errors().snapshot();
+  return info;
+}
+
 void Visualizer::setControls(const EngineControls& controls) noexcept {
   render_->setBeatSensitivity(controls.beatSensitivity);
   render_->setQualityScale(controls.qualityScale);

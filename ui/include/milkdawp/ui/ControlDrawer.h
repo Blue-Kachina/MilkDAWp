@@ -119,6 +119,9 @@ private:
     void mouseEnter(const juce::MouseEvent&) override { repaint(); }
     void mouseExit(const juce::MouseEvent&) override { repaint(); }
     void mouseUp(const juce::MouseEvent& e) override;
+    /// 5.8: a screen reader announces it as a button named after the preset,
+    /// and can press it (opens the picker).
+    std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
 
     juce::String name;
     juce::String detail;

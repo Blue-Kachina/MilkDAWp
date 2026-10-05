@@ -201,6 +201,10 @@ void PresetBrowserPanel::showContextMenu(const std::string& path) {
       callbacks_.onSetBlacklisted(path, !blacklisted);
     }
   });
+  if (callbacks_.presetInfo) {
+    ui::addPresetInfoSection(menu, juce::File(juce::String(path)).getFileNameWithoutExtension(),
+                             callbacks_.presetInfo(path), this);
+  }
   menu.showMenuAsync(juce::PopupMenu::Options());
 }
 

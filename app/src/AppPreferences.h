@@ -36,6 +36,9 @@ struct AppState {
   /// §4.4: MidiLearn::stateString() / restoreFromState().
   juce::String midiMappings;
 
+  /// 5.2: Settings -> Transitions -> "Only tags" (Director::setTagFilter).
+  juce::String tagFilter;
+
   juce::Rectangle<int> mainWindowBounds; // empty: centre a default size
   bool mainWindowFullscreen = false;
 

@@ -5,12 +5,12 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <optional>
 #include <random>
 
 #include "milkdawp/core/BeatClock.h"
 #include "milkdawp/core/Messages.h"
+#include "milkdawp/core/SectionDetector.h"
 
 namespace milkdawp::core {
 
@@ -44,12 +44,11 @@ struct TransitionSchedulerConfig {
   float beatConfidenceFallbackThreshold = 0.3f;
   float beatConfidenceLowSecondsBeforeFallback = 4.0f;
 
-  // Energy mode: a hop counts as a "drop" when broadband energy exceeds the
-  // rolling window's mean by this many standard deviations (a practical
-  // stand-in for "a rolling percentile", cheaper to maintain incrementally)
-  // and a strong bass onset lands on the same hop. Cooldown is in bars.
-  float energyThresholdMultiplier = 2.0f;
-  float energyWindowSeconds = 8.0f;
+  // Energy mode (5.1): a hard cut on each drop `SectionDetector` finds (the
+  // bass coming back after a breakdown or build-up), then none for
+  // `energyCooldownBars`; beat-quantized cuts the rest of the time, the next
+  // one `bars` after the drop.
+  SectionDetectorConfig section;
   std::uint32_t energyCooldownBars = 2;
 };
 
@@ -72,8 +71,11 @@ public:
   explicit TransitionScheduler(double sampleRate, std::size_t hopSize = 512,
                                 std::uint64_t rngSeed = std::mt19937::default_seed);
 
-  void setConfig(const TransitionSchedulerConfig& config) { config_ = config; }
+  void setConfig(const TransitionSchedulerConfig& config);
   [[nodiscard]] const TransitionSchedulerConfig& config() const noexcept { return config_; }
+
+  /// Energy mode's view of the last hop (diagnostics, mdw-analyze).
+  [[nodiscard]] const SectionFrame& lastSection() const noexcept { return lastSection_; }
 
   /// Call once per hop, in hop order. `transportDiscontinuity` is true on
   /// exactly the hop a stop->play transition, loop, or relocate happened
@@ -81,9 +83,10 @@ public:
   /// `nextPlaylistIndex`/`nextPresetId` are what a resulting transition
   /// should advance the playlist to -- Playlist itself decides *which*
   /// index that is (policy-dependent); the scheduler only decides *when*.
+  /// `bassEnergy` is `AnalysisFrame::bassEnergy` (Energy mode's drops).
   std::optional<ScheduledTransition> tick(std::uint64_t currentSamplePos, bool transportPlaying,
                                            bool transportDiscontinuity, const BeatClockState& beatClock,
-                                           float broadbandEnergy, bool strongBassOnsetThisHop,
+                                           float bassEnergy, bool strongBassOnsetThisHop,
                                            std::size_t nextPlaylistIndex, std::uint32_t nextPresetId);
 
 private:
@@ -106,13 +109,18 @@ private:
                                                                 std::uint64_t crossedBeatSample,
                                                                 std::size_t nextPlaylistIndex,
                                                                 std::uint32_t nextPresetId);
+  // BeatQuantized, falling back to Timed while beat confidence stays low.
+  [[nodiscard]] std::optional<ScheduledTransition> tickBeatQuantizedOrTimed(
+      std::uint64_t currentSamplePos, bool transportPlaying, bool transportDiscontinuity,
+      const BeatClockState& beatClock, bool beatJustCrossed, std::uint64_t crossedBeatIndex,
+      std::uint64_t crossedBeatSample, std::size_t nextPlaylistIndex, std::uint32_t nextPresetId);
   [[nodiscard]] std::optional<ScheduledTransition> tickEnergy(std::uint64_t currentSamplePos,
+                                                                bool transportPlaying,
+                                                                bool transportDiscontinuity,
                                                                 const BeatClockState& beatClock,
                                                                 bool beatJustCrossed,
                                                                 std::uint64_t crossedBeatIndex,
                                                                 std::uint64_t crossedBeatSample,
-                                                                float broadbandEnergy,
-                                                                bool strongBassOnsetThisHop,
                                                                 std::size_t nextPlaylistIndex,
                                                                 std::uint32_t nextPresetId);
 
@@ -146,7 +154,8 @@ private:
   float lowConfidenceSecondsAccumulated_ = 0.0f;
 
   // Energy state.
-  std::deque<float> energyWindow_;
+  SectionDetector section_;
+  SectionFrame lastSection_;
   bool haveLastEnergyTransitionSample_ = false;
   std::uint64_t lastEnergyTransitionSample_ = 0;
 

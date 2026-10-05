@@ -11,6 +11,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "milkdawp/core/StateSchema.h"
+#include "milkdawp/ui/KeyboardNavigation.h"
 
 namespace milkdawp::ui {
 
@@ -125,6 +126,9 @@ public:
   void setInstanceState(const InstanceState& state);
 
   void paint(juce::Graphics& g) override;
+  void paintOverChildren(juce::Graphics& g) override { focusRing_.paint(g); }
+  /// 5.8: with focus anywhere in the panel, 1-9 picks that screen and A picks Automatic.
+  bool keyPressed(const juce::KeyPress& key) override;
   void resized() override;
   void mouseMove(const juce::MouseEvent& event) override;
   void mouseExit(const juce::MouseEvent& event) override;
@@ -162,6 +166,8 @@ private:
   /// Index of the map tile under `position`, or -1.
   [[nodiscard]] int tileAt(juce::Point<int> position) const;
   void setHovered(int tile);
+  /// Picks map tile `tile` as the target screen (a click, or its number key).
+  void chooseDisplay(int tile);
   void rebuildDisplays();
   /// The screen picker only makes sense for an instance that opens its own
   /// window, and only with more than one monitor to choose between.
@@ -204,6 +210,8 @@ private:
   core::WindowBounds target_;
   int hovered_ = -1;
   DisplayHighlightFrame highlight_;
+
+  KeyboardFocusRing focusRing_{*this}; // 5.8
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OutputSettingsPanel)
 };

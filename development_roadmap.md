@@ -445,6 +445,10 @@ primary window, the Output window, and the detached-controls window alike:
 | `S` | Toggle shuffle | |
 | `H` | Toggle drawer (reveal or hide, respects pin) | |
 | `P` | Pin / unpin drawer | |
+| `B` | Browse presets (the preset picker; arrows + Return choose) | 5.8 |
+| `M` | Open the settings menu (arrows + Return choose) | 5.8 |
+| `D` | Show / hide the diagnostics panel | 5.8, 5.9 |
+| `Tab` / `Shift+Tab` | Inside an open popover (Transitions, Output, Diagnostics): move between its controls; `1`-`9` / `A` in Output pick a screen / Automatic | 5.8 |
 | `Space` | Toggle lock | **app only**: every DAW binds Space to transport, so the plugin never claims it |
 
 Rules: unmodified letters only when the visualization or drawer has focus, never while a text
@@ -1868,6 +1872,32 @@ rework:
         `MidiLearnTests.cpp` covers the pure state machine (arm/cancel, mapping table
         round-trip through `stateString`/`restoreFromState`, malformed-line handling); nothing
         exercises `handleIncomingMidiMessage` itself, since CI has no MIDI hardware.
+      Update (2026-10-03): that background enable thread was a race. It called
+      `juce::MidiInput::getAvailableDevices()` and `AudioDeviceManager::setMidiInputDeviceEnabled`
+      / `add|removeMidiInputDeviceCallback`, all message-thread JUCE APIs (an unlocked shared
+      device table and device vector, and a `sendChangeMessage` that re-entered `MidiLearn`
+      and started another thread), while the message thread used the same ones. It showed as
+      the "flaky" `[MidiLearn]` tests: SIGSEGV or a debug-heap `_CrtIsValidHeapPointer`
+      assertion in 7-9 of 80 runs, one of which left a modal CRT dialog waiting for a click.
+      Under cdb, JUCE's `JUCE_ASSERT_MESSAGE_THREAD` fired on the first run. Fix: `MidiLearn` no
+      longer goes through `AudioDeviceManager` (constructor is now `MidiLearn(ParameterBinding&)`).
+      It owns its `juce::MidiInput`s. The message thread lists the devices (which builds JUCE's
+      table) and adopts and starts each input. Only `MidiInput::openDevice`, the call a driver
+      can block, runs in the background. Hot-plug comes from `juce::MidiDeviceListConnection`,
+      and unplugged inputs are closed and can be reopened. The destructor waits up to 2 s for
+      in-flight opens, so none outlives the object or a test's JUCE shutdown, without letting a
+      hung driver block quitting. Result: 0/100 MidiLearn-only and 0/100 full app-suite runs
+      failed, against 7-9/80 before; full `ctest` 331/331. **Known deviation:** JUCE also marks
+      `openDevice` message-thread-only, so a Debug build under a debugger breaks once per MIDI
+      device at launch. Its lookups only read the table just built on the message thread;
+      JUCE rewrites it only on a plug/unplug, so a hot-plug in the same millisecond as an open is
+      the remaining window. The MOTU interface that hung is no longer attached (only the "USB
+      Uno MIDI Interface": open 0.5 ms, start 0.3 ms), so whether `openDevice` or `start()`
+      was the blocking call is unconfirmed. If it was `start()`, opening could move back to the
+      message thread and the deviation would go away. Test executables now link
+      `cmake/TestNoCrashDialogs.cpp` (`milkdawp_test_no_crash_dialogs`), so on Windows a
+      CRT assert, `abort()` or crash prints to stderr and fails the test instead of opening a
+      modal dialog.
 - [x] 4.5 (M) Preset library browser: tree of the library root, search, favourites, recently
       played, right-click add to blacklist.
       Note (2026-09-27):
@@ -2010,12 +2040,168 @@ source).
 energy mode demonstrably cuts on drops in the fixture set; adaptive quality keeps ≥55 fps at
 1080p on an integrated GPU with the bundled pack; 4-hour soak test passes with flat memory.
 
-- [ ] 5.1 (M) Energy / section-change transition mode: rolling energy percentile, drop
+- [x] 5.1 (M) Energy / section-change transition mode: rolling energy percentile, drop
       detector, build-up detection (optional), cooldown in bars.
-- [ ] 5.2 (M) Weighted shuffle with ratings and tags; per-preset "never auto-select"; tag
+      Note (2026-10-03):
+      - The 1.12 rule was wrong in steady music. It called a hop a drop when broadband RMS
+        was 2 standard deviations over its 8 s mean and a bass onset landed. Every kick in a
+        steady section clears that, so the mode hard-cut every `energyCooldownBars` whatever
+        the music did. Measured on the fixtures before replacing it: 16 "drops" in
+        `four_on_the_floor` (all 16 kicks), 12 in `syncopated`, 17 in `tempo_change`, 8 in
+        `sparse_acoustic`.
+      - New `core::SectionDetector` (`core/include/milkdawp/core/SectionDetector.h`): pure, one
+        call per hop, buffers sized up front. It works on the **bass** band
+        (`AnalysisFrame::bassEnergy`), since that is what a breakdown or build-up removes and a
+        drop brings back. Broadband energy also rises through a riser. The level is the bass
+        averaged over 0.5 s. The **rolling percentile** is the loud reference: the 80th
+        percentile of that level over 60 s, sampled every 0.25 s. A **drop** is a bass onset
+        where the bass jumps `jumpDb` above the *loudest* level of the 2.5 s before (the last
+        0.5 s left out, so a fill, kick roll or riser's last beat doesn't hide it) and comes
+        back within 6 dB of the loud reference. Comparing with the loudest moment rather than
+        the mean is what makes steady kicks, sparse hits and tempo changes never qualify.
+        There is one drop per breakdown: the kicks after a drop still see the breakdown behind
+        them. Music starting after silence counts as a drop; anything under an energy floor
+        doesn't. `SectionFrame::breakdown` reports "a drop can happen now".
+      - `TransitionScheduler` Energy mode: a hard cut on each drop outside the cooldown (bars).
+        The rest of the time it behaves like BeatQuantized, now including its low-confidence
+        fallback to Timed, which Energy mode used to skip. The beat-quantized count restarts
+        at the drop, so the next regular cut is exactly `bars` after it, and a grid-anchored
+        cut inside the cooldown is dropped. The detector runs in every mode, so switching to
+        Energy starts with history. `tick()` now takes the bass energy (Director passes
+        `frame.bassEnergy` instead of `broadbandRms`). `lastSection()` exposes the frame.
+      - The `energyThreshold` parameter keeps its id, 0.5-4 range and default 2, so saved
+        projects and automation still load. Its meaning changes to `jumpDb = 4 + 3 x value`
+        (5.5-16 dB, default 10). The bottom stays above a steady kick's ~4.4 dB swing over
+        its own average. Its label loses "(sd)" (`docs/parameters.md` regenerated), and the
+        tooltip is rewritten.
+      - Exit criterion ("energy mode demonstrably cuts on drops in the fixture set"): new
+        fixture `fixtures/breakdown_drop` (128 BPM: 2 full bars of kick, bassline and hats, a
+        2-bar breakdown with a pad and a noise riser, then the drop on beat 17 at 7.969 s), with
+        a new optional `drops.txt` annotation. `mdw-analyze --suite` now requires every
+        fixture to find exactly its annotated drops (none without the file) within
+        `dropToleranceSeconds` (0.15). Result: drop found at 7.979 s (10 ms late), 0 drops in
+        every other fixture, all 7 pass (also in CI's Linux suite job).
+      - The fixture generator gained the new fixture at the end of its run, so it doesn't
+        shift the RNG for the others. Regenerating on MSVC changes the other WAVs' bytes
+        anyway (`std::uniform_real_distribution` differs between standard libraries; beats
+        are identical), so only `breakdown_drop` was copied in. `fixtures/README.md` documents
+        `drops.txt` and this.
+      - The app's diagnostics overlay shows the bass level, the loud reference, "breakdown"
+        and a drop count (`DirectorStatus`), for the Phase 5 hand test.
+      - Tests: `SectionDetectorTests` (10 cases: steady kicks, breakdown then drop, the
+        breakdown flag, sparse hits, a soft hit in a breakdown, onset required, one drop per
+        breakdown, silence then music, near-silence, threshold). Energy cases in
+        `TransitionSchedulerTests` rewritten around realistic envelopes: no hard cuts on 70 s
+        of steady kicks, one hard cut on the drop with the next regular cut exactly 4 bars
+        later, and the cooldown suppressing a second drop 6 s later (both get through with a
+        1-bar cooldown). Full `ctest`: 297/297.
+      - **Not done:** build-up detection (optional in this item). A build-up is visible as
+        `breakdown` with broadband energy rising, but nothing uses it yet. "Only *calm* during
+        breakdowns" is 5.2/post-1.0 anyway. Known limit: a build-up whose kick roll runs
+        right up to the drop for longer than the 0.5 s guard hides that drop (the quiet
+        stretch isn't quiet). Real-music checking is the Phase 5 hand test (Matthew), not
+        done.
+      Correction (2026-10-03, during 5.2): the app's diagnostics showed a "drop" with nothing
+      playing. Room noise on the mic (bass about -70 to -120 dB) jumped over the first floor
+      (1e-7), and in a silent room the loud reference is silent too. Measured on the fixtures,
+      a kick near full scale is about 1.5e5 in `bassEnergy` units (+52 dB), so the floor is
+      now 1.0 (0 dB, about bass at -52 dBFS). That is far above room noise and below any real
+      track. A new test covers room-noise blips. The detector tests now build their tracks at
+      kick-like levels, and the fixture suite is unchanged (7/7, same drop time). The overlay
+      also printed "-71.6933 dB" because `juce::String(float, 0)` means default precision;
+      it now rounds.
+- [x] 5.2 (M) Weighted shuffle with ratings and tags; per-preset "never auto-select"; tag
       filters in the transition settings ("only *calm* during breakdowns" is post-1.0).
-- [ ] 5.3 (M) Adaptive quality on the real FBO with GPU-time-driven hysteresis and a manual
+      Note (2026-10-03):
+      - `core::PresetMetadata` (`core/include/milkdawp/core/PresetMetadata.h`): rating (0
+        unrated, 1-5), "never auto-select" and tags (lower case, trimmed, unique) per preset.
+        It is keyed by **file name**, case-insensitive, not by path. Moving or re-rooting a
+        preset folder keeps the ratings, and the same preset in two packs (common with MilkDrop
+        packs) shares one. Text format, one preset per line (`rating\tflags\ttags\tfile
+        name`); malformed lines are skipped. Weight: unrated 1, then each star doubles it
+        (1 star 0.25, 3 stars 1, 5 stars 4).
+      - `engine::PresetMetadataStore`: the file `<user data>/MilkDAWp/preset-metadata.txt`
+        (`MilkDAWp2 Dev` in dev builds), one store per process (`shared()`), shared by the
+        app and every plugin instance, since ratings describe the user's library, not a
+        project. It rereads the file when another process changes it (mtime, checked at most
+        once a second) and before each write, so the app and a DAW don't erase each other's
+        edits (last writer wins per preset). Writes go through a `TemporaryFile`.
+      - `Playlist`: entries carry `autoSelect`. Sequential, Shuffle and Weighted skip ineligible
+        entries on advanceNext/advancePrevious; `setCurrentIndex` (a pick by hand) still plays
+        them. If nothing is eligible, everything is, so a filter that matches nothing never
+        stops playback. Weighted now gets its weights from ratings.
+      - `Director::setPresetMetadata` / `setTagFilter`. The director reapplies weights and
+        eligibility whenever the store's generation, the filter or the playlist changes.
+        `DirectorStatus` gains `autoSelectable` and `tagFilterMatchesNothing`. "Never
+        auto-select" applies in every policy and to next/previous; ratings only matter under
+        Weighted.
+      - UI (`ui/PresetInfoMenu.h`, shared): clicking the preset title opens the picker, which
+        now has a section for the current preset: Rating submenu (stars plus "4 stars", since
+        the glyphs are small in the drawer font), "Never auto-select", "Tags..." (a small
+        dialog listing tags in use). The app's library browser right-click menu has the same
+        items. Transition settings gains an "Only tags" row (comma-separated, applied as
+        typed) with a status ("12 of 340 presets", or an orange "no preset has these tags").
+        The filter is per instance: saved in the app's preferences (`tagFilter`) and in the
+        plugin state (`StateSchemaV2::tagFilter`, an additive key; older states have none).
+      - Tests: `PresetMetadataTests` (key by file name, normalising, weights, filter,
+        round-trip incl. CRLF, malformed lines), new `PlaylistTests` (sequential skips,
+        shuffle/weighted never pick excluded presets even at weight 100, picks by hand, the
+        nothing-eligible fallback, previous, single eligible), `PresetMetadataStoreTests`
+        (missing file, write/read across stores, unchanged write, two writers keep both
+        edits, an external change is picked up, `shared()`), a Director end-to-end test (real
+        GL and projectM: next skips the excluded preset, a pick by hand plays it, a tag filter
+        narrows to one, a no-match filter is ignored and reported, a rating change elsewhere
+        reaches the playlist), `PresetInfoMenuTests`, `describeAutoSelection`, app preference
+        and state-schema round-trips. Full `ctest`: 322/322.
+      - Checked in the app (Windows, dev identity): the picker shows the section, choosing
+        "4 stars" writes `4\t\t\tmdw-wave.milk` to the file, and the "Only tags" row shows
+        "all 3 presets", then "no preset has these tags" for a tag nobody has. Test data
+        removed afterwards. The plugin editor uses the same code (picker section, tag row,
+        state key) and builds, but wasn't checked in a host.
+      - Not done: showing ratings in the browser tree, and tag *weights* (tags only filter).
+        "Only *calm* during breakdowns" stays post-1.0 as written; `SectionFrame::breakdown`
+        (5.1) is the hook it would use.
+- [x] 5.3 (M) Adaptive quality on the real FBO with GPU-time-driven hysteresis and a manual
       override; visible current-scale indicator.
+      Note (2026-10-03):
+      - `core::AdaptiveQuality` (`core/include/milkdawp/core/AdaptiveQuality.h`): pure, one call
+        per rendered frame. Discrete scales (100/85/70/55/40 %), because each change
+        reallocates the frame buffers and shows as a jump, so fewer and larger changes look
+        better. The cost is the GPU time (`GL_TIME_ELAPSED`, summed over layers), or the CPU
+        frame time (which includes `glFinish`) when the query reports nothing, smoothed with a
+        0.25 s time constant. **Hysteresis:** step down when the smoothed cost stays above 85% of
+        the frame budget for 0.5 s; far over budget, it jumps straight to the first step
+        predicted to fit within 70%. Step up only when the next step up is predicted under
+        55% for 3 s. The prediction scales with pixel count, which overestimates since
+        projectM's per-vertex work doesn't scale, so steps up stay cautious. After any change
+        it ignores frames for 1 s, because the first frames at a new size cost more. A
+        one-frame spike (a preset load) changes nothing.
+      - `RenderEngine`: `setQualityScale(<= 0)` now means Auto. The render thread runs the
+        controller against `config.fps` and applies its scale the next frame; choosing Auto
+        again starts from full scale. `qualityScaleFor` maps the `qualityOverride` choices
+        to Auto 0 / Low 0.5 / Medium 0.75 / High 1.0. Before this, Auto meant a fixed 1.0.
+        `RenderStats` gains `qualityScale` and `qualityAuto`.
+      - **Manual override:** a Quality submenu (Auto / Low / Medium / High) in the app's View
+        menu and the plugin's settings menu. Until now `qualityOverride` had no UI at all,
+        only host automation in the plugin. **Indicator:** the drawer's preset detail line adds
+        "render 70%" (or "render 50% (fixed)") whenever the scale is below 100%, using
+        `ui::describeRenderQuality`, without a new drawer widget. Both diagnostics overlays
+        show "quality N% (auto|fixed)".
+      - Tests: `AdaptiveQualityTests` (7 cases against a fixed-plus-per-pixel GPU model: a light
+        load stays at 100%; an overloaded GPU drops in at most two changes to a scale that fits
+        and no lower than needed; recovery steps up one at a time at least 3 s apart; a
+        one-frame spike; the CPU fallback; a 30 fps target; reset). Also a `RenderEngine` test
+        with real GL (Auto reports itself at 100% on a light frame; a fixed 0.75 resizes the
+        FBO to 240 wide and reports "fixed"), `describeRenderQuality`, and the ControlMapping
+        Auto value. Full `ctest`: 331/331.
+      - Checked in the app (Windows, RTX 4070 Ti): the overlay reads "quality 100% (auto)".
+        View > Quality > Low gives a 640x348 frame (visibly coarser), "quality 50% (fixed)" and
+        "3 / 3 · render 50% (fixed)" in the drawer. Set back to Auto afterwards.
+      - **Not verified:** that Auto actually steps down in real use. This GPU renders the test
+        presets in about 0.5 ms (budget 16.7), so it never needs to. The phase exit criterion
+        (>= 55 fps at 1080p on an integrated GPU with the bundled pack) needs an iGPU run and
+        the bundled pack (6.1); that is Matthew's hand test. Forcing this box's Intel iGPU
+        would mean changing Windows' per-app GPU preference, so I left it alone.
 - [x] 5.4 (S) Preset load hitch mitigation: measure per-preset compile time, cache it, and
       prefer cheap presets when the scheduler needs a hard cut on the next beat. This is the
       **primary** hitch fix. projectM compiles preset shaders synchronously on the GL thread in
@@ -2066,24 +2252,153 @@ energy mode demonstrably cuts on drops in the fixture set; adaptive quality keep
       still excluded, unchanged, for the reason above (order is user-visible). This narrows how
       often the freeze is hit but does not eliminate it: it still happens on the first-ever load
       of any preset in a session, and whenever no cheap alternative has been measured yet.
-- [ ] 5.5 (S) Beat sensitivity semantics: one knob that scales both our detector's threshold
+- [x] 5.5 (S) Beat sensitivity semantics: one knob that scales both our detector's threshold
       and `projectm_set_beat_sensitivity`, documented. The two are different things:
       projectM's value only rescales the bass/mid/treb levels presets animate from (clamped
       0–2). It detects no beats and triggers no transitions. Document the knob as "how hard
       visuals react + how easily we cut", or split it into two parameters if the coupling feels
       wrong in hand tests.
-- [ ] 5.6 (M) Multi-instance behaviour in a DAW: shared library handle, per-instance engine,
+      Note (2026-10-03): **split, on measurements rather than hand tests.** The coupling was
+      tried in the fixture suite: the bass onset detector's threshold multiplier was swept over
+      the range a 0-2 knob would cover (5.0 / 3.5 / 2.5 / 1.8 / 1.25). Only the current 2.5
+      passes everything. At 1.8 and 1.25 `breakdown_drop`'s beat tracking falls to F=0, and at
+      5.0 `four_on_the_floor` and `breakdown_drop` fall to F=0 and `tempo_change` fails. That
+      threshold sets beat-phase correction and Energy drops, so a user knob on it would mostly
+      break tracking. Outcome:
+      - `beatSensitivity` stays projectM-only, unchanged (id, range, default, v1 alias), and is
+        documented as "how hard visuals react".
+      - "How easily we cut" is the transition mode's own settings: Bars, the timed interval,
+        and Energy mode's Energy Threshold (5.1). No new parameter was needed.
+      - The parameter had no UI at all (host automation only). Both shells now show it as
+        **Reactivity** in the shared Transitions panel, with a tooltip saying it doesn't change
+        when transitions happen. The panel is one row taller.
+      - `docs/parameters.md` gains a generated Notes section (from
+        `tools/generate-param-docs`) on Beat Sensitivity versus Energy Threshold, and
+        `ParameterModel.cpp` has the same explanation at the parameter.
+      - Full `ctest` 331/331, fixture suite 7/7. Checked in the app: the panel shows the row.
+        The plugin binds the same slider by APVTS attachment (built, not run in a host).
+      Found while running the tests (2026-10-03): the app's `[MidiLearn]` tests, long written off
+      as an environmental ~5-8% flake, were a real thread race (see 4.4's update). Fixed;
+      `cmake/TestNoCrashDialogs.cpp` also stops a crashing test from opening a modal CRT
+      dialog that stalls an unattended `ctest`.
+- [x] 5.6 (M) Multi-instance behaviour in a DAW: shared library handle, per-instance engine,
       GPU budget awareness (lower FPS for instances without visible surfaces). With 4.2 (D15),
       every `projectm_handle` in the process shares one GL function resolver (the first
       create call's load proc wins), so all plugin instances must pass the same resolver.
+      Note (2026-10-04):
+      - **Shared library handle:** `ProjectMLibrary::acquireShared()` (new) gives every
+        `RenderEngine` in the process the same loaded copy and function table, held by
+        `shared_ptr` and kept while any engine lives (a process-wide `weak_ptr`; the first
+        successful load wins, later hints are ignored, and a failed load isn't remembered).
+        Before this each engine did its own `ProjectMLibrary::load()`: the OS refcounted it
+        to one module anyway, so this makes the sharing explicit rather than fixing a bug.
+        `load()` stays for tests and tools.
+      - **Same resolver:** already true, now documented at `acquireShared`: `ProjectMInstance`
+        always passes a null load proc (projectM's own resolver) for every instance and layer.
+      - **Per-instance engine:** already true (one `RenderEngine`, context and render thread per
+        processor). Unchanged.
+      - **Instances without visible surfaces:** already render nothing (2.10: a closed or
+        minimized editor pauses its engine, 0 fps, no GPU work, state kept). Rather than a
+        "lower FPS" tier for them, the new work is for instances that *are* visible:
+        **GPU budget awareness.** Each render thread publishes its smoothed frame cost to a
+        process-wide table (`GpuShare` in `RenderEngine.cpp`, 32 slots, one per running
+        engine, 0 while paused). An engine in Auto quality (5.3) budgets against
+        `core::AdaptiveQuality::sharedBudgetMs`: what the other rendering engines leave of
+        the frame, but never less than an equal share. So a heavy instance steps its
+        resolution down first, and a light one is never squeezed below its fair part by a
+        heavy neighbour. Fixed-quality instances still publish their cost. `RenderStats`
+        gains `gpuSharers`, and both diagnostics overlays add "GPU shared by N instances"
+        when N > 1.
+      - Tests: `AdaptiveQualityTests` (the budget formula; two simulated instances that
+        together overrun the frame: the heavy one drops, the light one stays at 100%, and
+        together they then fit), `ProjectMLibraryTests` (same library for every caller while
+        held, a fresh load after release), and a `RenderEngine` test with two real engines in
+        one process (both report 2 sharers while both render; hiding one pauses it, freezes
+        its frame count, and the other carries on reporting 1). Full `ctest`: 336/336.
+      - **Not verified:** several instances in a real DAW (hand test: three or four
+        instances in REAPER, two editors open, overlay shows "GPU shared by 2 instances";
+        close one and it goes away). And that Auto actually steps down when the shared load
+        overruns: like 5.3, this GPU never gets near the budget.
 - [ ] 5.7 (M) Soak and stress tests: 4-hour run script for the app; rapid parameter
       automation; preset folder of 2,000 files; hot-unplugging the audio device.
-- [ ] 5.8 (S) Accessibility and UX pass: keyboard navigation in both shells, tooltips, high-DPI on
+- [x] 5.8 (S) Accessibility and UX pass: keyboard navigation in both shells, tooltips, high-DPI on
       all platforms, drawer scrim contrast over bright presets, touch-target sizes in the
       drawer (≥ 32 px) so a future touch shell needs no relayout.
-- [ ] 5.9 (S) Diagnostics panel: GL vendor/renderer, projectM version, frame time, beat
+      Note (2026-10-04):
+      - **Keyboard navigation.** The drawer's controls still never take focus (a focused button
+        would swallow Space, the DAW's transport key), so the keyboard reaches them through
+        shortcuts. New in the shared table (§4.9): `B` opens the preset picker, `M` the
+        settings menu, `D` the diagnostics panel. JUCE's popup menus already take arrows and
+        Return, so everything in the settings menu is now keyboard-reachable. The popovers
+        (Transitions, Output, Diagnostics) are different: the user opened them to work in
+        them. `ui::KeyboardNavigation` makes each a keyboard focus container whose sliders,
+        combo boxes, buttons and text fields take focus. Opening one focuses its first
+        control, `Tab`/`Shift+Tab` move, a `KeyboardFocusRing` draws an accent outline
+        around the focused control, and `Esc` (which no control uses, so it reaches the
+        shell) closes it and gives focus back to the window. The Output panel's screen map
+        was mouse-only: with focus in the panel, `1`-`9` pick that screen and `A` picks
+        Automatic.
+      - **Tooltips.** Audited: every drawer control has one. The Settings button, the preset
+        title and the "Show diagnostics" menu items now name their new keys. A test checks
+        that every drawer control has a tooltip and that the keyboard ones name their key.
+      - **Screen readers.** The preset title was a plain component, invisible to
+        accessibility tools. It now reports itself as a button titled "Preset: <name>", with
+        the detail line as its description and a press action that opens the picker. The
+        icon buttons were already announced by their names.
+      - **Scrim contrast.** Measured instead of eyeballed: `ui::contrastRatio` (WCAG 2) over a
+        pure-white preset. The old straight ramp (clear at the top to 88% black at 70% of
+        the height) left the detail line at about 3.4:1 at the top of the button row,
+        below AA's 4.5:1. The gradient now gets dark faster: 50% behind the progress track,
+        80% at the top of the button row, 90% at the bottom. The top edge is still clear.
+        Every row of the button area now passes 4.5:1 for both text colours over white.
+      - **Touch targets.** Already met: buttons are 44 px, the mode chip and badge 36 px
+        tall. A test now holds every visible drawer control to >= 32x32 px, docked and
+        floating, from 480 px to 1920 px wide.
+      - **High-DPI.** Checked in code, not changed. `OutputSurface` reports its size times
+        `getApproximateScaleFactorForComponent` (display scale and a host's editor scale
+        alike), so the engine renders at physical pixels. Icons are paths and text is
+        vector, so nothing is a bitmap. **Not verified:** on a real HiDPI display, and not
+        at all on macOS or Linux (no hardware here).
+      - Tests: `AccessibilityTests` (contrast formula, scrim contrast, touch targets,
+        tooltips, focus container) and new `ShortcutsTests` cases. Full `ctest`: 348/348.
+      - **Not verified by hand:** the keyboard flow in a real window (I didn't screen-capture
+        the app this time; see 5.9). Hand test: in the app and in REAPER, press `B`, `M`, `D`;
+        open Transitions from `M`, `Tab` through it and watch the ring, `Esc` out, then
+        check `←`/`→` change presets again. Also look at the drawer over a bright preset.
+- [x] 5.9 (S) Diagnostics panel: GL vendor/renderer, projectM version, frame time, beat
       confidence, last errors, "copy diagnostics" button (replaces v1's Phase 9 benchmark
       idea with something cheaper and more useful).
+      Note (2026-10-04):
+      - `ui::DiagnosticsPanel` (new, shared by both shells) replaces the two shells' own
+        overlay labels and their duplicated text-building code. It shows: projectM version and
+        GL vendor/renderer/version; fps (or "paused"), frame size, CPU and GPU frame time,
+        quality, layers, GPU sharers (5.6); beat source, BPM, confidence, bass level, drops;
+        preset counts, last load time and the current preset; the shell's input (app) and
+        surface mode; and the newest 5 recent errors. **Copy diagnostics** puts a fuller
+        report on the clipboard: the shell (e.g. "MilkDAWp2 2.0.0 (VST3 in REAPER)"), the
+        time, the OS/CPU/RAM, everything above, and every recent error.
+      - The data is a plain `core::DiagnosticsInfo` struct, so `ui` still doesn't depend on
+        `engine` (§4.1). `engine::Visualizer::diagnostics()` fills the engine and director
+        parts and the shell adds its own. The app's log bundle (4.10) writes the same text.
+      - **Last errors:** `engine::RecentErrors` (new, one per `RenderEngine`) keeps the last
+        20 and folds back-to-back repeats into one entry with a count. It is fed by the
+        director (a preset file that couldn't be read, or that projectM rejected, by file
+        name and reason), by projectM's preset-switch-failed message, and by projectM's own
+        error log. The log callback is registered **per render thread**
+        (`currentThreadOnly`), so each plugin instance hears only its own projectM
+        instances.
+      - Opened from Settings / View > Show diagnostics, or `D` (5.8). It sits top left over
+        the picture, and `Esc` or Close hides it. In the plugin it is now hidden until asked
+        for; the old label showed by default. The app still remembers it (`showDiagnostics`).
+      - Tests: `DiagnosticsPanelTests` (lines for a running, paused and unavailable engine;
+        only the newest errors shown but all copied; the panel grows with its lines),
+        `RecentErrorsTests` (order, folding, capacity, cutting long messages), and the
+        `Director` end-to-end test now checks that the broken fixture file shows up in
+        `Visualizer::diagnostics()` as "zz-broken.milk skipped: ...". Full `ctest`: 348/348.
+      - **Not verified by hand:** what it looks like. I launched the app to capture its window,
+        but another full-screen application was in front, so the capture showed that instead
+        (deleted). Hand test: open it in the app and in REAPER, check it reads well over the
+        picture, press Copy diagnostics and paste.
 
 Hand test: a DJ-style hour with mixed genres in the app with Energy mode; note every transition
 that felt wrong and file it with the timestamp.

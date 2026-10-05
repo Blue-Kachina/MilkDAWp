@@ -5,6 +5,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "milkdawp/ui/KeyboardNavigation.h"
+
 #include "milkdawp/core/TransitionScheduler.h"
 
 namespace milkdawp::ui {
@@ -41,12 +43,13 @@ struct TransitionSettingsRelevance {
 class TransitionSettingsPanel : public juce::Component {
 public:
   static constexpr int preferredWidth = 440;
-  static constexpr int preferredHeight = 176;
+  static constexpr int preferredHeight = 232;
 
   TransitionSettingsPanel();
   ~TransitionSettingsPanel() override;
 
   void paint(juce::Graphics& g) override;
+  void paintOverChildren(juce::Graphics& g) override { focusRing_.paint(g); }
   void resized() override;
 
   /// Dims the widgets that do nothing in the current mode.
@@ -67,6 +70,18 @@ public:
   juce::Slider gridOffsetSlider;
   juce::ToggleButton hardCutToggle{"Hard cuts"};
   juce::Slider blendSlider;
+  /// 5.5: `beatSensitivity`, projectM's reactivity. Not a transition
+  /// setting, but this is where both shells' settings live; it is labelled
+  /// for what it does rather than for its parameter name.
+  juce::Slider reactivitySlider;
+  /// 5.2: automatic picks only choose presets with one of these tags
+  /// (comma-separated; empty: any). Not a parameter: the shell saves it and
+  /// passes it to `Director::setTagFilter` from `onTagFilterChanged`.
+  juce::TextEditor tagFilterEditor;
+  std::function<void(const juce::String&)> onTagFilterChanged;
+  /// "12 of 340 presets", or a warning when no preset matches.
+  void setTagFilterStatus(const juce::String& text, bool warning);
+
 private:
   struct Row {
     juce::Label label;
@@ -76,10 +91,27 @@ private:
 
   juce::Label titleLabel;
   juce::TextButton closeButton{"Close"};
-  Row modeRow, barsRow, timedRow, energyRow, blendRow, jitterMinRow, jitterMaxRow;
+  Row modeRow, barsRow, timedRow, energyRow, blendRow, jitterMinRow, jitterMaxRow, tagsRow, reactivityRow;
+  juce::Label tagFilterStatus;
+
+  KeyboardFocusRing focusRing_{*this}; // 5.8
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TransitionSettingsPanel)
 };
+
+/// 5.2: the "Only tags" row's status: how many presets automatic picks can
+/// choose (`DirectorStatus::autoSelectable` of `playlistSize`).
+struct AutoSelectionStatus {
+  juce::String text;
+  bool warning = false;
+};
+[[nodiscard]] AutoSelectionStatus describeAutoSelection(std::uint32_t autoSelectable, std::uint32_t playlistSize,
+                                                        bool filterMatchesNothing);
+
+/// 5.3: the render scale for the drawer's preset detail line, e.g.
+/// "render 70%". Empty at full resolution, so it only appears when quality
+/// is actually reduced. A fixed (non-Auto) choice says so.
+[[nodiscard]] juce::String describeRenderQuality(float scale, bool automatic);
 
 enum class BeatBadgeSource { None, Detected, Host };
 

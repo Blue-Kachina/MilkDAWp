@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 The MilkDAWp contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -293,31 +295,121 @@ TEST_CASE("TransitionScheduler Hybrid mode snaps the timed target forward to the
   CHECK(firedAtBeat % 4 == 0);
 }
 
-TEST_CASE("TransitionScheduler Energy mode hard-cuts on a drop and respects cooldown",
+namespace {
+
+/// Energy mode's input: a kick on every beat of the simulated clock while a
+/// section is loud (bass envelope 1.0, falling back with the Analyzer's
+/// 200 ms release), and only a pad's faint bass while it is quiet.
+struct EnergySection {
+  double seconds;
+  bool loud;
+};
+
+struct EnergyRun {
+  std::vector<ScheduledTransition> cuts;
+  std::vector<std::size_t> cutHops;
+  std::vector<std::size_t> sectionStartHops;
+};
+
+EnergyRun runEnergy(TransitionScheduler& scheduler, const std::vector<EnergySection>& sections) {
+  const double hopSeconds = static_cast<double>(kHopSize) / kSampleRate;
+  std::size_t totalHops = 0;
+  EnergyRun run;
+  for (const auto& section : sections) {
+    run.sectionStartHops.push_back(totalHops);
+    totalHops += static_cast<std::size_t>(section.seconds / hopSeconds);
+  }
+  const auto clock = simulateSteadyClock(120.0f, 1.0f, totalHops);
+
+  float envelope = 0.0f;
+  std::size_t section = 0;
+  for (std::size_t hop = 0; hop < totalHops; ++hop) {
+    while (section + 1 < run.sectionStartHops.size() && hop >= run.sectionStartHops[section + 1]) {
+      ++section;
+    }
+    const bool beat = hop > 0 && clock[hop].beatIndex != clock[hop - 1].beatIndex;
+    const bool kick = beat && sections[section].loud;
+    envelope = kick ? 1.0f : static_cast<float>(envelope * std::exp(-hopSeconds / 0.2));
+    const float bass = std::max(envelope, 0.001f) * 1.0e5f; // a full-scale kick's bassEnergy
+    if (auto cut = scheduler.tick(hop * kHopSize, true, false, clock[hop], bass, kick, 0, 0)) {
+      run.cuts.push_back(*cut);
+      run.cutHops.push_back(hop);
+    }
+  }
+  return run;
+}
+
+int hardCuts(const EnergyRun& run) {
+  return static_cast<int>(std::count_if(run.cuts.begin(), run.cuts.end(),
+                                        [](const auto& cut) { return cut.request.cutStyle == CutStyle::Hard; }));
+}
+
+} // namespace
+
+TEST_CASE("TransitionScheduler Energy mode never hard-cuts on steady kicks", "[core][TransitionScheduler]") {
+  // 5.1's regression: the old mean + 2 sd rule took nearly every kick of a
+  // steady section for a drop and cut every `energyCooldownBars`.
+  TransitionScheduler scheduler(kSampleRate, kHopSize);
+  TransitionSchedulerConfig config;
+  config.mode = TransitionMode::Energy;
+  config.bars = 16;
+  scheduler.setConfig(config);
+
+  const auto run = runEnergy(scheduler, {{70.0, true}});
+  CHECK(hardCuts(run) == 0);
+  CHECK(run.cuts.size() == 2); // the beat-quantized ones, every 16 bars (32 s)
+}
+
+TEST_CASE("TransitionScheduler Energy mode hard-cuts on the drop after a breakdown",
           "[core][TransitionScheduler]") {
   TransitionScheduler scheduler(kSampleRate, kHopSize);
   TransitionSchedulerConfig config;
   config.mode = TransitionMode::Energy;
-  config.energyCooldownBars = 4;
   config.bars = 4;
+  config.cutStyle = CutStyle::Soft;
   scheduler.setConfig(config);
 
-  auto clock = simulateSteadyClock(120.0f, 1.0f, 4000);
+  const auto run = runEnergy(scheduler, {{16.0, true}, {8.0, false}, {20.0, true}});
+  const auto dropHop = run.sectionStartHops[2];
+  REQUIRE(hardCuts(run) == 1);
 
-  int hardCutCount = 0;
-  for (std::size_t hop = 0; hop < clock.size(); ++hop) {
-    // Quiet baseline energy, with two big "drops" close together (well
-    // within the cooldown) and paired with a strong bass onset each time.
-    const bool isDropHop = (hop == 300 || hop == 320);
-    const float energy = isDropHop ? 10.0f : 0.05f;
-    auto result = scheduler.tick(hop * kHopSize, true, false, clock[hop], energy, isDropHop, 0, 0);
-    if (result && result->request.cutStyle == CutStyle::Hard) {
-      ++hardCutCount;
-    }
+  const auto hard = std::find_if(run.cuts.begin(), run.cuts.end(),
+                                 [](const auto& cut) { return cut.request.cutStyle == CutStyle::Hard; });
+  const auto hardIndex = static_cast<std::size_t>(hard - run.cuts.begin());
+  // On the drop's first kick (the first beat crossing of the section).
+  CHECK(run.cutHops[hardIndex] >= dropHop);
+  CHECK(run.cutHops[hardIndex] <= dropHop + 50);
+
+  // The beat-quantized count starts again from the drop: the next cut is
+  // 4 bars (8 s at 120 bpm) after it, not wherever the old count was.
+  REQUIRE(hardIndex + 1 < run.cuts.size());
+  const auto gapSeconds = static_cast<double>(run.cuts[hardIndex + 1].request.dueAtSample -
+                                              run.cuts[hardIndex].request.dueAtSample) /
+                          kSampleRate;
+  CHECK(gapSeconds > 7.9);
+  CHECK(gapSeconds < 8.1);
+}
+
+TEST_CASE("TransitionScheduler Energy mode's cooldown suppresses a second drop", "[core][TransitionScheduler]") {
+  // Two breakdown/drop pairs 6 s apart.
+  const std::vector<EnergySection> track{{16.0, true}, {4.0, false}, {2.0, true}, {4.0, false}, {10.0, true}};
+
+  TransitionSchedulerConfig config;
+  config.mode = TransitionMode::Energy;
+  config.bars = 16;
+
+  SECTION("a long cooldown keeps one") {
+    TransitionScheduler scheduler(kSampleRate, kHopSize);
+    config.energyCooldownBars = 8; // 16 s
+    scheduler.setConfig(config);
+    CHECK(hardCuts(runEnergy(scheduler, track)) == 1);
   }
-
-  // The second drop is inside the cooldown window and must be suppressed.
-  CHECK(hardCutCount == 1);
+  SECTION("a short one lets both through") {
+    TransitionScheduler scheduler(kSampleRate, kHopSize);
+    config.energyCooldownBars = 1; // 2 s
+    scheduler.setConfig(config);
+    CHECK(hardCuts(runEnergy(scheduler, track)) == 2);
+  }
 }
 
 TEST_CASE("TransitionScheduler Energy mode behaves like BeatQuantized when there is no drop",

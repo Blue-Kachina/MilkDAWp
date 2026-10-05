@@ -10,10 +10,13 @@ add_executable(milkdawp_engine_tests
   PcmFeederTests.cpp
   PresetHandoffTests.cpp
   PresetCompileTimeCacheTests.cpp
+  PresetMetadataStoreTests.cpp
   FrameReadbackExchangeTests.cpp
   ControlMappingTests.cpp
   DirectorTests.cpp
+  RecentErrorsTests.cpp
 )
+milkdawp_test_no_crash_dialogs(milkdawp_engine_tests)
 target_compile_definitions(milkdawp_engine_tests PRIVATE
   MILKDAWP_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/fixtures"
 )

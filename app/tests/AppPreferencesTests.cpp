@@ -38,6 +38,7 @@ TEST_CASE("App preferences round-trip through a PropertySet", "[app][preferences
   state.favouritePresets = {"C:/presets/a/b.milk", "C:/presets/c/d.milk"};
   state.recentlyPlayedPresets = {"C:/presets/c/d.milk", "C:/presets/a/b.milk"};
   state.midiMappings = "shuffle=0,1,21\nlockCurrentPreset=1,3,60";
+  state.tagFilter = "calm, dark";
   state.mainWindowBounds = {10, 20, 800, 450};
   state.mainWindowFullscreen = true;
   state.outputWindowOpen = true;
@@ -67,6 +68,7 @@ TEST_CASE("App preferences round-trip through a PropertySet", "[app][preferences
   CHECK(loaded.favouritePresets == state.favouritePresets);
   CHECK(loaded.recentlyPlayedPresets == state.recentlyPlayedPresets);
   CHECK(loaded.midiMappings == state.midiMappings);
+  CHECK(loaded.tagFilter == state.tagFilter);
   CHECK(loaded.mainWindowBounds == state.mainWindowBounds);
   CHECK(loaded.mainWindowFullscreen);
   CHECK(loaded.outputWindowOpen);

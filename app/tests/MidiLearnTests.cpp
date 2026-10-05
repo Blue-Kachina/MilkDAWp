@@ -14,10 +14,9 @@ using namespace milkdawp;
 // input would drive).
 TEST_CASE("MidiLearn starts idle and unmapped", "[app][MidiLearn]") {
   const juce::ScopedJuceInitialiser_GUI juce;
-  juce::AudioDeviceManager devices;
   engine::ParameterValues values;
   app::ParameterBinding binding(values, nullptr);
-  app::MidiLearn learn(devices, binding);
+  app::MidiLearn learn(binding);
 
   CHECK_FALSE(learn.isLearning());
   CHECK_FALSE(learn.hasMapping("shuffle"));
@@ -27,10 +26,9 @@ TEST_CASE("MidiLearn starts idle and unmapped", "[app][MidiLearn]") {
 
 TEST_CASE("startLearning arms and cancelLearning disarms", "[app][MidiLearn]") {
   const juce::ScopedJuceInitialiser_GUI juce;
-  juce::AudioDeviceManager devices;
   engine::ParameterValues values;
   app::ParameterBinding binding(values, nullptr);
-  app::MidiLearn learn(devices, binding);
+  app::MidiLearn learn(binding);
 
   learn.startLearning("shuffle");
   CHECK(learn.isLearning());
@@ -43,10 +41,9 @@ TEST_CASE("startLearning arms and cancelLearning disarms", "[app][MidiLearn]") {
 
 TEST_CASE("Mappings round-trip through stateString/restoreFromState", "[app][MidiLearn]") {
   const juce::ScopedJuceInitialiser_GUI juce;
-  juce::AudioDeviceManager devices;
   engine::ParameterValues values;
   app::ParameterBinding binding(values, nullptr);
-  app::MidiLearn learn(devices, binding);
+  app::MidiLearn learn(binding);
 
   learn.restoreFromState("shuffle=0,1,21\nlockCurrentPreset=1,3,60");
   CHECK(learn.hasMapping("shuffle"));
@@ -55,7 +52,7 @@ TEST_CASE("Mappings round-trip through stateString/restoreFromState", "[app][Mid
   CHECK(learn.describeMapping("lockCurrentPreset").startsWith("Note"));
   CHECK_FALSE(learn.hasMapping("unmappedParam"));
 
-  app::MidiLearn restored(devices, binding);
+  app::MidiLearn restored(binding);
   restored.restoreFromState(learn.stateString());
   CHECK(restored.describeMapping("shuffle") == learn.describeMapping("shuffle"));
   CHECK(restored.describeMapping("lockCurrentPreset") == learn.describeMapping("lockCurrentPreset"));
@@ -67,10 +64,9 @@ TEST_CASE("Mappings round-trip through stateString/restoreFromState", "[app][Mid
 
 TEST_CASE("restoreFromState ignores malformed lines", "[app][MidiLearn]") {
   const juce::ScopedJuceInitialiser_GUI juce;
-  juce::AudioDeviceManager devices;
   engine::ParameterValues values;
   app::ParameterBinding binding(values, nullptr);
-  app::MidiLearn learn(devices, binding);
+  app::MidiLearn learn(binding);
 
   learn.restoreFromState("not a mapping at all\nshuffle=0,1\nlockCurrentPreset=1,3,60,extra\nvalid=0,2,10");
   CHECK_FALSE(learn.hasMapping("shuffle"));         // missing a field

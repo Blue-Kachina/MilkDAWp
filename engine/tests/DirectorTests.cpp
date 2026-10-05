@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -124,6 +125,17 @@ TEST_CASE("Director loads a preset folder, steps through it, and skips files tha
   REQUIRE(waitFor([&] { return render.stats().presetsLoaded >= 4; }));
   CHECK(director.status().currentIndex == 0);
   CHECK(director.status().presetsSkipped >= 1);
+  // ...and the diagnostics panel's recent errors say which file and why (5.9).
+  const auto diagnostics = visualizer.diagnostics();
+  CHECK(diagnostics.engineAvailable);
+  CHECK(diagnostics.playlistSize == 4);
+  CHECK_FALSE(diagnostics.glDescription.empty());
+  const bool reported = std::any_of(diagnostics.recentErrors.begin(), diagnostics.recentErrors.end(),
+                                    [](const core::DiagnosticsError& error) {
+                                      return error.source == "preset" &&
+                                             error.message.find("zz-broken.milk skipped") != std::string::npos;
+                                    });
+  CHECK(reported);
 
   director.requestPrevious();
   REQUIRE(waitFor([&] { return render.stats().presetsLoaded >= 5; }));
@@ -213,4 +225,63 @@ TEST_CASE("Director exposes preset paths parallel to names, and blacklisting by 
 
   director.unblacklistPreset(paths[0]);
   REQUIRE(waitFor([&] { return director.blacklistedPaths().empty(); }));
+}
+
+TEST_CASE("Director's automatic picks skip never-auto-select presets and follow the tag filter (5.2)",
+          "[engine][Director]") {
+  engine::Visualizer::Config config;
+  engine::Visualizer visualizer(config);
+  auto& render = visualizer.renderEngine();
+  auto& director = visualizer.director();
+  waitFor([&] { return render.isAvailable() || !render.unavailableReason().empty(); });
+  if (!render.isAvailable()) {
+    SUCCEED("projectM or a GL context is unavailable here: " + render.unavailableReason());
+    return;
+  }
+  const int surface = render.registerSurface();
+  render.reportSurfaceSize(surface, 320, 180, true);
+
+  engine::EngineControls controls;
+  controls.transitionMode = core::TransitionMode::Manual;
+  controls.cutStyle = core::CutStyle::Hard;
+  visualizer.setControls(controls);
+
+  const juce::TemporaryFile metadataFile(".txt");
+  auto store = std::make_shared<engine::PresetMetadataStore>(metadataFile.getFile());
+  store->set("mdw-feedback.milk", {0, true, {}});        // index 1: never auto-selected
+  store->set("mdw-wave.milk", {5, false, {"wavy"}});     // index 2
+  store->set("mdw-border.milk", {0, false, {"frame"}});  // index 0
+  director.setPresetMetadata(store);
+
+  PresetFolder presets;
+  director.setPresetFolder(presets.folder.getFullPathName().toStdString());
+  REQUIRE(waitFor([&] { return director.status().playlistSize == 4; }));
+  REQUIRE(waitFor([&] { return director.status().autoSelectable == 3; })); // all but mdw-feedback
+  REQUIRE(waitFor([&] { return render.stats().presetsLoaded >= 1; }));
+  CHECK(director.status().currentIndex == 0);
+
+  director.requestNext(); // skips mdw-feedback
+  REQUIRE(waitFor([&] { return director.status().currentIndex == 2; }));
+
+  // By hand, it still plays.
+  director.requestPreset(1);
+  REQUIRE(waitFor([&] { return director.status().currentIndex == 1; }));
+
+  director.setTagFilter("Wavy");
+  REQUIRE(waitFor([&] { return director.status().autoSelectable == 1; }));
+  director.requestNext();
+  REQUIRE(waitFor([&] { return director.status().currentIndex == 2; }));
+  CHECK(director.tagFilter() == "wavy");
+
+  // A filter nothing matches is ignored, and says so.
+  director.setTagFilter("nothing-has-this");
+  REQUIRE(waitFor([&] { return director.status().tagFilterMatchesNothing; }));
+  CHECK(director.status().autoSelectable == 4);
+
+  // Changing a rating elsewhere (another instance, the app) reaches the playlist.
+  director.setTagFilter("");
+  store->set("mdw-feedback.milk", {});
+  REQUIRE(waitFor([&] { return director.status().autoSelectable == 4 && !director.status().tagFilterMatchesNothing; }));
+
+  render.unregisterSurface(surface);
 }

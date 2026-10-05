@@ -10,6 +10,7 @@
 #include "milkdawp/core/DisplayLayout.h"
 #include "milkdawp/core/ParameterModel.h"
 #include "milkdawp/ui/Icons.h"
+#include "milkdawp/ui/PresetInfoMenu.h"
 #include "milkdawp/ui/PresetMenu.h"
 #include "milkdawp/ui/Shortcuts.h"
 
@@ -71,17 +72,15 @@ MainComponent::MainComponent(engine::Visualizer& visualizer, AudioSourceRouter& 
                 }
                 notifyStateChanged();
               }),
-      midiLearn_(input.device().deviceManager(), binding_) {
+      midiLearn_(binding_) {
   addAndMakeVisible(surface_);
 
   // Everything drawn over the video is a child of the surface, never a
   // sibling: JUCE only composites a GL component's own children over its
   // frame (§4.11, 2.3's finding).
-  diagnosticsLabel_.setJustificationType(juce::Justification::topLeft);
-  diagnosticsLabel_.setColour(juce::Label::textColourId, juce::Colours::white);
-  diagnosticsLabel_.setColour(juce::Label::backgroundColourId, juce::Colours::black.withAlpha(0.5f));
-  surface_.addChildComponent(diagnosticsLabel_);
-  diagnosticsLabel_.setVisible(state_.showDiagnostics);
+  surface_.addChildComponent(diagnosticsPanel_);
+  diagnosticsPanel_.onCloseRequested = [this] { setDiagnosticsVisible(false); };
+  diagnosticsPanel_.setVisible(state_.showDiagnostics);
 
   inputHint_.setColour(juce::TextButton::buttonColourId, juce::Colours::black.withAlpha(0.6f));
   inputHint_.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
@@ -137,11 +136,18 @@ MainComponent::MainComponent(engine::Visualizer& visualizer, AudioSourceRouter& 
   binding_.bind(transitionSettings_.jitterMaxSlider, "transitionDurationMax");
   binding_.bind(transitionSettings_.energyThresholdSlider, "energyThreshold");
   binding_.bind(transitionSettings_.blendSlider, "softCutDuration");
+  binding_.bind(transitionSettings_.reactivitySlider, "beatSensitivity");
   binding_.bind(transitionSettings_.jitterToggle, "transitionJitterEnabled");
   binding_.bind(transitionSettings_.hardCutToggle, "hardCutEnabled");
   binding_.bind(transitionSettings_.gridToggle, "transitionGridSync");
   binding_.bind(transitionSettings_.gridOffsetSlider, "transitionGridOffset");
   transitionSettings_.refreshRelevance();
+  transitionSettings_.tagFilterEditor.setText(state_.tagFilter, juce::dontSendNotification);
+  transitionSettings_.onTagFilterChanged = [this](const juce::String& text) {
+    state_.tagFilter = text;
+    visualizer_.director().setTagFilter(text.toStdString());
+    notifyStateChanged();
+  };
 
   input_.device().onDeviceChanged = [this] {
     if (!input_.isUsingSystemAudio()) {
@@ -266,6 +272,7 @@ void MainComponent::showPresetPicker() {
   rescan.setEnabled(!folder.empty());
   rescan.setAction([this] { rescanPresets(); });
   menu.addItem(std::move(rescan));
+  addCurrentPresetInfo(menu);
 
   if (const auto names = director.presetNames(); !names.empty()) {
     menu.addSeparator();
@@ -273,6 +280,30 @@ void MainComponent::showPresetPicker() {
                       [this](int index) { visualizer_.director().requestPreset(index); });
   }
   menu.showMenuAsync(ui::DrawerLookAndFeel::menuOptions(drawer_.presetTitleComponent()));
+}
+
+ui::PresetInfoAccess MainComponent::presetInfoAccess(const std::string& path) const {
+  auto store = visualizer_.director().presetMetadata();
+  if (store == nullptr || path.empty()) {
+    return {};
+  }
+  return {[store, path] { return store->get(path); },
+          [store, path](const core::PresetInfo& info) {
+            if (!store->set(path, info)) {
+              juce::Logger::writeToLog("Couldn't save preset ratings to " + store->file().getFullPathName());
+            }
+          },
+          [store] { return store->allTags(); }};
+}
+
+void MainComponent::addCurrentPresetInfo(juce::PopupMenu& menu) {
+  auto& director = visualizer_.director();
+  const auto index = director.status().currentIndex;
+  if (index < 0) {
+    return;
+  }
+  const auto name = ui::splitPresetName(director.presetName(index)).leaf;
+  ui::addPresetInfoSection(menu, juce::String(name), presetInfoAccess(director.presetPath(index)), this);
 }
 
 void MainComponent::showPresetBrowser() {
@@ -314,6 +345,7 @@ void MainComponent::showPresetBrowser() {
       visualizer_.director().unblacklistPreset(path);
     }
   };
+  callbacks.presetInfo = [this](const std::string& path) { return presetInfoAccess(path); };
 
   juce::DialogWindow::LaunchOptions options;
   options.content.setOwned(new PresetBrowserPanel(std::move(callbacks)));
@@ -350,6 +382,7 @@ void MainComponent::setOutputSettingsVisible(bool visible) {
   if (visible) {
     outputSettings_.toFront(false);
     drawer_.reveal();
+    ui::focusFirstControl(outputSettings_); // 5.8: Tab through it, Esc closes
   } else {
     grabKeyboardFocus();
   }
@@ -372,6 +405,7 @@ void MainComponent::setTransitionSettingsVisible(bool visible) {
     transitionSettings_.refreshRelevance();
     transitionSettings_.toFront(false);
     drawer_.reveal();
+    ui::focusFirstControl(transitionSettings_); // 5.8: Tab through it, Esc closes
   } else {
     grabKeyboardFocus(); // the panel's widgets may have taken it; shortcuts need it back
   }
@@ -451,10 +485,18 @@ void MainComponent::setControlsFloating(bool floating) {
 }
 
 void MainComponent::setDiagnosticsVisible(bool visible) {
-  diagnosticsLabel_.setVisible(visible);
+  if (visible) {
+    diagnosticsPanel_.update(diagnosticsInfo());
+  }
+  diagnosticsPanel_.setVisible(visible);
   state_.showDiagnostics = visible;
   updateStatusText();
   resized();
+  if (visible) {
+    ui::focusFirstControl(diagnosticsPanel_); // 5.8: Copy is one Space away
+  } else {
+    grabKeyboardFocus();
+  }
   notifyStateChanged();
 }
 
@@ -549,8 +591,18 @@ juce::PopupMenu MainComponent::createMenu(int menuIndex) {
     if (!all) {
       menu.addItem(makeItem("Pin controls", [this] { drawer_.togglePin(); }, drawer_.isPinned(), "P"));
     }
+    // 5.3: Auto adapts the render scale to the GPU; the others fix it.
+    if (const auto* spec = core::findParameter(core::allParameters(), "qualityOverride")) {
+      juce::PopupMenu quality;
+      const auto current = static_cast<int>(binding_.get("qualityOverride"));
+      for (int i = 0; i < static_cast<int>(spec->choices.size()); ++i) {
+        quality.addItem(makeItem(juce::String(spec->choices[static_cast<std::size_t>(i)]),
+                                 [this, i] { binding_.set("qualityOverride", static_cast<float>(i)); }, i == current));
+      }
+      menu.addSubMenu("Quality", quality);
+    }
     menu.addItem(makeItem("Show diagnostics", [this] { setDiagnosticsVisible(!isDiagnosticsVisible()); },
-                          isDiagnosticsVisible()));
+                          isDiagnosticsVisible(), "D"));
   }
   return menu;
 }
@@ -587,9 +639,12 @@ void MainComponent::restoreSecondaryWindows() {
 
 void MainComponent::resized() {
   surface_.setBounds(getLocalBounds());
-  auto area = surface_.getLocalBounds();
-  diagnosticsLabel_.setBounds(area.removeFromTop(96).reduced(8));
-  const int hintTop = diagnosticsLabel_.isVisible() ? 104 : 12;
+  // Diagnostics top left over the picture; the popovers sit bottom right.
+  const int drawerHeight = controlsWindow_ != nullptr ? 0 : ui::ControlDrawer::controlsHeight;
+  auto area = surface_.getLocalBounds().withTrimmedBottom(drawerHeight).reduced(8);
+  diagnosticsPanel_.setBounds(area.removeFromTop(std::min(diagnosticsPanel_.preferredHeight(), area.getHeight()))
+                                  .removeFromLeft(std::min(760, area.getWidth())));
+  const int hintTop = diagnosticsPanel_.isVisible() ? diagnosticsPanel_.getBottom() + 8 : 12;
   const int hintWidth = std::min(520, surface_.getWidth() - 24);
   inputHint_.setBounds((surface_.getWidth() - hintWidth) / 2, hintTop, hintWidth, 30);
   if (controlsWindow_ == nullptr) {
@@ -631,6 +686,8 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
       setOutputSettingsVisible(false); // Esc closes the popover first
     } else if (transitionSettings_.isVisible()) {
       setTransitionSettingsVisible(false);
+    } else if (diagnosticsPanel_.isVisible()) {
+      setDiagnosticsVisible(false);
     } else if (isMainFullscreen && isMainFullscreen() && onToggleMainFullscreen) {
       onToggleMainFullscreen();
     } else {
@@ -654,6 +711,17 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
     return true;
   case ShortcutAction::TogglePin:
     drawer_.togglePin();
+    return true;
+  case ShortcutAction::BrowsePresets:
+    drawer_.reveal();
+    showPresetPicker();
+    return true;
+  case ShortcutAction::OpenSettingsMenu:
+    drawer_.reveal();
+    drawer_.settingsButton.triggerClick();
+    return true;
+  case ShortcutAction::ToggleDiagnostics:
+    setDiagnosticsVisible(!isDiagnosticsVisible());
     return true;
   case ShortcutAction::None:
   default:
@@ -725,6 +793,11 @@ void MainComponent::updateStatusText() {
       detail << juce::String(parts.folder) << juce::String(juce::CharPointer_UTF8(" \xc2\xb7 "));
     }
     detail << juce::String(status.currentIndex + 1) << " / " << juce::String(status.playlistSize);
+    const auto renderStats = visualizer_.renderEngine().stats();
+    if (const auto quality = ui::describeRenderQuality(renderStats.qualityScale, renderStats.qualityAuto);
+        quality.isNotEmpty()) {
+      detail << juce::String(juce::CharPointer_UTF8(" \xc2\xb7 ")) << quality; // 5.3
+    }
     drawer_.setPresetInfo(juce::String(parts.leaf), detail, juce::String(fullName));
   }
 
@@ -735,37 +808,37 @@ void MainComponent::updateStatusText() {
   drawer_.bpmLabel.setColour(juce::Label::textColourId, badge.colour);
   drawer_.bpmLabel.setTooltip(badge.tooltip);
 
-  if (diagnosticsLabel_.isVisible()) {
-    diagnosticsLabel_.setText(diagnosticsText(), juce::dontSendNotification);
+  if (diagnosticsPanel_.isVisible()) {
+    const int before = diagnosticsPanel_.preferredHeight();
+    diagnosticsPanel_.update(diagnosticsInfo());
+    if (diagnosticsPanel_.preferredHeight() != before) {
+      resized();
+    }
   }
 
   if (transitionSettings_.isVisible()) {
     transitionSettings_.refreshRelevance();
+    const auto tagStatus = ui::describeAutoSelection(status.autoSelectable, status.playlistSize,
+                                                     status.tagFilterMatchesNothing);
+    transitionSettings_.setTagFilterStatus(tagStatus.text, tagStatus.warning);
   }
 }
 
+core::DiagnosticsInfo MainComponent::diagnosticsInfo() const {
+  auto info = visualizer_.diagnostics();
+  info.shell = (juce::JUCEApplication::getInstance() != nullptr
+                    ? juce::JUCEApplication::getInstance()->getApplicationName() + " " +
+                          juce::JUCEApplication::getInstance()->getApplicationVersion() + " (app)"
+                    : juce::String("app"))
+                   .toStdString();
+  info.surface = surface_.isSharingWorking() ? "shared context" : "readback (no shared context)";
+  info.input = input_.describe().toStdString();
+  return info;
+}
+
 juce::String MainComponent::diagnosticsText() const {
-  auto& director = visualizer_.director();
-  auto& engine = visualizer_.renderEngine();
-  const auto status = director.status();
-  const auto stats = engine.stats();
-  juce::String text;
-  if (engine.isAvailable()) {
-    text << "projectM " << engine.projectMVersion() << ": " << juce::String(stats.framesPerSecond, 1) << " fps, "
-         << stats.width << "x" << stats.height << ", render " << juce::String(stats.cpuFrameMs, 1) << " ms (gpu "
-         << juce::String(stats.gpuFrameMs, 1) << " ms), last preset load " << juce::String(stats.lastPresetLoadMs, 1)
-         << " ms\n";
-  } else {
-    const auto reason = engine.unavailableReason();
-    text << "projectM: " << (reason.empty() ? juce::String("starting...") : juce::String("unavailable (" + reason + ")"))
-         << "\n";
-  }
-  text << "presets: " << juce::String(status.playlistSize) << " in folder, " << juce::String(stats.presetsLoaded)
-       << " loaded, " << juce::String(status.presetsSkipped) << " skipped; surface "
-       << (surface_.isSharingWorking() ? "shared" : "readback (no shared context)") << "\n";
-  text << "input: " << input_.describe() << "; beat confidence " << juce::String(status.beatConfidence, 2) << "\n";
-  text << engine.glDescription();
-  return text;
+  const auto info = diagnosticsInfo();
+  return ui::formatDiagnosticsLines(info, static_cast<int>(info.recentErrors.size())).joinIntoString("\n");
 }
 
 } // namespace milkdawp::app

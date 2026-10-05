@@ -78,3 +78,20 @@ TEST_CASE("Beat badge shows the source and confidence", "[ui][BeatBadge]") {
   CHECK(unsure.colour != sure.colour);
   CHECK(unsure.tooltip.contains("falls back"));
 }
+
+TEST_CASE("The tag filter status counts what automatic picks can choose", "[ui][TransitionSettings]") {
+  CHECK(describeAutoSelection(0, 0, false).text.isEmpty());
+  CHECK(describeAutoSelection(340, 340, false).text == "all 340 presets");
+  CHECK(describeAutoSelection(12, 340, false).text == "12 of 340 presets");
+  CHECK_FALSE(describeAutoSelection(12, 340, false).warning);
+  const auto nothing = describeAutoSelection(340, 340, true);
+  CHECK(nothing.text == "no preset has these tags");
+  CHECK(nothing.warning);
+}
+
+TEST_CASE("The render quality shows only when it is reduced", "[ui][TransitionSettings]") {
+  CHECK(describeRenderQuality(1.0f, true).isEmpty());
+  CHECK(describeRenderQuality(1.0f, false).isEmpty());
+  CHECK(describeRenderQuality(0.7f, true) == "render 70%");
+  CHECK(describeRenderQuality(0.5f, false) == "render 50% (fixed)");
+}

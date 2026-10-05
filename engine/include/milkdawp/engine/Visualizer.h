@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "milkdawp/core/AudioRing.h"
+#include "milkdawp/core/Diagnostics.h"
 #include "milkdawp/core/HostTransport.h"
 #include "milkdawp/engine/Director.h"
 #include "milkdawp/engine/RenderEngine.h"
@@ -51,6 +52,11 @@ public:
   [[nodiscard]] RenderEngine& renderEngine() noexcept { return *render_; }
   [[nodiscard]] Director& director() noexcept { return *director_; }
   [[nodiscard]] const core::AudioRing& audioRing() const noexcept { return ring_; }
+
+  /// The engine's and director's part of the diagnostics panel (5.9); the shell
+  /// adds `shell`, `surface` and `input`. Message thread (takes the director's
+  /// and the error log's locks).
+  [[nodiscard]] core::DiagnosticsInfo diagnostics();
 
   // ~1.4 s at 48 kHz: far more than any gap between audio callbacks and the
   // analysis or render threads reading it.

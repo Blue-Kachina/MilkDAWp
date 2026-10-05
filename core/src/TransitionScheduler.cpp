@@ -11,7 +11,13 @@ namespace milkdawp::core {
 TransitionScheduler::TransitionScheduler(double sampleRate, std::size_t hopSize, std::uint64_t rngSeed)
     : sampleRate_(sampleRate),
       hopDurationSeconds_(static_cast<double>(hopSize) / sampleRate),
-      rng_(static_cast<std::mt19937::result_type>(rngSeed)) {}
+      rng_(static_cast<std::mt19937::result_type>(rngSeed)),
+      section_(sampleRate, hopSize, config_.section) {}
+
+void TransitionScheduler::setConfig(const TransitionSchedulerConfig& config) {
+  config_ = config;
+  section_.setConfig(config.section);
+}
 
 std::uint64_t TransitionScheduler::toSamples(float seconds) const noexcept {
   return static_cast<std::uint64_t>(static_cast<double>(seconds) * sampleRate_);
@@ -150,57 +156,56 @@ std::optional<ScheduledTransition> TransitionScheduler::tickHybrid(
   return std::nullopt;
 }
 
+std::optional<ScheduledTransition> TransitionScheduler::tickBeatQuantizedOrTimed(
+    std::uint64_t currentSamplePos, bool transportPlaying, bool transportDiscontinuity,
+    const BeatClockState& beatClock, bool beatJustCrossed, std::uint64_t crossedBeatIndex,
+    std::uint64_t crossedBeatSample, std::size_t nextPlaylistIndex, std::uint32_t nextPresetId) {
+  if (beatClock.confidence < config_.beatConfidenceFallbackThreshold) {
+    lowConfidenceSecondsAccumulated_ += static_cast<float>(hopDurationSeconds_);
+  } else {
+    lowConfidenceSecondsAccumulated_ = 0.0f;
+  }
+
+  if (lowConfidenceSecondsAccumulated_ >= config_.beatConfidenceLowSecondsBeforeFallback) {
+    return tickTimed(currentSamplePos, transportPlaying, transportDiscontinuity, nextPlaylistIndex, nextPresetId);
+  }
+  return tickBeatQuantized(beatJustCrossed, crossedBeatIndex, crossedBeatSample, nextPlaylistIndex, nextPresetId);
+}
+
 std::optional<ScheduledTransition> TransitionScheduler::tickEnergy(
-    std::uint64_t currentSamplePos, const BeatClockState& beatClock, bool beatJustCrossed,
-    std::uint64_t crossedBeatIndex, std::uint64_t crossedBeatSample, float broadbandEnergy,
-    bool strongBassOnsetThisHop, std::size_t nextPlaylistIndex, std::uint32_t nextPresetId) {
-  const auto windowSizeHops =
-      std::max<std::size_t>(4, static_cast<std::size_t>(config_.energyWindowSeconds / hopDurationSeconds_));
-  energyWindow_.push_back(broadbandEnergy);
-  while (energyWindow_.size() > windowSizeHops) {
-    energyWindow_.pop_front();
-  }
-
-  bool isDrop = false;
-  if (strongBassOnsetThisHop && energyWindow_.size() >= 4) {
-    double mean = 0.0;
-    for (float v : energyWindow_) {
-      mean += v;
-    }
-    mean /= static_cast<double>(energyWindow_.size());
-
-    double variance = 0.0;
-    for (float v : energyWindow_) {
-      const double d = static_cast<double>(v) - mean;
-      variance += d * d;
-    }
-    variance /= static_cast<double>(energyWindow_.size());
-    const double stddev = std::sqrt(variance);
-
-    const double threshold = mean + static_cast<double>(config_.energyThresholdMultiplier) * stddev;
-    isDrop = static_cast<double>(broadbandEnergy) > threshold;
-  }
-
+    std::uint64_t currentSamplePos, bool transportPlaying, bool transportDiscontinuity,
+    const BeatClockState& beatClock, bool beatJustCrossed, std::uint64_t crossedBeatIndex,
+    std::uint64_t crossedBeatSample, std::size_t nextPlaylistIndex, std::uint32_t nextPresetId) {
   const double bpmForCooldown = beatClock.bpm > 0.0f ? static_cast<double>(beatClock.bpm) : 120.0;
   const double secondsPerBar = (60.0 / bpmForCooldown) * 4.0;
   const auto cooldownSamples =
       static_cast<std::uint64_t>(secondsPerBar * static_cast<double>(config_.energyCooldownBars) * sampleRate_);
-  const bool cooldownElapsed = !haveLastEnergyTransitionSample_ ||
-                                (currentSamplePos - lastEnergyTransitionSample_) >= cooldownSamples;
+  const bool inCooldown = haveLastEnergyTransitionSample_ && currentSamplePos >= lastEnergyTransitionSample_ &&
+                          (currentSamplePos - lastEnergyTransitionSample_) < cooldownSamples;
 
-  if (isDrop && cooldownElapsed) {
+  if (lastSection_.drop && !inCooldown) {
     haveLastEnergyTransitionSample_ = true;
     lastEnergyTransitionSample_ = currentSamplePos;
+    // The beat-quantized count starts again from the drop: the next regular
+    // cut is `bars` after it, not whenever the old count was due.
+    beatQuantizedTargetSet_ = beatJustCrossed;
+    beatQuantizedTargetBeatIndex_ = crossedBeatIndex + static_cast<std::uint64_t>(config_.bars) * 4;
+    timedTargetSet_ = false;
     return makeTransition(currentSamplePos, nextPlaylistIndex, nextPresetId, CutStyle::Hard);
   }
 
-  return tickBeatQuantized(beatJustCrossed, crossedBeatIndex, crossedBeatSample, nextPlaylistIndex,
-                            nextPresetId);
+  auto regular = tickBeatQuantizedOrTimed(currentSamplePos, transportPlaying, transportDiscontinuity, beatClock,
+                                          beatJustCrossed, crossedBeatIndex, crossedBeatSample, nextPlaylistIndex,
+                                          nextPresetId);
+  if (regular && inCooldown) {
+    return std::nullopt; // a grid-anchored cut a beat after the drop
+  }
+  return regular;
 }
 
 std::optional<ScheduledTransition> TransitionScheduler::tick(
     std::uint64_t currentSamplePos, bool transportPlaying, bool transportDiscontinuity,
-    const BeatClockState& beatClock, float broadbandEnergy, bool strongBassOnsetThisHop,
+    const BeatClockState& beatClock, float bassEnergy, bool strongBassOnsetThisHop,
     std::size_t nextPlaylistIndex, std::uint32_t nextPresetId) {
   if (transportDiscontinuity) {
     timedTargetSet_ = false;
@@ -225,6 +230,9 @@ std::optional<ScheduledTransition> TransitionScheduler::tick(
     }
   }
 
+  // Every mode, so switching to Energy finds the history already there.
+  lastSection_ = section_.processHop(bassEnergy, strongBassOnsetThisHop);
+
   std::optional<ScheduledTransition> result;
 
   switch (config_.mode) {
@@ -236,22 +244,11 @@ std::optional<ScheduledTransition> TransitionScheduler::tick(
                         nextPresetId);
     break;
 
-  case TransitionMode::BeatQuantized: {
-    if (beatClock.confidence < config_.beatConfidenceFallbackThreshold) {
-      lowConfidenceSecondsAccumulated_ += static_cast<float>(hopDurationSeconds_);
-    } else {
-      lowConfidenceSecondsAccumulated_ = 0.0f;
-    }
-
-    if (lowConfidenceSecondsAccumulated_ >= config_.beatConfidenceLowSecondsBeforeFallback) {
-      result = tickTimed(currentSamplePos, transportPlaying, transportDiscontinuity, nextPlaylistIndex,
-                          nextPresetId);
-    } else {
-      result = tickBeatQuantized(beatJustCrossed, crossedBeatIndex, crossedBeatSample, nextPlaylistIndex,
-                                  nextPresetId);
-    }
+  case TransitionMode::BeatQuantized:
+    result = tickBeatQuantizedOrTimed(currentSamplePos, transportPlaying, transportDiscontinuity, beatClock,
+                                      beatJustCrossed, crossedBeatIndex, crossedBeatSample, nextPlaylistIndex,
+                                      nextPresetId);
     break;
-  }
 
   case TransitionMode::Hybrid:
     result = tickHybrid(currentSamplePos, transportPlaying, transportDiscontinuity, beatJustCrossed,
@@ -259,8 +256,8 @@ std::optional<ScheduledTransition> TransitionScheduler::tick(
     break;
 
   case TransitionMode::Energy:
-    result = tickEnergy(currentSamplePos, beatClock, beatJustCrossed, crossedBeatIndex, crossedBeatSample,
-                         broadbandEnergy, strongBassOnsetThisHop, nextPlaylistIndex, nextPresetId);
+    result = tickEnergy(currentSamplePos, transportPlaying, transportDiscontinuity, beatClock, beatJustCrossed,
+                        crossedBeatIndex, crossedBeatSample, nextPlaylistIndex, nextPresetId);
     break;
   }
 

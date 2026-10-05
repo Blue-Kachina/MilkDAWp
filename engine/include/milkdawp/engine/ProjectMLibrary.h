@@ -138,6 +138,23 @@ public:
   /// unsupported version) becomes an `Unavailable{reason}` explaining which.
   [[nodiscard]] static LoadResult load(const juce::File& bundleDirectoryHint = {});
 
+  /// What every RenderEngine in the process uses (5.6): one loaded copy and
+  /// one function table, shared by all plugin instances in a DAW, kept
+  /// while any holder lives. The first successful load wins and later hints
+  /// are ignored until every holder is gone (then the next call loads
+  /// afresh). That matters beyond saving a load: projectM 4.2 keeps one GL
+  /// resolver per loaded library, initialized by the first create call, so
+  /// all instances must share the library *and* pass the same load proc
+  /// (ProjectMInstance::create always passes null, i.e. projectM's own).
+  /// A failed load is not remembered; the next call tries again.
+  struct SharedLoadResult {
+    std::shared_ptr<const ProjectMLibrary> library;
+    std::string unavailableReason;
+
+    [[nodiscard]] bool isAvailable() const noexcept { return library != nullptr; }
+  };
+  [[nodiscard]] static SharedLoadResult acquireShared(const juce::File& bundleDirectoryHint = {});
+
   ~ProjectMLibrary();
   ProjectMLibrary(const ProjectMLibrary&) = delete;
   ProjectMLibrary& operator=(const ProjectMLibrary&) = delete;

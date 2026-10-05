@@ -79,6 +79,8 @@ struct StateSchemaV2 {
   /// What the user calls this instance in the target picker. Empty means "use
   /// the host's track name".
   std::string instanceLabel;
+  /// 5.2: Transitions -> "Only tags" (Director::setTagFilter). Additive key.
+  std::string tagFilter;
   WindowLayout windows; // additive keys: older v2 states load with everything closed
   std::map<std::string, float> paramValues; // keyed by ParameterModel's v2 ids
 };

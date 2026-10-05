@@ -18,8 +18,10 @@
 #include "milkdawp/engine/OutputWindow.h"
 #include "milkdawp/engine/Visualizer.h"
 #include "milkdawp/ui/ControlDrawer.h"
+#include "milkdawp/ui/DiagnosticsPanel.h"
 #include "milkdawp/ui/DetachedControlsWindow.h"
 #include "milkdawp/ui/OutputSettings.h"
+#include "milkdawp/ui/PresetInfoMenu.h"
 #include "milkdawp/ui/TransitionSettings.h"
 
 namespace milkdawp::app {
@@ -50,6 +52,10 @@ public:
   void choosePresetFolder();
   void rescanPresets();
   void showPresetPicker();
+  /// 5.2: the rating / never-auto-select / tags of one preset (the shared
+  /// `PresetMetadataStore`), for the picker and the browser.
+  [[nodiscard]] ui::PresetInfoAccess presetInfoAccess(const std::string& path) const;
+  void addCurrentPresetInfo(juce::PopupMenu& menu);
   void showPresetBrowser();
   void showAudioSettings();
   /// A `.milk` file (loads its folder, selects the file) or a folder
@@ -73,7 +79,7 @@ public:
   [[nodiscard]] bool isOutputSettingsVisible() const { return outputSettings_.isVisible(); }
   [[nodiscard]] bool isOutputWindowOpen() const noexcept { return outputWindow_ != nullptr; }
   [[nodiscard]] bool areControlsFloating() const noexcept { return controlsWindow_ != nullptr; }
-  [[nodiscard]] bool isDiagnosticsVisible() const { return diagnosticsLabel_.isVisible(); }
+  [[nodiscard]] bool isDiagnosticsVisible() const { return diagnosticsPanel_.isVisible(); }
 
   /// The actions as menus: the menu bar's "File", "Playback" and "View"
   /// (`menuNames()`), and the drawer's settings popup (all of them at once).
@@ -100,7 +106,9 @@ public:
   std::function<void()> onShowLogFile;
   std::function<void()> onCollectLogs;
 
-  /// The diagnostics overlay's text (engine, presets, input, GL), also put
+  /// What the diagnostics panel shows (5.9), with the app's own fields.
+  [[nodiscard]] core::DiagnosticsInfo diagnosticsInfo() const;
+  /// The diagnostics panel's text with every recent error, also put
   /// in a log bundle.
   [[nodiscard]] juce::String diagnosticsText() const;
 
@@ -127,7 +135,7 @@ private:
   AppState& state_;
 
   engine::OutputSurface surface_;
-  juce::Label diagnosticsLabel_;
+  ui::DiagnosticsPanel diagnosticsPanel_; // 5.9
   juce::TextButton inputHint_;
   ui::ControlDrawer drawer_;
   ui::TransitionSettingsPanel transitionSettings_;

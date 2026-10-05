@@ -50,7 +50,7 @@ struct ParameterValues {
 [[nodiscard]] const float* parameterField(const ParameterValues& values, std::string_view id) noexcept;
 
 /// qualityOverride's choices (Auto / Low / Medium / High) as an FBO scale.
-/// Auto is full resolution until adaptive quality (5.3) drives the scale.
+/// Auto is 0: the render engine picks the scale itself (adaptive quality, 5.3).
 [[nodiscard]] float qualityScaleFor(int choice) noexcept;
 
 /// Real-time safe: no allocation, no locks.

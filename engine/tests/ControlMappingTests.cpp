@@ -57,7 +57,7 @@ TEST_CASE("toEngineControls maps model units to engine controls", "[engine][Cont
   CHECK(controls.transitionBars == 4);
   CHECK(controls.cutStyle == core::CutStyle::Soft);
   CHECK(controls.policy == core::PlaylistPolicy::Sequential);
-  CHECK(controls.qualityScale == 1.0f);
+  CHECK(controls.qualityScale == 0.0f); // Auto: adaptive (5.3)
 
   values.transitionMode = 99.0f;  // clamped
   values.transitionBars = 0.0f;   // at least one bar

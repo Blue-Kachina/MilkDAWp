@@ -4,6 +4,7 @@
 #include "MidiLearn.h"
 
 #include <algorithm>
+#include <chrono>
 #include <optional>
 #include <thread>
 
@@ -11,52 +12,108 @@
 
 namespace milkdawp::app {
 
-MidiLearn::MidiLearn(juce::AudioDeviceManager& devices, ParameterBinding& binding)
-    : devices_(devices), binding_(binding) {
-  devices_.addChangeListener(this);
-  enableAllInputs();
+MidiLearn::MidiLearn(ParameterBinding& binding)
+    : binding_(binding),
+      deviceListConnection_(juce::MidiDeviceListConnection::make([this] { openNewInputs(); })) {
+  openNewInputs();
 }
 
 MidiLearn::~MidiLearn() {
-  // Not joined with any in-flight background enable (see enableAllInputs):
-  // a stuck driver call there could otherwise hang app shutdown. alive_ (a
-  // shared_ptr that thread also holds) stops it from touching `this` from
-  // that point on; it can still be mid-call on `devices_` when this runs,
-  // an accepted, narrow risk that only matters if the app quits in the same
-  // instant a device's driver is already hung.
-  alive_->store(false, std::memory_order_release);
-  devices_.removeChangeListener(this);
-  for (const auto& info : juce::MidiInput::getAvailableDevices()) {
-    devices_.removeMidiInputDeviceCallback(info.identifier, this);
+  // Wait for open threads still inside JUCE (a normal open takes
+  // milliseconds), so none outlives this object, or JUCE itself, which a
+  // test shuts down right after. Bounded: a driver call that never returns
+  // (one real USB interface here does that) must not hang shutdown; only
+  // then is a thread left behind.
+  {
+    std::unique_lock lock(openState_->mutex);
+    openState_->alive = false;
+    if (!openState_->idle.wait_for(
+            lock, std::chrono::seconds(2), [this] { return openState_->running == 0; })) {
+      juce::Logger::writeToLog(
+          "MIDI learn: a MIDI driver is still busy opening an input; closing anyway");
+    }
   }
+  deviceListConnection_ = {};
+  for (auto& input : inputs_) {
+    input->stop();
+  }
+  inputs_.clear();
 }
 
-void MidiLearn::enableAllInputs() {
-  // A MIDI input's driver is free to block `setMidiInputDeviceEnabled` for
-  // a long time, or forever (observed here against real USB MIDI hardware
-  // whose driver never returned) -- off the message thread so one bad
-  // driver never hangs the app, and detached rather than tracked so this
-  // destructing never has to wait for it either. `alive` is checked between
-  // devices so a `MidiLearn` destroyed while this is running is only
-  // touched up to that point, not after.
-  std::thread([alive = alive_, this] {
-    for (const auto& info : juce::MidiInput::getAvailableDevices()) {
-      if (!alive->load(std::memory_order_acquire)) {
-        return;
-      }
-      if (!devices_.isMidiInputDeviceEnabled(info.identifier)) {
-        devices_.setMidiInputDeviceEnabled(info.identifier, true);
-      }
-      if (!alive->load(std::memory_order_acquire)) {
-        return;
-      }
-      devices_.removeMidiInputDeviceCallback(info.identifier, this); // avoid a duplicate registration
-      devices_.addMidiInputDeviceCallback(info.identifier, this);
+void MidiLearn::openNewInputs() {
+  // Listing the devices here, on the message thread, is also what builds
+  // JUCE's device table: the background open below only reads it.
+  const auto available = juce::MidiInput::getAvailableDevices();
+  const auto isAvailable = [&available](const juce::String& id) {
+    return std::any_of(available.begin(), available.end(), [&id](const juce::MidiDeviceInfo& info) {
+      return info.identifier == id;
+    });
+  };
+
+  // Unplugged: close it, and allow it to be opened again when it returns.
+  inputs_.erase(std::remove_if(inputs_.begin(),
+                               inputs_.end(),
+                               [&](const std::shared_ptr<juce::MidiInput>& input) {
+                                 if (isAvailable(input->getIdentifier())) {
+                                   return false;
+                                 }
+                                 input->stop();
+                                 return true;
+                               }),
+                inputs_.end());
+  for (auto it = requested_.begin(); it != requested_.end();) {
+    it = isAvailable(*it) ? std::next(it) : requested_.erase(it);
+  }
+
+  std::vector<juce::String> toOpen;
+  for (const auto& info : available) {
+    if (requested_.insert(info.identifier).second) {
+      toOpen.push_back(info.identifier);
     }
+  }
+  if (toOpen.empty()) {
+    return;
+  }
+
+  {
+    const std::lock_guard lock(openState_->mutex);
+    ++openState_->running;
+  }
+  std::thread([state = openState_, this, toOpen = std::move(toOpen)] {
+    for (const auto& id : toOpen) {
+      {
+        const std::lock_guard lock(state->mutex);
+        if (!state->alive) {
+          break;
+        }
+      }
+      // May block for a long time. The input isn't started, so `this` as its
+      // callback is never called until the message thread has adopted it.
+      //
+      // JUCE marks openDevice message-thread-only (JUCE_ASSERT_MESSAGE_THREAD
+      // in its device list lookup, so a debug build under a debugger breaks
+      // here once per device). Calling it here is deliberate: its lookups
+      // only read the device table openNewInputs() has just built on the
+      // message thread, which JUCE rebuilds only when a device is plugged or
+      // unplugged. That narrow window is the price of never letting a hung
+      // driver freeze the app.
+      std::shared_ptr<juce::MidiInput> input(juce::MidiInput::openDevice(id, this).release());
+      if (input != nullptr) {
+        juce::MessageManager::callAsync([state, this, input]() mutable {
+          // Message thread, like the destructor: `alive` can't change under us.
+          if (!state->alive) {
+            return; // `input` closes here, never started
+          }
+          input->start();
+          inputs_.push_back(std::move(input));
+        });
+      }
+    }
+    const std::lock_guard lock(state->mutex);
+    --state->running;
+    state->idle.notify_all();
   }).detach();
 }
-
-void MidiLearn::changeListenerCallback(juce::ChangeBroadcaster*) { enableAllInputs(); }
 
 void MidiLearn::startLearning(const std::string& parameterId) {
   learningParameterId_ = parameterId;
@@ -71,7 +128,9 @@ void MidiLearn::cancelLearning() {
   fireChanged();
 }
 
-bool MidiLearn::hasMapping(const std::string& parameterId) const { return mappings_.find(parameterId) != mappings_.end(); }
+bool MidiLearn::hasMapping(const std::string& parameterId) const {
+  return mappings_.find(parameterId) != mappings_.end();
+}
 
 juce::String MidiLearn::describeMapping(const std::string& parameterId) const {
   const auto it = mappings_.find(parameterId);
@@ -83,7 +142,7 @@ juce::String MidiLearn::describeMapping(const std::string& parameterId) const {
     return "CC " + juce::String(source.number) + " ch " + juce::String(source.channel);
   }
   return "Note " + juce::MidiMessage::getMidiNoteName(source.number, true, true, 3) + " ch " +
-        juce::String(source.channel);
+         juce::String(source.channel);
 }
 
 void MidiLearn::clearMapping(const std::string& parameterId) {
@@ -95,7 +154,8 @@ void MidiLearn::clearMapping(const std::string& parameterId) {
 juce::String MidiLearn::stateString() const {
   juce::StringArray lines;
   for (const auto& [id, source] : mappings_) {
-    lines.add(juce::String(id) + "=" + juce::String(source.type == SourceType::ControlChange ? 0 : 1) + "," +
+    lines.add(juce::String(id) + "=" +
+              juce::String(source.type == SourceType::ControlChange ? 0 : 1) + "," +
               juce::String(source.channel) + "," + juce::String(source.number));
   }
   return lines.joinIntoString("\n");
@@ -125,7 +185,8 @@ void MidiLearn::handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMess
   std::optional<Source> incoming;
   float value = 0.0f;
   if (message.isController()) {
-    incoming = Source{SourceType::ControlChange, message.getChannel(), message.getControllerNumber()};
+    incoming =
+        Source{SourceType::ControlChange, message.getChannel(), message.getControllerNumber()};
     value = static_cast<float>(message.getControllerValue()) / 127.0f;
   } else if (message.isNoteOn()) {
     incoming = Source{SourceType::Note, message.getChannel(), message.getNoteNumber()};
@@ -134,8 +195,10 @@ void MidiLearn::handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMess
   if (!incoming) {
     return;
   }
-  juce::MessageManager::callAsync([alive = alive_, this, source = *incoming, value] {
-    if (alive->load(std::memory_order_acquire)) {
+  // Runs on the message thread, like the destructor, so `alive` can't change
+  // under it.
+  juce::MessageManager::callAsync([state = openState_, this, source = *incoming, value] {
+    if (state->alive) {
       applyIncoming(source, value);
     }
   });

@@ -103,6 +103,8 @@ MilkDAWpAudioProcessor::MilkDAWpAudioProcessor()
   // drives everything and "transport stopped" never pauses the Timed clock.
   config.followHostTransport = wrapperType != wrapperType_Standalone;
   visualizer_ = std::make_unique<engine::Visualizer>(config);
+  // 5.2: the library's ratings and tags, shared by every instance and the app.
+  visualizer_->director().setPresetMetadata(engine::PresetMetadataStore::shared());
 
   // CI guard (3.9/3.10): a plugin that can't find projectM stays inert and
   // still passes pluginval, which would hide a broken runtime layout (rpath,
@@ -540,6 +542,7 @@ void MilkDAWpAudioProcessor::getStateInformation(juce::MemoryBlock& destData) {
   state.windows = windowLayout();
   state.instanceId = instanceId();
   state.instanceLabel = instanceLabel();
+  state.tagFilter = visualizer_->director().tagFilter();
   for (const auto& spec : core::allParameters()) {
     if (auto* raw = apvts.getRawParameterValue(juce::String(spec.id))) {
       state.paramValues[spec.id] = raw->load(std::memory_order_relaxed);
@@ -581,6 +584,7 @@ void MilkDAWpAudioProcessor::setStateInformation(const void* data, int sizeInByt
   if (!state.instanceId.empty()) {
     LayerRegistry::get().claimId(registryEntry_, state.instanceId);
   }
+  visualizer_->director().setTagFilter(state.tagFilter);
   refreshRegistryName();
   triggerAsyncUpdate(); // opens/closes the Output window, and links to the Output target, on the message thread
 

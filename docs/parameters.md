@@ -24,7 +24,7 @@ The canonical parameter surface (Phase 1.13), shared by the plugin's APVTS layou
 | `transitionMode` | Transition Mode | Choice | Manual / Timed / BeatQuantized / Hybrid / Energy | BeatQuantized | yes | *(new in v2)* |
 | `transitionBars` | Transition Bars (N) | Int | 1 .. 16 | 4 | yes | *(new in v2)* |
 | `presetSelectionPolicy` | Preset Selection | Choice | Sequential / ShuffleNoRepeat / Weighted | Sequential | yes | *(new in v2)* |
-| `energyThreshold` | Energy Threshold (sd) | Float | 0.5 .. 4 | 2 | yes | *(new in v2)* |
+| `energyThreshold` | Energy Threshold | Float | 0.5 .. 4 | 2 | yes | *(new in v2)* |
 | `useHostTempo` | BPM From DAW | Bool | true / false | false | yes | *(new in v2)* |
 | `layerOpacity` | Layer Opacity | Float | 0 .. 1 | 1 | yes | *(new in v2)* |
 | `layerBlend` | Layer Blend | Choice | Normal / Add / Screen / Multiply / Luma key | Normal | yes | *(new in v2)* |
@@ -32,3 +32,8 @@ The canonical parameter surface (Phase 1.13), shared by the plugin's APVTS layou
 | `layerOrder` | Layer Order | Int | 0 .. 7 | 0 | yes | *(new in v2)* |
 | `transitionGridSync` | Sync Cuts to Bar Grid | Bool | true / false | false | yes | *(new in v2)* |
 | `transitionGridOffset` | Grid Offset (beats) | Int | 0 .. 15 | 0 | yes | *(new in v2)* |
+
+## Notes
+
+- **Beat Sensitivity** ("Reactivity" in the Transitions panel) is projectM's own setting: how strongly presets react to the bass, mid and treble levels they animate from. 0 is calm, 1 is MilkDrop's usual response, 2 is twice as jumpy. It detects no beats and causes no transitions. MilkDAWp's beat detector keeps its own fixed threshold: tying it to this knob made beat tracking fail on the test fixtures at both ends of the range (roadmap 5.5).
+- **How easily MilkDAWp cuts** is set by the transition mode and its settings: Bars, the timed interval, and in Energy mode the **Energy Threshold**, how sharply the bass must come back after a breakdown to count as a drop (4 + 3 x the value, in dB: 5.5 to 16 dB, default 10).

@@ -23,6 +23,7 @@
 #include "milkdawp/core/OnsetDetector.h"
 #include "milkdawp/core/Resample.h"
 #include "milkdawp/core/Scoring.h"
+#include "milkdawp/core/SectionDetector.h"
 #include "milkdawp/core/TempoTracker.h"
 #include "milkdawp/core/Wav.h"
 
@@ -68,6 +69,7 @@ struct Thresholds {
   double toleranceSeconds = 0.070;
   double maxTempoErrorFraction = 0.02;
   double maxOnsetsForSilence = 2.0;
+  double dropToleranceSeconds = 0.15;
 };
 
 Thresholds loadThresholds(const std::string& path) {
@@ -84,6 +86,7 @@ Thresholds loadThresholds(const std::string& path) {
   t.toleranceSeconds = readJsonNumber(text, "toleranceSeconds", t.toleranceSeconds);
   t.maxTempoErrorFraction = readJsonNumber(text, "maxTempoErrorFraction", t.maxTempoErrorFraction);
   t.maxOnsetsForSilence = readJsonNumber(text, "maxOnsetsForSilence", t.maxOnsetsForSilence);
+  t.dropToleranceSeconds = readJsonNumber(text, "dropToleranceSeconds", t.dropToleranceSeconds);
   return t;
 }
 
@@ -156,6 +159,41 @@ struct FixtureResult {
   std::string detail;
 };
 
+/// 5.1: Energy mode must cut on exactly the annotated drops (drops.txt; none
+/// when the file is missing), each within the tolerance. Returns whether it
+/// did, and describes the result in `detail`.
+bool scoreDrops(const std::vector<double>& detected, const std::vector<double>& reference, double tolerance,
+                std::string& detail) {
+  std::vector<bool> used(detected.size(), false);
+  int missed = 0;
+  for (const double drop : reference) {
+    bool found = false;
+    for (std::size_t i = 0; i < detected.size() && !found; ++i) {
+      if (!used[i] && std::abs(detected[i] - drop) <= tolerance) {
+        used[i] = true;
+        found = true;
+      }
+    }
+    missed += found ? 0 : 1;
+  }
+  const auto extra = static_cast<int>(std::count(used.begin(), used.end(), false));
+
+  std::ostringstream text;
+  text << "drops=" << detected.size() << " (expected " << reference.size();
+  if (missed > 0 || extra > 0) {
+    text << ", " << missed << " missed, " << extra << " extra";
+  }
+  text << ")";
+  if (!detected.empty()) {
+    text << " at";
+    for (const double t : detected) {
+      text << " " << t << "s";
+    }
+  }
+  detail = text.str();
+  return missed == 0 && extra == 0;
+}
+
 std::vector<float> downmixToMono(const WavAudio& audio) {
   if (audio.numChannels == 1) {
     return audio.interleavedSamples;
@@ -199,6 +237,7 @@ FixtureResult evaluateFixture(const std::filesystem::path& dir, const Thresholds
   OnsetDetector bassDetector(kInternalSampleRate);
   TempoTracker tempoTracker(kInternalSampleRate);
   BeatClock beatClock(kInternalSampleRate);
+  SectionDetector sections(kInternalSampleRate, Analyzer::hopSize);
 
   const std::size_t hopSize = Analyzer::hopSize;
   std::size_t numHops = (resampled.size() + hopSize - 1) / hopSize;
@@ -206,7 +245,7 @@ FixtureResult evaluateFixture(const std::filesystem::path& dir, const Thresholds
   resampled.resize(numHops * hopSize, 0.0f);
 
   std::vector<double> beatTimes;
-  std::size_t onsetCount = 0;
+  std::vector<double> dropTimes;  std::size_t onsetCount = 0;
   bool haveLastBeatIndex = false;
   std::uint64_t lastBeatIndex = 0;
   float finalBpm = 0.0f;
@@ -220,7 +259,10 @@ FixtureResult evaluateFixture(const std::filesystem::path& dir, const Thresholds
     auto bassOnset = bassDetector.processHop(frame.bassOnsetStrength);
     auto tempo = tempoTracker.processHop(frame.onsetStrength);
     auto beatState = beatClock.processHop(samplePos, tempo, bassOnset);
-
+    // What the Director gives Energy mode (TransitionScheduler::tick).
+    if (sections.processHop(frame.bassEnergy, bassOnset.has_value()).drop) {
+      dropTimes.push_back(static_cast<double>(samplePos) / kInternalSampleRate);
+    }
     if (haveLastBeatIndex && beatState.beatIndex > lastBeatIndex) {
       beatTimes.push_back(static_cast<double>(samplePos) / kInternalSampleRate);
     }
@@ -230,13 +272,16 @@ FixtureResult evaluateFixture(const std::filesystem::path& dir, const Thresholds
   }
 
   auto reference = readReferenceBeats(beatsPath);
+  std::string dropDetail;
+  const bool dropsOk =
+      scoreDrops(dropTimes, readReferenceBeats(dir / "drops.txt"), thresholds.dropToleranceSeconds, dropDetail);
 
   if (reference.empty()) {
     // A "no beats expected" fixture (silence, noise): pass if we didn't
     // hallucinate a pile of onsets (§4.3 acceptance metric).
-    result.passed = static_cast<double>(onsetCount) <= thresholds.maxOnsetsForSilence;
+    result.passed = static_cast<double>(onsetCount) <= thresholds.maxOnsetsForSilence && dropsOk;
     result.detail = "no reference beats (expected none); onsets=" + std::to_string(onsetCount) +
-                     " (max " + std::to_string(thresholds.maxOnsetsForSilence) + ")";
+                     " (max " + std::to_string(thresholds.maxOnsetsForSilence) + "), " + dropDetail;
     return result;
   }
 
@@ -247,13 +292,13 @@ FixtureResult evaluateFixture(const std::filesystem::path& dir, const Thresholds
 
   const bool fMeasureOk = fMeasure.fMeasure >= thresholds.minFMeasure;
   const bool tempoOk = !steady || tempoError <= thresholds.maxTempoErrorFraction;
-  result.passed = fMeasureOk && tempoOk;
+  result.passed = fMeasureOk && tempoOk && dropsOk;
 
   std::ostringstream detail;
   detail << "F-measure=" << fMeasure.fMeasure << " (min " << thresholds.minFMeasure << "), "
          << (steady ? "" : "[no steady tempo, tempo check skipped] ") << "tempoError="
          << (tempoError * 100.0) << "% (max " << (thresholds.maxTempoErrorFraction * 100.0)
-         << "%), detectedBpm=" << finalBpm << ", referenceBpm=" << referenceBpm;
+         << "%), detectedBpm=" << finalBpm << ", referenceBpm=" << referenceBpm << ", " << dropDetail;
   result.detail = detail.str();
   return result;
 }

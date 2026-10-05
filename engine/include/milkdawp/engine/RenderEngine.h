@@ -25,6 +25,7 @@
 #include "milkdawp/engine/LayerChannel.h"
 #include "milkdawp/engine/PresetHandoff.h"
 #include "milkdawp/engine/ProjectMLibrary.h"
+#include "milkdawp/engine/RecentErrors.h"
 #include "milkdawp/engine/TransitionExecutor.h"
 
 namespace milkdawp::engine {
@@ -48,6 +49,9 @@ struct RenderStats {
   std::uint32_t presetsLoaded = 0;
   std::uint32_t presetsFailed = 0;
   float lastPresetLoadMs = 0.0f;  // projectM parse + shader compile, on the render thread
+  float qualityScale = 1.0f;      // the FBO scale in use (5.3)
+  int gpuSharers = 1;             // engines in this process rendering right now, this one included (5.6)
+  bool qualityAuto = true;        // chosen adaptively (Auto) rather than fixed
   std::int64_t lastLandingErrorSamples = 0;
 };
 
@@ -109,12 +113,16 @@ public:
   [[nodiscard]] std::string glDescription() const;
   [[nodiscard]] std::string projectMVersion() const;
   [[nodiscard]] RenderStats stats() const noexcept { return stats_.read(); }
+  /// Recent errors (5.9): projectM's error log on this engine's render thread, the
+  /// presets it rejected, and the director's preset read failures. Any thread.
+  [[nodiscard]] RecentErrors& errors() noexcept { return errors_; }
+  [[nodiscard]] const RecentErrors& errors() const noexcept { return errors_; }
 
   // ---- settings (any thread) ----
   void setBeatSensitivity(float sensitivity) noexcept { beatSensitivity_.store(sensitivity); }
-  /// FBO resolution relative to the largest visible surface (5.3 drives
-  /// this adaptively later; `qualityOverride` sets it for now). Clamped to
-  /// [0.25, 1].
+  /// FBO resolution relative to the largest visible surface, clamped to
+  /// [0.25, 1]. 0 or less: adaptive (5.3, `core::AdaptiveQuality`), the
+  /// render thread picks it from its measured GPU time.
   void setQualityScale(float scale) noexcept { qualityScale_.store(scale); }
   /// Sample rate of the audio clock `dueAtSample` values use.
   void setSampleRate(double sampleRate) noexcept { sampleRate_.store(sampleRate); }
@@ -210,7 +218,7 @@ public:
   [[nodiscard]] FrameReadbackExchange::ReadLock latestReadbackFrame() const { return readback_.acquireLatest(); }
 
 private:
-  RenderEngine(const core::AudioRing& audio, const Config& config, std::unique_ptr<ProjectMLibrary> library,
+  RenderEngine(const core::AudioRing& audio, const Config& config, std::shared_ptr<const ProjectMLibrary> library,
                std::string unavailableReason);
 
   void run();
@@ -225,7 +233,7 @@ private:
   };
 
   const Config config_;
-  std::unique_ptr<ProjectMLibrary> library_;
+  std::shared_ptr<const ProjectMLibrary> library_; // shared by every engine in the process (5.6)
 
   mutable std::mutex textMutex_;
   std::string unavailableReason_;
@@ -275,6 +283,7 @@ private:
   bool contextReleased_ = false;
   bool renderThreadExited_ = false;
 
+  RecentErrors errors_;
   core::SeqlockSnapshot<RenderStats> stats_;
   std::thread thread_;
 };

@@ -64,6 +64,9 @@ public:
     }
 
     visualizer_ = std::make_unique<engine::Visualizer>(engine::Visualizer::Config{});
+    // 5.2: the library's ratings and tags, shared with the plugin.
+    visualizer_->director().setPresetMetadata(engine::PresetMetadataStore::shared());
+    visualizer_->director().setTagFilter(state_.tagFilter.toStdString());
     if (state_.presetFolder.isNotEmpty() && juce::File(state_.presetFolder).isDirectory()) {
       visualizer_->director().setPresetFolder(state_.presetFolder.toStdString(),
                                               state_.currentPresetPath.toStdString());

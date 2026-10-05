@@ -29,6 +29,7 @@ constexpr const char* kLogging = "logging";
 constexpr const char* kFavourites = "favouritePresets";
 constexpr const char* kRecentlyPlayed = "recentlyPlayedPresets";
 constexpr const char* kMidiMappings = "midiMappings";
+constexpr const char* kTagFilter = "tagFilter";
 constexpr const char* kParameterPrefix = "param.";
 
 // One path per line; paths never contain newlines.
@@ -81,6 +82,7 @@ AppState loadAppState(const juce::PropertySet& properties) {
   state.favouritePresets = readList(properties, kFavourites);
   state.recentlyPlayedPresets = readList(properties, kRecentlyPlayed);
   state.midiMappings = properties.getValue(kMidiMappings);
+  state.tagFilter = properties.getValue(kTagFilter);
   state.mainWindowBounds = readBounds(properties, kMainBounds);
   state.mainWindowFullscreen = properties.getBoolValue(kMainFullscreen, false);
   state.outputWindowOpen = properties.getBoolValue(kOutputOpen, false);
@@ -109,6 +111,7 @@ void saveAppState(const AppState& state, juce::PropertySet& properties) {
   writeList(properties, kFavourites, state.favouritePresets);
   writeList(properties, kRecentlyPlayed, state.recentlyPlayedPresets);
   properties.setValue(kMidiMappings, state.midiMappings);
+  properties.setValue(kTagFilter, state.tagFilter);
   writeBounds(properties, kMainBounds, state.mainWindowBounds);
   properties.setValue(kMainFullscreen, state.mainWindowFullscreen);
   properties.setValue(kOutputOpen, state.outputWindowOpen);

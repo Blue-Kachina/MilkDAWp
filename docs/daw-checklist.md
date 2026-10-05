@@ -41,6 +41,7 @@ Copy this table once per host/platform/format combination above.
 | 13 | Keyboard: `S` toggles shuffle | `[ ]` | |
 | 14 | Keyboard: `H` toggles the drawer | `[ ]` | |
 | 15 | Keyboard: `P` pins/unpins the drawer | `[ ]` | |
+| 15a | Keyboard: `B` opens the preset picker, `M` the settings menu, `D` the diagnostics panel; inside a popover `Tab` moves between controls (with a visible focus ring) and `Esc` closes it | `[ ]` | 5.8 |
 | 16 | Keyboard: unhandled keys fall through to the host (host's own shortcuts still work with the editor focused) | `[ ]` | |
 | 17 | If any key above is swallowed by the host before the editor sees it | `[ ]` | note which key; try `EDITOR_WANTS_KEYBOARD_FOCUS TRUE` for this host only and record the trade-off (3.14) |
 | 18 | Drawer: hover/tap reveals it; auto-hides after ~3s of no pointer activity when unpinned | `[ ]` | |

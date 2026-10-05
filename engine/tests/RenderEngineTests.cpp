@@ -422,3 +422,78 @@ TEST_CASE("RenderEngine publishes CPU copies of its frames while a readback clie
   CHECK_FALSE(engine->latestReadbackFrame()); // stale frames are withdrawn
   engine->unregisterSurface(slot);
 }
+
+TEST_CASE("RenderEngine reports its quality scale, chosen adaptively in Auto (5.3)", "[engine][RenderEngine]") {
+  milkdawp::core::AudioRing ring(1 << 14, 2);
+  const auto engine = RenderEngine::create(ring);
+  waitForStartup(*engine);
+  if (!engine->isAvailable()) {
+    SUCCEED("projectM or a GL context is unavailable here: " + engine->unavailableReason());
+    return;
+  }
+  const int slot = engine->registerSurface();
+  engine->reportSurfaceSize(slot, 320, 180, true);
+
+  // Auto (0): a tiny frame costs next to nothing, so it stays at full scale.
+  engine->setQualityScale(0.0f);
+  bool reported = false;
+  for (int i = 0; i < 300 && !reported; ++i) {
+    std::this_thread::sleep_for(10ms);
+    const auto stats = engine->stats();
+    reported = stats.framesRendered > 30 && stats.qualityAuto;
+  }
+  REQUIRE(reported);
+  CHECK(engine->stats().qualityScale == 1.0f);
+  CHECK(engine->stats().width == 320);
+
+  // A fixed choice is reported as one.
+  engine->setQualityScale(0.75f);
+  bool fixed = false;
+  for (int i = 0; i < 300 && !fixed; ++i) {
+    std::this_thread::sleep_for(10ms);
+    const auto stats = engine->stats();
+    fixed = !stats.qualityAuto && stats.qualityScale == 0.75f && stats.width == 240;
+  }
+  CHECK(fixed);
+  engine->unregisterSurface(slot);
+}
+
+TEST_CASE("Several engines in one process share the GPU budget; a hidden one does no work (5.6)",
+          "[engine][RenderEngine]") {
+  // Two plugin instances in one DAW: each its own engine, context and projectM
+  // instance, over one shared projectM library.
+  milkdawp::core::AudioRing ringA(1 << 14, 2);
+  milkdawp::core::AudioRing ringB(1 << 14, 2);
+  const auto a = RenderEngine::create(ringA);
+  const auto b = RenderEngine::create(ringB);
+  waitForStartup(*a);
+  waitForStartup(*b);
+  if (!a->isAvailable() || !b->isAvailable()) {
+    SUCCEED("projectM or a GL context is unavailable here");
+    return;
+  }
+  CHECK(a->projectMVersion() == b->projectMVersion());
+  a->setQualityScale(0.0f); // Auto: the one that budgets against the other
+  const int slotA = a->registerSurface();
+  const int slotB = b->registerSurface();
+  a->reportSurfaceSize(slotA, 160, 90, true);
+  b->reportSurfaceSize(slotB, 160, 90, true);
+
+  // Both render, and each counts the other as sharing the GPU.
+  CHECK(waitUntil([&] { return a->stats().gpuSharers == 2 && b->stats().gpuSharers == 2; }));
+  CHECK(waitUntil([&] { return a->stats().framesRendered > 10 && b->stats().framesRendered > 10; }));
+  // Two tiny frames fit easily: sharing alone doesn't cost quality.
+  CHECK(a->stats().qualityScale == 1.0f);
+
+  // B's editor closes: B stops (no frames, no GPU), A renders on, alone.
+  b->reportSurfaceSize(slotB, 160, 90, false);
+  CHECK(waitUntil([&] { return b->stats().paused && a->stats().gpuSharers == 1; }));
+  const auto bFrozenAt = b->stats().framesRendered;
+  const auto aBefore = a->stats().framesRendered;
+  std::this_thread::sleep_for(200ms);
+  CHECK(b->stats().framesRendered == bFrozenAt);
+  CHECK(a->stats().framesRendered > aBefore);
+
+  a->unregisterSurface(slotA);
+  b->unregisterSurface(slotB);
+}

@@ -11,6 +11,7 @@
 
 #include <juce_opengl/juce_opengl.h>
 
+#include "milkdawp/core/AdaptiveQuality.h"
 #include "milkdawp/engine/GlFrameTarget.h"
 #include "milkdawp/engine/LayerCompositor.h"
 #include "milkdawp/engine/OffscreenGLContext.h"
@@ -37,14 +38,97 @@ double millisecondsBetween(Clock::time_point from, Clock::time_point to) {
   return std::chrono::duration<double, std::milli>(to - from).count();
 }
 
+// 5.6: what each engine in the process costs the GPU per frame right now, so
+// several plugin instances rendering at once budget against their combined
+// load (AdaptiveQuality::sharedBudgetMs) instead of each assuming the whole
+// GPU is its own. One slot per running render thread; an engine that is
+// paused (no visible surface, yielded primary) is not rendering and costs 0.
+// Plain atomics: each thread writes only its own slot and reads the others.
+class GpuShare {
+public:
+  static constexpr std::size_t kSlots = 32;
+
+  /// Claims a slot for the calling render thread; none (an engine past the
+  /// 32nd) means it budgets as if alone.
+  GpuShare() {
+    for (std::size_t i = 0; i < kSlots; ++i) {
+      bool expected = false;
+      if (slots()[i].claimed.compare_exchange_strong(expected, true)) {
+        slot_ = &slots()[i];
+        return;
+      }
+    }
+  }
+  ~GpuShare() {
+    if (slot_ != nullptr) {
+      setIdle();
+      slot_->claimed.store(false);
+    }
+  }
+  GpuShare(const GpuShare&) = delete;
+  GpuShare& operator=(const GpuShare&) = delete;
+
+  void setIdle() noexcept {
+    if (slot_ != nullptr) {
+      slot_->rendering.store(false);
+      slot_->costMs.store(0.0f);
+    }
+  }
+  void publish(float costMs) noexcept {
+    if (slot_ != nullptr) {
+      slot_->costMs.store(costMs);
+      slot_->rendering.store(true);
+    }
+  }
+
+  struct Others {
+    float costMs = 0.0f;
+    int sharers = 1; // rendering engines, the caller included
+  };
+  [[nodiscard]] Others others() const noexcept {
+    Others result;
+    for (const auto& slot : slots()) {
+      if (&slot != slot_ && slot.claimed.load() && slot.rendering.load()) {
+        result.costMs += slot.costMs.load();
+        ++result.sharers;
+      }
+    }
+    return result;
+  }
+
+private:
+  struct Slot {
+    std::atomic<bool> claimed{false};
+    std::atomic<bool> rendering{false};
+    std::atomic<float> costMs{0.0f};
+  };
+  static std::array<Slot, kSlots>& slots() noexcept {
+    static std::array<Slot, kSlots> table;
+    return table;
+  }
+
+  Slot* slot_ = nullptr;
+};
+
 // projectM calls this synchronously from inside a load call when it rejects
 // the preset; the render loop checks the flag right after the call.
 struct LoadFailureFlag {
   bool failed = false;
+  std::string message; // projectM's reason, for the recent-errors log (5.9)
 };
 
-void onPresetSwitchFailed(const char*, const char*, void* userData) {
-  static_cast<LoadFailureFlag*>(userData)->failed = true;
+void onPresetSwitchFailed(const char*, const char* message, void* userData) {
+  auto& flag = *static_cast<LoadFailureFlag*>(userData);
+  flag.failed = true;
+  flag.message = message != nullptr ? message : "";
+}
+
+// projectM's own log, error level only, registered per render thread (5.9):
+// shader compile errors and the like land in that engine's recent errors.
+void onProjectMLog(const char* message, int, void* userData) {
+  if (message != nullptr) {
+    static_cast<RecentErrors*>(userData)->add("projectM", message);
+  }
 }
 
 // Render-thread state for one layer: its projectM instance, the cursor it
@@ -155,7 +239,7 @@ private:
 
 std::unique_ptr<RenderEngine> RenderEngine::create(const core::AudioRing& audio, const Config& config,
                                                    const juce::File& bundleDirectoryHint) {
-  auto loaded = ProjectMLibrary::load(bundleDirectoryHint);
+  auto loaded = ProjectMLibrary::acquireShared(bundleDirectoryHint);
   std::unique_ptr<RenderEngine> engine(
       new RenderEngine(audio, config, std::move(loaded.library), std::move(loaded.unavailableReason)));
   if (engine->library_) {
@@ -165,7 +249,7 @@ std::unique_ptr<RenderEngine> RenderEngine::create(const core::AudioRing& audio,
 }
 
 RenderEngine::RenderEngine(const core::AudioRing& audio, const Config& config,
-                           std::unique_ptr<ProjectMLibrary> library, std::string unavailableReason)
+                           std::shared_ptr<const ProjectMLibrary> library, std::string unavailableReason)
     : config_(config), library_(std::move(library)), unavailableReason_(std::move(unavailableReason)),
       sampleRate_(config.sampleRate), primary_(audio, config.sampleRate) {}
 
@@ -375,6 +459,14 @@ void RenderEngine::run() {
     setUnavailable(error);
     return;
   }
+  // This thread's projectM log goes to this engine's recent errors. Per
+  // thread, so each plugin instance hears only its own instances (5.6/5.9).
+  library_->functions().setLogCallback(&onProjectMLog, /*currentThreadOnly=*/true, &errors_);
+  library_->functions().setLogLevel(static_cast<int>(ProjectMLogLevel::Error), /*currentThreadOnly=*/true);
+  struct LogUnregister {
+    const ProjectMFunctions& fn;
+    ~LogUnregister() { fn.setLogCallback(nullptr, true, nullptr); }
+  } logUnregister{library_->functions()};
   // The layers this thread renders. Exactly one for now, the primary one a
   // solo Visualizer drives; the loops below already run per layer.
   std::vector<std::unique_ptr<Layer>> layers;
@@ -444,6 +536,17 @@ void RenderEngine::run() {
   std::size_t lastIndex = 0;
   std::uint64_t frameNumber = 0;
 
+  // Adaptive quality (5.3): drives the FBO scale while `qualityScale_` is Auto.
+  core::AdaptiveQuality adaptive;
+  const float frameBudgetMs = 1000.0f / static_cast<float>(std::max(config_.fps, 1));
+  adaptive.setTargetFps(static_cast<float>(std::max(config_.fps, 1)));
+  bool wasAutoQuality = false;
+  auto lastFrameEnd = Clock::now();
+  // 5.6: this engine's part of the process-wide GPU load, and its own cost
+  // smoothed for the others to read (same time constant as AdaptiveQuality).
+  GpuShare gpuShare;
+  float sharedCostMs = 0.0f;
+
   while (!stopRequested_.load()) {
     context.pumpPlatformEvents();
     serviceShareRequest(context);
@@ -480,6 +583,8 @@ void RenderEngine::run() {
         stats.paused = true;
         stats.framesPerSecond = 0.0f;
         stats_.publish(stats);
+        gpuShare.setIdle();
+        sharedCostMs = 0.0f;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
       nextFrame = Clock::now();
@@ -503,7 +608,13 @@ void RenderEngine::run() {
       }
     }
 
-    const float scale = std::clamp(qualityScale_.load(), 0.25f, 1.0f);
+    const float requestedScale = qualityScale_.load();
+    const bool autoQuality = requestedScale <= 0.0f;
+    if (autoQuality && !wasAutoQuality) {
+      adaptive.reset(); // Auto chosen again: start from full scale
+    }
+    wasAutoQuality = autoQuality;
+    const float scale = autoQuality ? adaptive.scale() : std::clamp(requestedScale, 0.25f, 1.0f);
     const int width = std::clamp(static_cast<int>(std::lround(widest * scale)), 16, config_.maxDimension);
     const int height = std::clamp(static_cast<int>(std::lround(tallest * scale)), 16, config_.maxDimension);
     if (width != primary.instance->width() || height != primary.instance->height()) {
@@ -556,6 +667,10 @@ void RenderEngine::run() {
             if (layer->loadFailure.failed) {
               if (isPrimary) {
                 ++stats.presetsFailed;
+              }
+              // The director adds which file it was when it hears of the failure.
+              if (!layer->loadFailure.message.empty()) {
+                errors_.add("projectM", layer->loadFailure.message);
               }
               handoff.reportFailure(due.request.presetId);
             } else if (isPrimary) {
@@ -667,6 +782,26 @@ void RenderEngine::run() {
     stats.framesRendered = frameNumber;
     stats.cpuFrameMs = static_cast<float>(millisecondsBetween(renderStart, renderEnd));
     stats.gpuFrameMs = static_cast<float>(static_cast<double>(gpuNanoseconds) / 1.0e6);
+    // The time since the last frame, capped: after a pause or a stall the
+    // smoothing shouldn't treat one frame as seconds of evidence.
+    const auto dt = std::min(static_cast<float>(millisecondsBetween(lastFrameEnd, renderEnd) / 1000.0), 0.1f);
+    // Published whether or not this engine is in Auto: a fixed-quality
+    // instance still uses the GPU the others share.
+    const float costMs = stats.gpuFrameMs > 0.0f ? stats.gpuFrameMs : stats.cpuFrameMs;
+    sharedCostMs = sharedCostMs <= 0.0f ? costMs
+                                        : sharedCostMs + (costMs - sharedCostMs) *
+                                                             std::min(dt / adaptive.config().smoothingSeconds, 1.0f);
+    gpuShare.publish(sharedCostMs);
+    const auto others = gpuShare.others();
+    stats.gpuSharers = others.sharers;
+    if (autoQuality) {
+      adaptive.setTargetFps(1000.0f / core::AdaptiveQuality::sharedBudgetMs(frameBudgetMs, others.costMs,
+                                                                             others.sharers));
+      adaptive.onFrame(stats.gpuFrameMs, stats.cpuFrameMs, dt);
+    }
+    lastFrameEnd = renderEnd;
+    stats.qualityScale = scale;
+    stats.qualityAuto = autoQuality;
     stats.width = primary.instance->width();
     stats.height = primary.instance->height();
     stats_.publish(stats);

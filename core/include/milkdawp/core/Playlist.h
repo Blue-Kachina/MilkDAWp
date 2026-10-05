@@ -17,7 +17,11 @@ namespace milkdawp::core {
 struct PlaylistEntry {
   std::string absolutePath;
   std::string relativePath; // relative to the scanned root; used for stable ordering
-  float weight = 1.0f;      // for Weighted policy; ratings/tags (Phase 5.2) feed this later
+  float weight = 1.0f;      // Weighted policy: from the rating (5.2, PresetMetadata::weightFor)
+  /// 5.2: false for "never auto-select" and for presets outside the tag
+  /// filter. advanceNext/advancePrevious skip it; setCurrentIndex (a pick
+  /// by hand) doesn't. When no entry is eligible, all of them are.
+  bool autoSelect = true;
 };
 
 enum class PlaylistPolicy { Sequential, ShuffleNoRepeat, Weighted };
@@ -42,6 +46,8 @@ public:
   [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
   [[nodiscard]] bool empty() const noexcept { return entries_.empty(); }
   [[nodiscard]] const PlaylistEntry& at(std::size_t index) const;
+  /// Updates an entry's `weight` and `autoSelect` (5.2). Out-of-range: no-op.
+  void setSelectionInfo(std::size_t index, float weight, bool autoSelect);
 
   [[nodiscard]] std::size_t currentIndex() const noexcept { return currentIndex_; }
   /// Explicit selection (e.g. from the `presetIndex` parameter or the UI
@@ -72,6 +78,8 @@ public:
 
 private:
   [[nodiscard]] bool isInNoRepeatWindow(std::size_t index) const noexcept;
+  // autoSelect, or every entry when none has it.
+  [[nodiscard]] std::vector<bool> eligibility() const;
   void recordHistory(std::size_t index);
 
   std::vector<PlaylistEntry> entries_;

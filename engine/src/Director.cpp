@@ -58,7 +58,10 @@ core::TransitionSchedulerConfig schedulerConfigFor(const EngineControls& control
   config.jitterMaxSeconds = std::max(controls.jitterMinSeconds, controls.jitterMaxSeconds);
   config.cutStyle = controls.cutStyle;
   config.blendSeconds = std::max(controls.blendSeconds, 0.1f);
-  config.energyThresholdMultiplier = std::max(controls.energyThreshold, 0.0f);
+  // Energy Threshold keeps its 0.5-4 range (saved projects, automation) and
+  // maps to 5.5-16 dB of bass jump; the default 2 is SectionDetector's 10 dB.
+  // Below ~5 dB a steady kick (about 4.4 dB over its own average) would count.
+  config.section.jumpDb = 4.0f + 3.0f * std::clamp(controls.energyThreshold, 0.5f, 4.0f);
   return config;
 }
 
@@ -148,6 +151,31 @@ std::vector<std::string> Director::blacklistedPaths() const {
   return blacklistedPaths_;
 }
 
+void Director::setPresetMetadata(std::shared_ptr<PresetMetadataStore> store) {
+  const std::lock_guard lock(mutex_);
+  metadataStore_ = std::move(store);
+  ++selectionSerial_;
+}
+
+std::shared_ptr<PresetMetadataStore> Director::presetMetadata() const {
+  const std::lock_guard lock(mutex_);
+  return metadataStore_;
+}
+
+void Director::setTagFilter(const std::string& commaSeparatedTags) {
+  auto tags = core::PresetMetadata::parseTags(commaSeparatedTags);
+  const std::lock_guard lock(mutex_);
+  if (tags != tagFilter_) {
+    tagFilter_ = std::move(tags);
+    ++selectionSerial_;
+  }
+}
+
+std::string Director::tagFilter() const {
+  const std::lock_guard lock(mutex_);
+  return core::PresetMetadata::joinTags(tagFilter_);
+}
+
 void Director::run() {
   juce::Thread::setCurrentThreadName("MilkDAWp director");
 
@@ -170,6 +198,9 @@ void Director::run() {
   std::uint32_t seenPrevious = previousRequests_.load();
   std::uint32_t seenReissue = reissueRequests_.load();
   bool reissuePending = false; // kept until a handoff slot is free to send it through
+  std::uint64_t appliedSelectionSerial = 0;
+  std::uint64_t appliedMetadataGeneration = ~std::uint64_t{0};
+  std::uint64_t appliedSelectionPlaylist = ~std::uint64_t{0};
 
   bool haveLastTransport = false;
   core::TransportInfo lastTransport;
@@ -184,6 +215,8 @@ void Director::run() {
     }
     const auto fetched = loader.prefetch(juce::File(juce::String(entry.absolutePath)));
     if (!fetched.success) {
+      render_.errors().add("preset", juce::File(juce::String(entry.absolutePath)).getFileName().toStdString() +
+                                         " skipped: " + fetched.reason);
       ++status.presetsSkipped;
       return false;
     }
@@ -306,6 +339,8 @@ void Director::run() {
       ++status.playlistGeneration;
       status.playlistSize = playlist ? static_cast<std::uint32_t>(playlist->size()) : 0;
       status.currentIndex = -1;
+      status.autoSelectable = status.playlistSize; // until the selection pass below
+      status.tagFilterMatchesNothing = false;
       appliedPresetIndex = controls.presetIndex;
       if (playlist) {
         playlist->setPolicy(controls.policy);
@@ -325,6 +360,8 @@ void Director::run() {
     while (const auto failedId = render_.presetHandoff().popFailure()) {
       if (const auto path = library.pathFor(*failedId)) {
         loader.blacklist(*path, "projectM could not load this preset");
+        render_.errors().add("preset", juce::File(juce::String(*path)).getFileName().toStdString() +
+                                           " skipped: projectM could not load it");
         blacklistChanged = true;
       }
       ++status.presetsSkipped;
@@ -357,6 +394,37 @@ void Director::run() {
     if (blacklistChanged) {
       const std::lock_guard lock(mutex_);
       blacklistedPaths_ = loader.blacklistedPaths();
+    }
+
+    // Ratings, "never auto-select" and the tag filter (5.2), applied again
+    // whenever any of them or the playlist changes.
+    if (playlist) {
+      std::shared_ptr<PresetMetadataStore> store;
+      std::vector<std::string> filter;
+      std::uint64_t serial = 0;
+      {
+        const std::lock_guard lock(mutex_);
+        store = metadataStore_;
+        filter = tagFilter_;
+        serial = selectionSerial_;
+      }
+      const auto metadataGeneration = store ? store->generation() : 0;
+      if (serial != appliedSelectionSerial || metadataGeneration != appliedMetadataGeneration ||
+          status.playlistGeneration != appliedSelectionPlaylist) {
+        appliedSelectionSerial = serial;
+        appliedMetadataGeneration = metadataGeneration;
+        appliedSelectionPlaylist = status.playlistGeneration;
+        const auto metadata = store ? store->snapshot() : nullptr;
+        std::uint32_t selectable = 0;
+        for (std::size_t i = 0; i < playlist->size(); ++i) {
+          const auto info = metadata ? metadata->get(playlist->at(i).absolutePath) : core::PresetInfo{};
+          const bool autoSelect = !info.neverAutoSelect && core::PresetMetadata::matchesFilter(info, filter);
+          playlist->setSelectionInfo(i, core::PresetMetadata::weightFor(info), autoSelect);
+          selectable += autoSelect ? 1 : 0;
+        }
+        status.tagFilterMatchesNothing = selectable == 0 && !filter.empty();
+        status.autoSelectable = selectable == 0 ? static_cast<std::uint32_t>(playlist->size()) : selectable;
+      }
     }
 
     if (playlist) {
@@ -453,7 +521,7 @@ void Director::run() {
         haveLastTransport = true;
       }
 
-      const auto scheduled = pipeline->scheduler.tick(hopEnd, playing, discontinuity, beat, frame.broadbandRms,
+      const auto scheduled = pipeline->scheduler.tick(hopEnd, playing, discontinuity, beat, frame.bassEnergy,
                                                       bassOnset.has_value(), 0, 0);
       if (scheduled && playlist && !controls.locked) {
         step(true, scheduled->request.cutStyle, scheduled->request.blendSeconds, scheduled->request.dueAtSample);
@@ -464,6 +532,11 @@ void Director::run() {
       status.beatSource = hostDrives ? BeatSource::Host
                                      : (detected.confidence > 0.0f ? BeatSource::Detected : BeatSource::None);
       status.transportPlaying = playing;
+      const auto& section = pipeline->scheduler.lastSection();
+      status.bassLevelDb = section.levelDb;
+      status.bassReferenceDb = section.referenceDb;
+      status.inBreakdown = section.breakdown;
+      status.dropsDetected += section.drop ? 1 : 0;
     }
 
     status_.publish(status);

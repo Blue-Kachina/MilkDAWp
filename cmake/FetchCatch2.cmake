@@ -20,3 +20,10 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(catch2)
 
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
+
+# Test executables report debug-CRT asserts, abort() and crashes on stderr
+# instead of a modal dialog that stalls an unattended run (Windows only; the
+# source is empty elsewhere).
+function(milkdawp_test_no_crash_dialogs target)
+  target_sources(${target} PRIVATE "${PROJECT_SOURCE_DIR}/cmake/TestNoCrashDialogs.cpp")
+endfunction()

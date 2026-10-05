@@ -56,7 +56,7 @@ TransitionSettingsPanel::TransitionSettingsPanel() {
   }
 
   for (auto* slider : {&barsSlider, &timedDurationSlider, &jitterMinSlider, &jitterMaxSlider, &energyThresholdSlider,
-                       &blendSlider, &gridOffsetSlider}) {
+                       &blendSlider, &gridOffsetSlider, &reactivitySlider}) {
     styleSlider(*slider);
   }
   gridToggle.setTooltip("Cut on a fixed beat grid instead of counting bars from this instance's start. "
@@ -69,8 +69,10 @@ TransitionSettingsPanel::TransitionSettingsPanel() {
   barsSlider.setTooltip("Bars between beat-quantized transitions");
   timedDurationSlider.setTooltip("Seconds between timed transitions");
   jitterToggle.setTooltip("Pick each timed interval at random from the jitter range");
-  energyThresholdSlider.setTooltip("Energy mode: how far above the recent average (in standard deviations) "
-                                   "the level must jump to count as a drop");
+  energyThresholdSlider.setTooltip("Energy mode: how sharply the bass must come back after a breakdown to count "
+                                   "as a drop (hard cut). Higher: only the biggest drops");
+  reactivitySlider.setTooltip("How strongly the visuals react to the music (projectM's beat sensitivity): "
+                              "0 calm, 1 normal, 2 twice as jumpy. It doesn't change when transitions happen");
   hardCutToggle.setTooltip("Cut instantly instead of blending");
   blendSlider.setTooltip("Seconds a soft cut blends over");
 
@@ -83,6 +85,32 @@ TransitionSettingsPanel::TransitionSettingsPanel() {
   addRow(jitterMaxRow, "Max (s)", jitterMaxSlider);
   addAndMakeVisible(hardCutToggle);
   addRow(blendRow, "Blend (s)", blendSlider);
+  addRow(reactivityRow, "Reactivity", reactivitySlider);
+
+  tagFilterEditor.setTextToShowWhenEmpty("any preset", juce::Colours::white.withAlpha(0.45f));
+  tagFilterEditor.setTooltip("Transitions, shuffle and next/previous only pick presets with one of these tags "
+                             "(comma-separated). Tag a preset from the preset menu. Picking a preset by hand always "
+                             "works");
+  tagFilterEditor.setColour(juce::TextEditor::backgroundColourId, juce::Colours::white.withAlpha(0.1f));
+  tagFilterEditor.setColour(juce::TextEditor::textColourId, juce::Colours::white);
+  tagFilterEditor.setColour(juce::TextEditor::outlineColourId, juce::Colours::white.withAlpha(0.25f));
+  tagFilterEditor.setIndents(4, 4);
+  // Applied as typed: the director reapplies it within a tick.
+  tagFilterEditor.onTextChange = [this] {
+    if (onTagFilterChanged) {
+      onTagFilterChanged(tagFilterEditor.getText());
+    }
+  };
+  tagFilterEditor.onEscapeKey = [this] {
+    if (onCloseRequested) {
+      onCloseRequested();
+    }
+  };
+  addRow(tagsRow, "Only tags", tagFilterEditor);
+  tagFilterStatus.setJustificationType(juce::Justification::centredRight);
+  tagFilterStatus.setFont(juce::FontOptions(12.0f));
+  addAndMakeVisible(tagFilterStatus);
+  setTagFilterStatus({}, false);
 
   for (auto* toggle : {&jitterToggle, &hardCutToggle}) {
     toggle->setColour(juce::ToggleButton::textColourId, juce::Colours::white);
@@ -178,6 +206,7 @@ void TransitionSettingsPanel::resized() {
     auto line = left.removeFromTop(rowHeight);
     gridToggle.setBounds(line.removeFromLeft(line.getWidth() * 45 / 100));
     gridOffsetSlider.setBounds(line);
+    left.removeFromTop(gap);
   }
 
   placeToggle(right, jitterToggle);
@@ -185,6 +214,42 @@ void TransitionSettingsPanel::resized() {
   place(right, jitterMaxRow);
   placeToggle(right, hardCutToggle);
   place(right, blendRow);
+  place(left, reactivityRow);
+
+  // Full width, under both columns.
+  auto line = area.withTop(std::max(left.getY(), right.getY())).removeFromTop(rowHeight);
+  line.setX(getLocalBounds().reduced(8, 6).getX());
+  line.setRight(getLocalBounds().reduced(8, 6).getRight());
+  tagsRow.label.setBounds(line.removeFromLeft(labelWidth));
+  tagFilterStatus.setBounds(line.removeFromRight(150));
+  tagFilterEditor.setBounds(line.withTrimmedRight(gap));
+}
+
+void TransitionSettingsPanel::setTagFilterStatus(const juce::String& text, bool warning) {
+  tagFilterStatus.setText(text, juce::dontSendNotification);
+  tagFilterStatus.setColour(juce::Label::textColourId,
+                            warning ? juce::Colour(0xffffb347) : juce::Colours::white.withAlpha(0.6f));
+}
+
+AutoSelectionStatus describeAutoSelection(std::uint32_t autoSelectable, std::uint32_t playlistSize,
+                                          bool filterMatchesNothing) {
+  if (playlistSize == 0) {
+    return {};
+  }
+  if (filterMatchesNothing) {
+    return {"no preset has these tags", true};
+  }
+  if (autoSelectable >= playlistSize) {
+    return {"all " + juce::String(playlistSize) + " presets", false};
+  }
+  return {juce::String(autoSelectable) + " of " + juce::String(playlistSize) + " presets", false};
+}
+
+juce::String describeRenderQuality(float scale, bool automatic) {
+  if (!(scale < 0.995f)) {
+    return {};
+  }
+  return "render " + juce::String(juce::roundToInt(scale * 100.0f)) + "%" + (automatic ? "" : " (fixed)");
 }
 
 BeatBadge describeBeat(BeatBadgeSource source, float bpm, float confidence) {

@@ -28,6 +28,7 @@ fixtures/
 └── <clip-name>/
     ├── audio.wav          # mono or stereo, any sample rate (mdw-analyze resamples)
     ├── beats.txt           # one beat time in seconds per line, ascending
+    ├── drops.txt           # optional: the drops Energy mode must cut on (5.1)
     └── SOURCE.md            # where this clip came from and its licence
 ```
 
@@ -45,6 +46,23 @@ Plain text, one beat time in seconds per line, ascending, `\n`-terminated:
 Downbeats are not marked separately in 1.0 -- see §4.3's downbeat heuristic
 in `development_roadmap.md`; a `downbeats.txt` in the same format may be
 added later without changing this schema.
+
+## `drops.txt` format
+
+The same format as `beats.txt`: the times where the bass comes back after a
+breakdown or build-up, where Energy mode should hard-cut (5.1,
+`core::SectionDetector`). `mdw-analyze --suite` requires each one to be found
+within `dropToleranceSeconds` and nothing else to be called a drop. A fixture
+without the file has no drops, so the steady fixtures also check that steady
+music never cuts.
+
+## Regenerating
+
+`tools/generate-fixtures <fixturesDir>` writes the synthesized fixtures. The
+random parts (kick transients, noise) come from `std::uniform_real_distribution`,
+whose output differs between standard libraries, so a run with another compiler
+gives slightly different `audio.wav` bytes (the beats are the same). Write to a
+scratch folder and copy in only the fixtures you mean to change.
 
 ## Adding a fixture
 

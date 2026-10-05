@@ -23,6 +23,12 @@ add_library(milkdawp_ui STATIC
   src/DrawerLookAndFeel.cpp
   include/milkdawp/ui/PresetMenu.h
   src/PresetMenu.cpp
+  include/milkdawp/ui/PresetInfoMenu.h
+  src/PresetInfoMenu.cpp
+  include/milkdawp/ui/KeyboardNavigation.h
+  src/KeyboardNavigation.cpp
+  include/milkdawp/ui/DiagnosticsPanel.h
+  src/DiagnosticsPanel.cpp
 )
 
 target_include_directories(milkdawp_ui PUBLIC

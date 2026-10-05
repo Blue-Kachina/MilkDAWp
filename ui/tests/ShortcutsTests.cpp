@@ -59,3 +59,15 @@ TEST_CASE("mapKeyPress accepts lower-case letter codes", "[ui][Shortcuts]") {
   CHECK(mapKeyPress(plainKey('p'), false) == ShortcutAction::TogglePin);
   CHECK(mapKeyPress(modifiedKey('l', juce::ModifierKeys::ctrlModifier), false) == ShortcutAction::None);
 }
+
+TEST_CASE("mapKeyPress maps B/M/D to the picker, settings menu and diagnostics (5.8)", "[ui][Shortcuts]") {
+  for (const bool app : {false, true}) {
+    CHECK(mapKeyPress(plainKey('B'), app) == ShortcutAction::BrowsePresets);
+    CHECK(mapKeyPress(plainKey('m'), app) == ShortcutAction::OpenSettingsMenu);
+    CHECK(mapKeyPress(plainKey('D'), app) == ShortcutAction::ToggleDiagnostics);
+  }
+  // Ctrl+D, Cmd+M and the like belong to the host or the OS.
+  CHECK(mapKeyPress(modifiedKey('D', juce::ModifierKeys::ctrlModifier), false) == ShortcutAction::None);
+  CHECK(mapKeyPress(modifiedKey('M', juce::ModifierKeys::commandModifier), false) == ShortcutAction::None);
+  CHECK(mapKeyPress(modifiedKey('B', juce::ModifierKeys::altModifier), true) == ShortcutAction::None);
+}

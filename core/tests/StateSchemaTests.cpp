@@ -163,6 +163,13 @@ TEST_CASE("StateSchemaV2 round-trips the instance identity and Output target (La
   CHECK(roundTripped.windows.outputTargetInstance == original.windows.outputTargetInstance);
 }
 
+TEST_CASE("StateSchemaV2 round-trips the tag filter, and older states have none (5.2)", "[core][StateSchema]") {
+  StateSchemaV2 original;
+  original.tagFilter = "calm, dark";
+  CHECK(deserializeStateSchemaV2(serializeStateSchemaV2(original)).tagFilter == "calm, dark");
+  CHECK(deserializeStateSchemaV2("schemaVersion=2\n").tagFilter.empty());
+}
+
 TEST_CASE("StateSchemaV2 keeps a label with a line break from corrupting the lines after it", "[core][StateSchema]") {
   StateSchemaV2 original;
   original.instanceLabel = "Lead\nsynth\r\nbus";

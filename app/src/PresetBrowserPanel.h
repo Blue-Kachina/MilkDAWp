@@ -11,6 +11,7 @@
 
 #include <juce_gui_extra/juce_gui_extra.h>
 
+#include "milkdawp/ui/PresetInfoMenu.h"
 #include "milkdawp/ui/PresetMenu.h"
 
 namespace milkdawp::app {
@@ -38,6 +39,8 @@ public:
     std::function<void(int)> onPick;
     std::function<void(const std::string&, bool)> onSetFavourite;
     std::function<void(const std::string&, bool)> onSetBlacklisted;
+    /// 5.2: rating, never-auto-select and tags for one preset (by path).
+    std::function<ui::PresetInfoAccess(const std::string&)> presetInfo;
   };
 
   explicit PresetBrowserPanel(Callbacks callbacks);

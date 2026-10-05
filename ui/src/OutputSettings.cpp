@@ -188,12 +188,13 @@ OutputSettingsPanel::OutputSettingsPanel() {
   addAndMakeVisible(fullscreenToggle);
 
   screenLabel.setText("Screen", juce::dontSendNotification);
+  screenLabel.setTooltip("Click a screen below, or press its number");
   screenLabel.setColour(juce::Label::textColourId, juce::Colours::white);
   screenLabel.setJustificationType(juce::Justification::centredLeft);
   addChildComponent(screenLabel);
 
   automaticToggle.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
-  automaticToggle.setTooltip("Open where the window was last, or on the main screen");
+  automaticToggle.setTooltip("Open where the window was last, or on the main screen (A)");
   automaticToggle.setClickingTogglesState(false);
   automaticToggle.onClick = [this] {
     target_ = {};
@@ -576,8 +577,31 @@ void OutputSettingsPanel::mouseMove(const juce::MouseEvent& event) { setHovered(
 
 void OutputSettingsPanel::mouseExit(const juce::MouseEvent&) { setHovered(-1); }
 
-void OutputSettingsPanel::mouseUp(const juce::MouseEvent& event) {
-  const auto tile = tileAt(event.getPosition());
+void OutputSettingsPanel::mouseUp(const juce::MouseEvent& event) { chooseDisplay(tileAt(event.getPosition())); }
+
+bool OutputSettingsPanel::keyPressed(const juce::KeyPress& key) {
+  // Reached with focus on any of the panel's widgets that doesn't use the key
+  // itself (a text field keeps its digits).
+  if (!hasPicker() || key.getModifiers().isAnyModifierKeyDown()) {
+    return false;
+  }
+  const auto character = juce::CharacterFunctions::toUpperCase(key.getTextCharacter());
+  if (character >= '1' && character <= '9') {
+    const int tile = static_cast<int>(character - '1');
+    if (tile < static_cast<int>(displays_.size())) {
+      chooseDisplay(tile);
+      return true;
+    }
+    return false;
+  }
+  if (character == 'A' && !automaticToggle.getToggleState()) {
+    automaticToggle.triggerClick();
+    return true;
+  }
+  return false;
+}
+
+void OutputSettingsPanel::chooseDisplay(int tile) {
   if (tile < 0 || tile >= static_cast<int>(displays_.size())) {
     return;
   }

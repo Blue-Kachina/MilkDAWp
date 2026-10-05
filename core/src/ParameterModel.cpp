@@ -11,6 +11,10 @@ namespace milkdawp::core {
 const std::vector<ParameterSpec>& allParameters() {
   static const std::vector<ParameterSpec> params = {
       // --- Carried forward from v1 unchanged (§2.9) ---
+      // 5.5: projectM's own beat sensitivity: how strongly presets react to the
+      // bass/mid/treble levels they animate from. It detects no beats and causes
+      // no transitions; our detector's threshold is deliberately not tied to it
+      // (scaling it broke beat tracking on the fixtures; see the roadmap's 5.5).
       {"beatSensitivity", "Beat Sensitivity", ParameterType::Float, 0.0f, 2.0f, 1.0f, true,
        "beatSensitivity", {}},
       {"transitionDurationSeconds", "Transition Duration (s)", ParameterType::Float, 0.1f, 30.0f, 5.0f,
@@ -43,9 +47,9 @@ const std::vector<ParameterSpec>& allParameters() {
       {"transitionBars", "Transition Bars (N)", ParameterType::Int, 1.0f, 16.0f, 4.0f, true, "", {}},
       {"presetSelectionPolicy", "Preset Selection", ParameterType::Choice, 0.0f, 2.0f, 0.0f, true, "",
        {"Sequential", "ShuffleNoRepeat", "Weighted"}},
-      // Energy mode: a drop is broadband energy this many standard deviations
-      // above the rolling mean (TransitionSchedulerConfig::energyThresholdMultiplier).
-      {"energyThreshold", "Energy Threshold (sd)", ParameterType::Float, 0.5f, 4.0f, 2.0f, true, "", {}},
+      // Energy mode: how far the bass must jump back up after a breakdown to count
+      // as a drop: 4 + 3 x this in dB (SectionDetectorConfig::jumpDb, set in Director.cpp).
+      {"energyThreshold", "Energy Threshold", ParameterType::Float, 0.5f, 4.0f, 2.0f, true, "", {}},
       // Off: the audio-detected tempo always drives the beat modes, even while the host plays
       // (no click, or a host tempo that doesn't match the music). On: the host's beat grid wins.
       {"useHostTempo", "BPM From DAW", ParameterType::Bool, 0.0f, 1.0f, 0.0f, true, "", {}},

@@ -3,6 +3,7 @@
 
 #include "milkdawp/engine/ProjectMLibrary.h"
 
+#include <mutex>
 #include <string>
 
 namespace milkdawp::engine {
@@ -133,6 +134,28 @@ ProjectMLibrary::LoadResult ProjectMLibrary::load(const juce::File& bundleDirect
   }
 
   result.library = std::move(instance);
+  return result;
+}
+
+ProjectMLibrary::SharedLoadResult ProjectMLibrary::acquireShared(const juce::File& bundleDirectoryHint) {
+  // The weak_ptr owns nothing: the library lives exactly as long as the
+  // engines holding it.
+  static std::mutex mutex;
+  static std::weak_ptr<const ProjectMLibrary> shared;
+
+  const std::lock_guard lock(mutex);
+  SharedLoadResult result;
+  if (auto existing = shared.lock()) {
+    result.library = std::move(existing);
+    return result;
+  }
+  auto loaded = load(bundleDirectoryHint);
+  if (!loaded.isAvailable()) {
+    result.unavailableReason = std::move(loaded.unavailableReason);
+    return result;
+  }
+  result.library = std::shared_ptr<const ProjectMLibrary>(std::move(loaded.library));
+  shared = result.library;
   return result;
 }
 

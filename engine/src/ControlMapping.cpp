@@ -55,8 +55,10 @@ float qualityScaleFor(int choice) noexcept {
     return 0.5f;
   case 2:
     return 0.75f;
-  default:
+  case 3:
     return 1.0f;
+  default:
+    return 0.0f; // Auto
   }
 }
 

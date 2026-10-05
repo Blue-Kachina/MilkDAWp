@@ -6,7 +6,10 @@
 #include <algorithm>
 #include <utility>
 
+#include "milkdawp/core/ParameterModel.h"
+#include "milkdawp/core/Version.h"
 #include "milkdawp/ui/Icons.h"
+#include "milkdawp/ui/PresetInfoMenu.h"
 #include "milkdawp/ui/PresetMenu.h"
 #include "milkdawp/ui/Shortcuts.h"
 
@@ -21,16 +24,14 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
       controlDrawer(milkdawp::ui::DrawerStateMachine::Config{.startPinned = true}) {
   addAndMakeVisible(outputSurface);
 
-  diagnosticsLabel.setJustificationType(juce::Justification::topLeft);
-  diagnosticsLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-  diagnosticsLabel.setColour(juce::Label::backgroundColourId, juce::Colours::black.withAlpha(0.5f));
   // Must be a child of outputSurface, not a sibling: JUCE only composites a
   // GL-attached component's own paint() (and its children's) over the GL
   // content each frame. A sibling Component added at the editor level gets
   // drawn first and then overwritten by the GL surface's buffer swap --
   // exactly the "overlapping sibling peer" risk §4.11 flagged for the
   // drawer, hit here for real on Windows.
-  outputSurface.addAndMakeVisible(diagnosticsLabel);
+  outputSurface.addChildComponent(diagnosticsPanel);
+  diagnosticsPanel.onCloseRequested = [this] { setDiagnosticsVisible(false); };
   // Same rule as above: a child of outputSurface, or the GL buffer swap paints over it.
   sendingLabel.setJustificationType(juce::Justification::centred);
   sendingLabel.setColour(juce::Label::textColourId, juce::Colours::white);
@@ -71,7 +72,8 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
                             {"transitionDurationMin", &transitionSettings.jitterMinSlider},
                             {"transitionDurationMax", &transitionSettings.jitterMaxSlider},
                             {"energyThreshold", &transitionSettings.energyThresholdSlider},
-                            {"softCutDuration", &transitionSettings.blendSlider}}) {
+                            {"softCutDuration", &transitionSettings.blendSlider},
+                            {"beatSensitivity", &transitionSettings.reactivitySlider}}) {
     transitionSliderAttachments_.push_back(std::make_unique<SliderAttachment>(apvts, id, *slider));
   }
   transitionButtonAttachments_.push_back(
@@ -83,6 +85,12 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
   transitionSliderAttachments_.push_back(
       std::make_unique<SliderAttachment>(apvts, "transitionGridOffset", transitionSettings.gridOffsetSlider));
   transitionSettings.refreshRelevance();
+  // 5.2: the tag filter lives in the director (saved with the plugin state).
+  transitionSettings.tagFilterEditor.setText(juce::String(processor.visualizer().director().tagFilter()),
+                                             juce::dontSendNotification);
+  transitionSettings.onTagFilterChanged = [this](const juce::String& text) {
+    processorRef.visualizer().director().setTagFilter(text.toStdString());
+  };
 
   // Settings -> Output, same compositing rules as the transition popover.
   outputSurface.addChildComponent(outputSettings);
@@ -149,8 +157,7 @@ MilkDAWpAudioProcessorEditor::~MilkDAWpAudioProcessorEditor() {
 
 void MilkDAWpAudioProcessorEditor::resized() {
   outputSurface.setBounds(getLocalBounds());
-  // Relative to outputSurface's own local bounds now that it's the parent.
-  diagnosticsLabel.setBounds(outputSurface.getLocalBounds().removeFromTop(80).reduced(8));
+  layoutDiagnostics();
   sendingLabel.setBounds(outputSurface.getLocalBounds()
                              .withTrimmedBottom(kDrawerHeight)
                              .withSizeKeepingCentre(std::min(getWidth() - 16, 360), 56));
@@ -196,6 +203,7 @@ void MilkDAWpAudioProcessorEditor::setControlsFloating(bool floating) {
     outputSurface.addAndMakeVisible(controlDrawer);
     transitionSettings.toFront(false); // the popover stays above the drawer
     outputSettings.toFront(false);
+    milkdawp::ui::focusFirstControl(outputSettings); // 5.8: Tab through it, Esc closes
     grabKeyboardFocus();
   }
   resized();
@@ -219,6 +227,40 @@ void MilkDAWpAudioProcessorEditor::layoutOutputSettings() {
   const auto width = std::min(milkdawp::ui::OutputSettingsPanel::preferredWidth, area.getWidth());
   const auto height = std::min(outputSettings.preferredHeight(), area.getHeight());
   outputSettings.setBounds(area.removeFromBottom(height).removeFromRight(width));
+}
+
+void MilkDAWpAudioProcessorEditor::setDiagnosticsVisible(bool visible) {
+  if (visible) {
+    diagnosticsPanel.update(diagnosticsInfo());
+    layoutDiagnostics();
+  }
+  diagnosticsPanel.setVisible(visible);
+  if (visible) {
+    milkdawp::ui::focusFirstControl(diagnosticsPanel); // 5.8: Copy is one Space away
+  } else {
+    grabKeyboardFocus();
+  }
+}
+
+void MilkDAWpAudioProcessorEditor::layoutDiagnostics() {
+  // Top left, over the picture; the popovers sit bottom right, above the drawer.
+  const int drawerHeight = controlsWindow_ != nullptr ? 0 : milkdawp::ui::ControlDrawer::controlsHeight;
+  auto area = outputSurface.getLocalBounds().withTrimmedBottom(drawerHeight).reduced(8);
+  diagnosticsPanel.setBounds(area.removeFromTop(std::min(diagnosticsPanel.preferredHeight(), area.getHeight()))
+                                 .removeFromLeft(std::min(760, area.getWidth())));
+}
+
+core::DiagnosticsInfo MilkDAWpAudioProcessorEditor::diagnosticsInfo() {
+  auto info = processorRef.visualizer().diagnostics();
+  info.shell = juce::String(JucePlugin_Name " " + juce::String(core::versionString()) + " (" +
+                            juce::AudioProcessor::getWrapperTypeDescription(processorRef.wrapperType) + " in " +
+                            juce::PluginHostType().getHostDescription() + ")")
+                   .toStdString();
+  info.surface = ((outputSurface.isSharingWorking() ? juce::String("shared context")
+                                                     : juce::String("readback (no shared context)")) +
+                  ", context created x" + juce::String(outputSurface.contextCreationCount()))
+                     .toStdString();
+  return info;
 }
 
 void MilkDAWpAudioProcessorEditor::refreshOutputSettingsInstances() {
@@ -250,6 +292,7 @@ void MilkDAWpAudioProcessorEditor::setOutputSettingsVisible(bool visible) {
   outputSettings.setVisible(visible);
   if (visible) {
     outputSettings.toFront(false);
+    milkdawp::ui::focusFirstControl(outputSettings); // 5.8: Tab through it, Esc closes
     controlDrawer.reveal();
   } else {
     grabKeyboardFocus(); // the panel's widgets may have taken it; shortcuts need it back
@@ -264,6 +307,7 @@ void MilkDAWpAudioProcessorEditor::setTransitionSettingsVisible(bool visible) {
   if (visible) {
     transitionSettings.refreshRelevance();
     controlDrawer.reveal();
+    milkdawp::ui::focusFirstControl(transitionSettings); // 5.8: Tab through it, Esc closes
   } else {
     grabKeyboardFocus(); // the panel's widgets may have taken it; shortcuts need it back
   }
@@ -286,6 +330,8 @@ bool MilkDAWpAudioProcessorEditor::keyPressed(const juce::KeyPress& key) {
       setOutputSettingsVisible(false); // Esc closes the popover first
     } else if (transitionSettings.isVisible()) {
       setTransitionSettingsVisible(false);
+    } else if (diagnosticsPanel.isVisible()) {
+      setDiagnosticsVisible(false);
     } else {
       controlDrawer.reveal();
     }
@@ -316,6 +362,17 @@ bool MilkDAWpAudioProcessorEditor::keyPressed(const juce::KeyPress& key) {
     // A host-framed editor cannot go fullscreen itself: F11 opens (or
     // toggles) the Output window fullscreen instead (§4.9).
     processorRef.toggleOutputFullscreen();
+    return true;
+  case ShortcutAction::BrowsePresets:
+    controlDrawer.reveal();
+    showPresetPicker();
+    return true;
+  case ShortcutAction::OpenSettingsMenu:
+    controlDrawer.reveal();
+    showSettingsMenu();
+    return true;
+  case ShortcutAction::ToggleDiagnostics:
+    setDiagnosticsVisible(!diagnosticsPanel.isVisible());
     return true;
   case ShortcutAction::None:
   default:
@@ -362,8 +419,26 @@ void MilkDAWpAudioProcessorEditor::showSettingsMenu() {
       param->endChangeGesture();
     }
   });
-  menu.addItem("Show diagnostics", true, diagnosticsLabel.isVisible(),
-               [this] { diagnosticsLabel.setVisible(!diagnosticsLabel.isVisible()); });
+  // 5.3: Auto adapts the render scale to the GPU; the others fix it.
+  if (const auto* spec = milkdawp::core::findParameter(milkdawp::core::allParameters(), "qualityOverride")) {
+    juce::PopupMenu quality;
+    const auto current = static_cast<int>(processorRef.apvts.getRawParameterValue("qualityOverride")->load());
+    for (int i = 0; i < static_cast<int>(spec->choices.size()); ++i) {
+      quality.addItem(juce::String(spec->choices[static_cast<std::size_t>(i)]), true, i == current, [this, i] {
+        if (auto* param = processorRef.apvts.getParameter("qualityOverride")) {
+          param->beginChangeGesture();
+          param->setValueNotifyingHost(param->convertTo0to1(static_cast<float>(i)));
+          param->endChangeGesture();
+        }
+      });
+    }
+    menu.addSubMenu("Quality", quality);
+  }
+  juce::PopupMenu::Item diagnostics("Show diagnostics");
+  diagnostics.setTicked(diagnosticsPanel.isVisible());
+  diagnostics.shortcutKeyDescription = "D";
+  diagnostics.setAction([this] { setDiagnosticsVisible(!diagnosticsPanel.isVisible()); });
+  menu.addItem(std::move(diagnostics));
   menu.setLookAndFeel(&controlDrawer.getLookAndFeel());
   menu.showMenuAsync(milkdawp::ui::DrawerLookAndFeel::menuOptions(controlDrawer.settingsMenuAnchor()));
 }
@@ -387,6 +462,19 @@ void MilkDAWpAudioProcessorEditor::showPresetPicker() {
   rescan.setEnabled(!folder.empty());
   rescan.setAction([this] { processorRef.visualizer().director().rescan(); });
   menu.addItem(std::move(rescan));
+
+  // 5.2: rate / tag / exclude the preset that is playing.
+  if (const auto index = director.status().currentIndex; index >= 0) {
+    if (auto store = director.presetMetadata()) {
+      const auto path = director.presetPath(index);
+      const milkdawp::ui::PresetInfoAccess access{
+          [store, path] { return store->get(path); },
+          [store, path](const milkdawp::core::PresetInfo& info) { store->set(path, info); },
+          [store] { return store->allTags(); }};
+      milkdawp::ui::addPresetInfoSection(
+          menu, juce::String(milkdawp::ui::splitPresetName(director.presetName(index)).leaf), access, this);
+    }
+  }
 
   if (const auto names = director.presetNames(); !names.empty()) {
     menu.addSeparator();
@@ -417,23 +505,18 @@ void MilkDAWpAudioProcessorEditor::timerCallback() {
   const auto stats = engine.stats();
   const auto status = visualizer.director().status();
 
-  if (diagnosticsLabel.isVisible()) {
-    juce::String text;
-    if (engine.isAvailable()) {
-      text << "projectM " << engine.projectMVersion() << ": " << juce::String(stats.framesPerSecond, 1) << " fps, "
-           << stats.width << "x" << stats.height << ", render " << juce::String(stats.cpuFrameMs, 1) << " ms (gpu "
-           << juce::String(stats.gpuFrameMs, 1) << " ms), last preset load "
-           << juce::String(stats.lastPresetLoadMs, 1) << " ms\n";
-    } else {
-      const auto reason = engine.unavailableReason();
-      text << "projectM: "
-           << (reason.empty() ? juce::String("starting...") : juce::String("unavailable (" + reason + ")")) << "\n";
+  if (diagnosticsPanel.isVisible()) {
+    const int before = diagnosticsPanel.preferredHeight();
+    diagnosticsPanel.update(diagnosticsInfo());
+    if (diagnosticsPanel.preferredHeight() != before) {
+      layoutDiagnostics();
     }
-    text << "presets: " << juce::String(status.playlistSize) << " in folder, " << juce::String(stats.presetsLoaded) << " loaded, "
-         << juce::String(status.presetsSkipped) << " skipped; surface " << (outputSurface.isSharingWorking() ? "shared" : "readback (no shared context)")
-         << " (context x" << outputSurface.contextCreationCount() << ")\n";
-    text << engine.glDescription();
-    diagnosticsLabel.setText(text, juce::dontSendNotification);
+  }
+
+  if (transitionSettings.isVisible()) {
+    const auto tagStatus = milkdawp::ui::describeAutoSelection(status.autoSelectable, status.playlistSize,
+                                                               status.tagFilterMatchesNothing);
+    transitionSettings.setTagFilterStatus(tagStatus.text, tagStatus.warning);
   }
 
   if (status.playlistSize == 0) {
@@ -446,6 +529,10 @@ void MilkDAWpAudioProcessorEditor::timerCallback() {
       detail << juce::String(parts.folder) << juce::String(juce::CharPointer_UTF8(" \xc2\xb7 "));
     }
     detail << juce::String(status.currentIndex + 1) << " / " << juce::String(status.playlistSize);
+    if (const auto quality = milkdawp::ui::describeRenderQuality(stats.qualityScale, stats.qualityAuto);
+        quality.isNotEmpty()) {
+      detail << juce::String(juce::CharPointer_UTF8(" \xc2\xb7 ")) << quality; // 5.3
+    }
     controlDrawer.setPresetInfo(juce::String(parts.leaf), detail, juce::String(fullName));
   }
 

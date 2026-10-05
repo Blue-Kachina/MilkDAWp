@@ -13,6 +13,7 @@
 #include "milkdawp/engine/OutputSurface.h"
 #include "milkdawp/ui/ControlDrawer.h"
 #include "milkdawp/ui/DetachedControlsWindow.h"
+#include "milkdawp/ui/DiagnosticsPanel.h"
 #include "milkdawp/ui/OutputSettings.h"
 #include "milkdawp/ui/TransitionSettings.h"
 
@@ -20,7 +21,7 @@ namespace milkdawp::plugin {
 
 /// Phase 3.3: the whole editor is `engine::OutputSurface` (§4.5) with
 /// `ui::ControlDrawer` (§4.9) composited as its child -- never a sibling,
-/// the same GL-compositing rule the diagnostics label below already
+/// the same GL-compositing rule the diagnostics panel below already
 /// exercises (§2.3's spike finding, §4.11) -- pinned by default per §4.9's
 /// plugin-editor rule. Drawer widgets bind to real `apvts` parameters here
 /// rather than inside `milkdawp_ui`, keeping that module decoupled from
@@ -59,6 +60,9 @@ private:
   /// popover slot with the transition settings, so only one shows at a time.
   void setOutputSettingsVisible(bool visible);
   void layoutOutputSettings();
+  void setDiagnosticsVisible(bool visible);
+  void layoutDiagnostics();
+  [[nodiscard]] core::DiagnosticsInfo diagnosticsInfo();
   /// Hands the panel the Layers state (other instances, this one's target and name).
   void refreshOutputSettingsInstances();
   /// Phase 3.13: moves `controlDrawer` into its own window, or back.
@@ -70,7 +74,8 @@ private:
 
   MilkDAWpAudioProcessor& processorRef;
   engine::OutputSurface outputSurface;
-  juce::Label diagnosticsLabel;
+  /// 5.9: Settings > Show diagnostics. Hidden until asked for.
+  milkdawp::ui::DiagnosticsPanel diagnosticsPanel;
   /// Shown instead of a (frozen) picture while this instance's picture is part
   /// of another instance's canvas.
   juce::Label sendingLabel;

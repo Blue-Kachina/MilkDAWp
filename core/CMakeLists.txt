@@ -8,6 +8,8 @@ add_library(milkdawp_core STATIC
   src/Fft.cpp
   include/milkdawp/core/Resample.h
   src/Resample.cpp
+  include/milkdawp/core/AdaptiveQuality.h
+  src/AdaptiveQuality.cpp
   include/milkdawp/core/Analyzer.h
   src/Analyzer.cpp
   include/milkdawp/core/OnsetDetector.h
@@ -23,7 +25,11 @@ add_library(milkdawp_core STATIC
   include/milkdawp/core/Playlist.h
   src/Playlist.cpp
   include/milkdawp/core/PresetLibrary.h
+  include/milkdawp/core/PresetMetadata.h
+  src/PresetMetadata.cpp
   src/PresetLibrary.cpp
+  include/milkdawp/core/SectionDetector.h
+  src/SectionDetector.cpp
   include/milkdawp/core/TransitionScheduler.h
   src/TransitionScheduler.cpp
   include/milkdawp/core/StateSchema.h
@@ -35,6 +41,7 @@ add_library(milkdawp_core STATIC
   include/milkdawp/core/Scoring.h
   src/Scoring.cpp
   include/milkdawp/core/SeqlockSnapshot.h
+  include/milkdawp/core/Diagnostics.h
 )
 
 target_include_directories(milkdawp_core PUBLIC

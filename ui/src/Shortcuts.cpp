@@ -42,6 +42,12 @@ ShortcutAction mapKeyPress(const juce::KeyPress& key, bool isAppShell) noexcept 
       return ShortcutAction::ToggleDrawer;
     case 'P':
       return ShortcutAction::TogglePin;
+    case 'B':
+      return ShortcutAction::BrowsePresets;
+    case 'M':
+      return ShortcutAction::OpenSettingsMenu;
+    case 'D':
+      return ShortcutAction::ToggleDiagnostics;
     default:
       break;
     }

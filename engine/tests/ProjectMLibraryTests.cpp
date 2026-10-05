@@ -92,3 +92,41 @@ TEST_CASE("ProjectMLibrary accepts 4.2 and later 4.x only (D15)", "[engine][Proj
   CHECK_FALSE(ProjectMLibrary::isSupportedVersion({5, 0}));
   CHECK_FALSE(ProjectMLibrary::isSupportedVersion({-1, -1}));
 }
+
+TEST_CASE("ProjectMLibrary::acquireShared hands every caller the same library while any holder lives (5.6)",
+          "[engine][ProjectMLibrary]") {
+  auto first = ProjectMLibrary::acquireShared();
+  if (!first.isAvailable()) {
+    CHECK_FALSE(first.unavailableReason.empty());
+    return;
+  }
+  CHECK(first.unavailableReason.empty());
+  // A second plugin instance gets the same copy and function table, whatever
+  // hint it passes.
+  const auto second = ProjectMLibrary::acquireShared(juce::File("Z:/this/path/should/not/exist/on/any/machine"));
+  REQUIRE(second.isAvailable());
+  CHECK(second.library == first.library);
+  CHECK(second.library->functions().createWithOpenGlLoadProc ==
+        first.library->functions().createWithOpenGlLoadProc);
+
+  // The copy lives while anyone holds it...
+  first.library.reset();
+  const auto third = ProjectMLibrary::acquireShared();
+  REQUIRE(third.isAvailable());
+  CHECK(third.library == second.library);
+}
+
+TEST_CASE("ProjectMLibrary::acquireShared loads afresh once every holder is gone", "[engine][ProjectMLibrary]") {
+  {
+    const auto held = ProjectMLibrary::acquireShared();
+    if (!held.isAvailable()) {
+      SUCCEED("projectM is unavailable here: " + held.unavailableReason);
+      return;
+    }
+  }
+  // ...and once it is released, the next caller still gets a working one.
+  const auto again = ProjectMLibrary::acquireShared();
+  REQUIRE(again.isAvailable());
+  CHECK(again.library->functions().createWithOpenGlLoadProc != nullptr);
+  CHECK_FALSE(again.library->versionString().empty());
+}

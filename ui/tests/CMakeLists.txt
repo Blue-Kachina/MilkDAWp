@@ -8,7 +8,11 @@ add_executable(milkdawp_ui_tests
   IconsTests.cpp
   ControlDrawerLayoutTests.cpp
   PresetMenuTests.cpp
+  PresetInfoMenuTests.cpp
+  DiagnosticsPanelTests.cpp
+  AccessibilityTests.cpp
 )
+milkdawp_test_no_crash_dialogs(milkdawp_ui_tests)
 
 # Same as milkdawp_ui: this target compiles JUCE's module sources too, and
 # without these Linux links them against libcurl/WebKit.
