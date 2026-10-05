@@ -115,14 +115,24 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      # 6.2: builds the installer. Version pinned in toolchain.json.
+      # 6.2: builds the installer. The official installer pinned (URL and
+      # SHA-256) in toolchain.json, installed silently into a known folder.
+      # Not Chocolatey: its feed lags behind Inno Setup's releases.
       - name: Install Inno Setup (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $version = (Get-Content toolchain.json -Raw | ConvertFrom-Json).windows.innoSetup.version
-          choco install innosetup --version $version -y --no-progress
-          "MILKDAWP_ISCC=${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" >> $env:GITHUB_ENV
+          $pin = (Get-Content toolchain.json -Raw | ConvertFrom-Json).windows.innoSetup
+          $setup = Join-Path $env:RUNNER_TEMP "innosetup-$($pin.version).exe"
+          Invoke-WebRequest $pin.url -OutFile $setup -UseBasicParsing
+          $hash = (Get-FileHash $setup -Algorithm SHA256).Hash
+          if ($hash -ne $pin.sha256) { throw "Inno Setup download hash mismatch: got $hash, toolchain.json pins $($pin.sha256)" }
+          $dir = Join-Path $env:RUNNER_TEMP "InnoSetup"
+          $proc = Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/NOICONS", "/DIR=`"$dir`"" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Inno Setup's installer exited with $($proc.ExitCode)" }
+          $iscc = Join-Path $dir "ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "No ISCC.exe in $dir" }
+          "MILKDAWP_ISCC=$iscc" >> $env:GITHUB_ENV
 
       - name: Restore vcpkg binary cache
         uses: actions/cache/restore@v4
