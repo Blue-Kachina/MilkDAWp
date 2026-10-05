@@ -23,9 +23,9 @@ namespace milkdawp::engine {
 /// (the settings file below is shared).
 
 /// The GitHub repository whose releases are checked ("owner/name").
-inline constexpr const char* kReleasesRepository = "Blue-Kachina/MilkDAWp2";
+inline constexpr const char* kReleasesRepository = "Blue-Kachina/MilkDAWp";
 /// Where a person sees the releases.
-inline constexpr const char* kReleasesPage = "https://github.com/Blue-Kachina/MilkDAWp2/releases";
+inline constexpr const char* kReleasesPage = "https://github.com/Blue-Kachina/MilkDAWp/releases";
 
 /// Orders "major.minor.patch[-pre]" versions (a leading "v" is ignored): a
 /// pre-release sorts before its release, and pre-release parts compare

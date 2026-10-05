@@ -2616,12 +2616,15 @@ is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first publish
         GL); pluginval at strictness 5 on the tarball's VST3 with projectM required; the
         `.deb` installs with apt, the installed app starts, and it removes cleanly. Also
         checked by hand: the same AppImage starts on Ubuntu 24.04.
-- [~] 6.5 (S) Release workflow: tag → build matrix (Release config, real identity) → sign
+- [x] 6.5 (S) Release workflow: tag → build matrix (Release config, real identity) → sign
       where available → package → GitHub Release with generated notes, SHA-256 checksums and
       artifact attestations (`actions/attest-build-provenance`). `-beta` tags publish as
       pre-releases. Starts unsigned and before the installers exist (zipped bundles), so
       the pipeline is proven early.
-      Update (2026-10-04): written, not yet run on GitHub. How to cut a release:
+      Update (2026-10-05): done. `v1.0.0` (run 37337740239) published all six installers,
+      `SHA256SUMS.txt` and attestations; a downloaded `.deb` matched its checksum and
+      `gh attestation verify` traced it to `release.yml` at `refs/tags/v1.0.0`. (Written
+      2026-10-04.) How to cut a release:
       `docs/releasing.md`.
       - `.github/workflows/release.yml`: a `v*` tag runs `version` (the tag's numbers
         must equal `project(VERSION)`, so a wrong tag fails in seconds), then
@@ -2717,11 +2720,16 @@ is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first publish
       hear about the next beta), what to test, triage rules, the exit rule (two weeks
       without an open `blocker`). Removals are now possible: `MILKDAWP_PRESET_REMOVALS` in
       `cmake/BundledContent.cmake` deletes listed presets after extraction.
-- [~] 6.9 (S) 1.0 release and repository promotion, in this order:
-      Update (2026-10-05): prepared; every step is Matthew's (they change GitHub). The
-      checklist with exact commands is `docs/promotion.md`.
-      - Step 1: `scripts/release/backup-v1.sh` (mirror clone, bundle, wiki, issues and PRs
-        with comments, labels, metadata, every release and its assets, checksums).
+- [x] 6.9 (S) 1.0 release and repository promotion, in this order:
+      Update (2026-10-05): done. `v1.0.0` released; this repository renamed to
+      `Blue-Kachina/MilkDAWp`, remotes repointed and `rename-sweep.sh --apply` run (Matthew).
+      Announcing is optional (`docs/promotion.md`).
+      - **Done by Matthew:** v1 kept as a `.rar` of its VST3 plugin folder. A full repository
+        backup wasn't wanted, and old sessions don't need to keep working in v1, so the
+        `backup-v1.sh` script written for step 1 was removed. v1's repository was renamed
+        `Blue-Kachina/MilkDAWp_v0_7_5` and archived. `v1.0.0` was tagged directly.
+      - The installed 1.0 still links to `Blue-Kachina/MilkDAWp2`; GitHub redirects those
+        URLs (pages, issues, the releases API), so no new release was needed for the rename.
       - Step 2: v1 migration was dropped (§4.8), so this checks that a v1 session opens with
         v2 defaults. New `PluginProcessorTests` case: a blob built exactly as v1 0.7.x's
         `getStateInformation` wrote it (`PARAMS` tree, v1 parameter ids, non-default values,

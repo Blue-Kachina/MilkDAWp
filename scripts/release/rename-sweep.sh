@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# scripts/release/rename-sweep.sh -- 6.9 step 5: after this repository is
-# renamed MilkDAWp2 -> MilkDAWp (and v1 to MilkDAWp-v1), point the text at the
-# new names. Dry run by default; --apply edits the files.
+# scripts/release/rename-sweep.sh -- 6.9: after this repository is
+# renamed MilkDAWp2 -> MilkDAWp, point the text at the new name.
+# Dry run by default; --apply edits the files.
 #
 #   bash scripts/release/rename-sweep.sh          # show what would change
 #   bash scripts/release/rename-sweep.sh --apply  # change it, then review git diff
 #
-# Run it only AFTER both renames: before them, "Blue-Kachina/MilkDAWp" is still v1.
+# Run it only after the rename, so the new URLs resolve.
 #
 # Changes Blue-Kachina/MilkDAWp2 to Blue-Kachina/MilkDAWp everywhere (URLs, the
 # update check's repository, docs, workflows).
@@ -33,7 +33,7 @@ fi
 
 if ! $apply; then
   echo
-  echo "Dry run. Re-run with --apply after both repositories are renamed."
+  echo "Dry run. Re-run with --apply after the repository is renamed."
   exit 0
 fi
 

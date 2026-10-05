@@ -55,5 +55,5 @@ attestations so you can check a download came from this repository's build.
 
 ## Where's the source?
 
-[github.com/Blue-Kachina/MilkDAWp2](https://github.com/Blue-Kachina/MilkDAWp2)
+[github.com/Blue-Kachina/MilkDAWp](https://github.com/Blue-Kachina/MilkDAWp)
 (the Source code link in About).

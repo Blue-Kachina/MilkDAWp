@@ -6,7 +6,7 @@
 #
 # Needs the GitHub CLI, logged in (gh auth login).
 set -euo pipefail
-repo="${1:-Blue-Kachina/MilkDAWp2}"
+repo="${1:-Blue-Kachina/MilkDAWp}"
 
 label() { gh label create "$1" --repo "$repo" --color "$2" --description "$3" --force; }
 

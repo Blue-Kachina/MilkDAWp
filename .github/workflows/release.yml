@@ -359,7 +359,7 @@ jobs:
           cat SHA256SUMS.txt >> "$GITHUB_STEP_SUMMARY"
 
       # Anyone can check a download with:
-      #   gh attestation verify <file> --repo Blue-Kachina/MilkDAWp2
+      #   gh attestation verify <file> --repo Blue-Kachina/MilkDAWp
       - name: Attest build provenance
         if: needs.version.outputs.publish == 'true'
         uses: actions/attest-build-provenance@v2

@@ -48,7 +48,7 @@ cp -R "$stage/LICENSES" "$root/usr/share/doc/milkdawp/"
 cat > "$root/usr/share/doc/milkdawp/copyright" <<EOF
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: MilkDAWp
-Source: https://github.com/Blue-Kachina/MilkDAWp2
+Source: https://github.com/Blue-Kachina/MilkDAWp
 
 Files: *
 License: AGPL-3.0-or-later
@@ -67,11 +67,11 @@ Version: $debversion
 Section: sound
 Priority: optional
 Architecture: amd64
-Maintainer: Otitis Media <https://github.com/Blue-Kachina/MilkDAWp2/issues>
+Maintainer: Otitis Media <https://github.com/Blue-Kachina/MilkDAWp/issues>
 Installed-Size: $size_kb
 Depends: libc6 (>= 2.35), libstdc++6 (>= 12), libgcc-s1, libasound2 | libasound2t64, libfreetype6, libfontconfig1, libgl1, libegl1, libopengl0, libx11-6, libxext6, libxrandr2, libxinerama1, libxcursor1
 Recommends: shared-mime-info, desktop-file-utils
-Homepage: https://github.com/Blue-Kachina/MilkDAWp2
+Homepage: https://github.com/Blue-Kachina/MilkDAWp
 Description: Music visualizer: VST3 plugin and standalone app
  MilkDAWp shows MilkDrop presets (rendered by projectM) that change in time
  with the music, as a VST3 plugin in your DAW or as a standalone app

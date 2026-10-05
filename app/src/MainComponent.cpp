@@ -660,7 +660,7 @@ juce::PopupMenu MainComponent::createMenu(int menuIndex) {
       menu.addSeparator();
     }
     menu.addItem(makeItem("User guide", [] {
-      juce::URL("https://github.com/Blue-Kachina/MilkDAWp2/blob/HEAD/docs/user-guide/README.md").launchInDefaultBrowser();
+      juce::URL("https://github.com/Blue-Kachina/MilkDAWp/blob/HEAD/docs/user-guide/README.md").launchInDefaultBrowser();
     }));
     menu.addItem(makeItem("Releases", [] { juce::URL(engine::kReleasesPage).launchInDefaultBrowser(); }));
     const bool available = updateChecker_.status().state == engine::UpdateChecker::State::Available;

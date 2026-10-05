@@ -563,7 +563,7 @@ void MilkDAWpAudioProcessorEditor::showSettingsMenu() {
   menu.addItem(std::move(diagnostics));
   menu.addSeparator();
   menu.addItem("User guide", [] {
-    juce::URL("https://github.com/Blue-Kachina/MilkDAWp2/blob/HEAD/docs/user-guide/README.md").launchInDefaultBrowser();
+    juce::URL("https://github.com/Blue-Kachina/MilkDAWp/blob/HEAD/docs/user-guide/README.md").launchInDefaultBrowser();
   });
   menu.addItem("About MilkDAWp...", [this] { setAboutVisible(true); });
   menu.setLookAndFeel(&controlDrawer.getLookAndFeel());

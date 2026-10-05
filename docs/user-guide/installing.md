@@ -1,9 +1,9 @@
 # Installing
 
 Download the file for your system from the
-[releases page](https://github.com/Blue-Kachina/MilkDAWp2/releases). Each
+[releases page](https://github.com/Blue-Kachina/MilkDAWp/releases). Each
 release lists a `SHA256SUMS.txt`; to check a download, compare its SHA-256 with
-the one listed (or run `gh attestation verify <file> --repo Blue-Kachina/MilkDAWp2`,
+the one listed (or run `gh attestation verify <file> --repo Blue-Kachina/MilkDAWp`,
 which proves GitHub built it from this repository).
 
 ## Windows (10 21H2 or newer, 64-bit)

@@ -116,7 +116,7 @@ then `gh auth login`). The checksum check needs nothing extra.
 
 ```sh
 sha256sum -c SHA256SUMS.txt --ignore-missing
-gh attestation verify MilkDAWp-1.0.0-beta.1-windows-x64-setup.exe --repo Blue-Kachina/MilkDAWp2
+gh attestation verify MilkDAWp-1.0.0-beta.1-windows-x64-setup.exe --repo Blue-Kachina/MilkDAWp
 ```
 
 ## The app icon

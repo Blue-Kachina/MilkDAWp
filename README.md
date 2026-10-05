@@ -18,7 +18,7 @@ change in time with your music.
 
 ## Download
 
-From the [releases page](https://github.com/Blue-Kachina/MilkDAWp2/releases):
+From the [releases page](https://github.com/Blue-Kachina/MilkDAWp/releases):
 an installer for Windows (10 21H2+), a `.pkg` for macOS (12+, Apple Silicon and
 Intel), and an AppImage, VST3 tarball or `.deb` for Linux (glibc 2.35+, e.g.
 Ubuntu 22.04+). See [Installing](docs/user-guide/installing.md).
@@ -29,7 +29,7 @@ The [user guide](docs/user-guide/README.md) covers installing, the controls
 and shortcuts, presets, transitions, the plugin in a DAW, the app, capturing
 with OBS, troubleshooting and licences.
 
-Questions, bugs and ideas: [issues](https://github.com/Blue-Kachina/MilkDAWp2/issues/new/choose).
+Questions, bugs and ideas: [issues](https://github.com/Blue-Kachina/MilkDAWp/issues/new/choose).
 
 ## Building from source
 

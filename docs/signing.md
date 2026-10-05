@@ -30,7 +30,7 @@ confirm that JUCE's own dual licence isn't a problem before applying.
 Apply at <https://signpath.org/apply>. Points worth making:
 
 - Project: MilkDAWp, a music visualizer (VST3/AU plugin and standalone app),
-  <https://github.com/Blue-Kachina/MilkDAWp2> (to become `Blue-Kachina/MilkDAWp`).
+  <https://github.com/Blue-Kachina/MilkDAWp> (to become `Blue-Kachina/MilkDAWp`).
 - Licence: AGPL-3.0-or-later; dependencies: projectM (LGPL-2.1, dynamically
   linked), JUCE (used under the AGPL-3.0), Lucide icons (ISC).
 - Build: GitHub Actions on GitHub-hosted runners, from tags, with

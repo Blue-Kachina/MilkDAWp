@@ -27,6 +27,6 @@ Fletcher) and share your ratings, favourites and tags.
 
 Every parameter, its range and default: [parameters.md](../parameters.md).
 
-Found a bug, or have an idea? [Open an issue](https://github.com/Blue-Kachina/MilkDAWp2/issues/new/choose).
+Found a bug, or have an idea? [Open an issue](https://github.com/Blue-Kachina/MilkDAWp/issues/new/choose).
 The diagnostics panel (`D`) has a **Copy diagnostics** button whose text makes
 a bug report much easier to act on.

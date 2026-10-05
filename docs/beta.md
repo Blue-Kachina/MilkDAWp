@@ -20,7 +20,7 @@ itself.
 
 Put this, or a link to it, in the announcement:
 
-- **Report problems** with the [bug form](https://github.com/Blue-Kachina/MilkDAWp2/issues/new?template=bug_report.yml).
+- **Report problems** with the [bug form](https://github.com/Blue-Kachina/MilkDAWp/issues/new?template=bug_report.yml).
   The diagnostics panel's **Copy diagnostics** (press `D`) is the most useful
   thing to paste.
 - **Turn on update checks** (Help > About > Check for updates once a day) to

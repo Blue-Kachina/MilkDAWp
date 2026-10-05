@@ -59,10 +59,10 @@ public:
   juce::TextButton copyButton{"Copy versions"};
   juce::TextButton closeButton{"Close"};
   juce::TextEditor credits; // read-only, scrolls
-  juce::HyperlinkButton sourceLink{"Source code", juce::URL("https://github.com/Blue-Kachina/MilkDAWp2")};
+  juce::HyperlinkButton sourceLink{"Source code", juce::URL("https://github.com/Blue-Kachina/MilkDAWp")};
   juce::HyperlinkButton guideLink{"User guide",
-                                  juce::URL("https://github.com/Blue-Kachina/MilkDAWp2/blob/HEAD/docs/user-guide/README.md")};
-  juce::HyperlinkButton releasesLink{"Releases", juce::URL("https://github.com/Blue-Kachina/MilkDAWp2/releases")};
+                                  juce::URL("https://github.com/Blue-Kachina/MilkDAWp/blob/HEAD/docs/user-guide/README.md")};
+  juce::HyperlinkButton releasesLink{"Releases", juce::URL("https://github.com/Blue-Kachina/MilkDAWp/releases")};
   juce::ToggleButton autoCheckToggle{"Check for updates once a day"};
   juce::TextButton checkNowButton{"Check now"};
   juce::Label updateLabel;

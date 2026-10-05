@@ -209,7 +209,7 @@ cp "$projectm_copyright" "$stage/LICENSES/projectM-COPYRIGHT.txt"
   echo
   echo "Licences: MilkDAWp is AGPL-3.0-or-later (LICENSE). projectM is LGPL-2.1, shipped as"
   echo "a separate shared library you may replace (LICENSES/projectM-COPYRIGHT.txt; source"
-  echo "in THIRD_PARTY_NOTICES.md). Source code: https://github.com/Blue-Kachina/MilkDAWp2"
+  echo "in THIRD_PARTY_NOTICES.md). Source code: https://github.com/Blue-Kachina/MilkDAWp"
 } > "$stage/README.txt"
 
 # --- Installers --------------------------------------------------------------
