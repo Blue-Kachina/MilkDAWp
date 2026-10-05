@@ -16,6 +16,14 @@ class GlFrameTarget;
 
 /// One layer's texture and how it goes onto the canvas.
 struct LayerDraw {
+  // A constructor so `{texture, opacity, blend}` can leave the media fields at
+  // their defaults without GCC/Clang's -Wmissing-field-initializers (an error in CI).
+  LayerDraw() = default;
+  LayerDraw(std::uint32_t texture_, float opacity_ = 1.0f, LayerBlend blend_ = LayerBlend::Normal,
+            bool textureAlpha_ = false, float uvScaleX_ = 1.0f, float uvScaleY_ = 1.0f)
+      : texture(texture_), opacity(opacity_), blend(blend_), textureAlpha(textureAlpha_), uvScaleX(uvScaleX_),
+        uvScaleY(uvScaleY_) {}
+
   std::uint32_t texture = 0; // a texture in the compositor's context, same size as the canvas
   float opacity = 1.0f;      // 0..1
   LayerBlend blend = LayerBlend::Normal;

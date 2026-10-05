@@ -93,7 +93,14 @@ std::shared_ptr<ImageMediaSource> ImageMediaSource::load(const juce::File& file,
 
 // ---- cameras ------------------------------------------------------------------
 
-bool camerasSupported() noexcept { return JUCE_USE_CAMERA != 0; }
+bool camerasSupported() noexcept {
+  // juce_video.h #undefs JUCE_USE_CAMERA where JUCE has no camera (Linux).
+#if defined(JUCE_USE_CAMERA) && JUCE_USE_CAMERA
+  return true;
+#else
+  return false;
+#endif
+}
 
 std::string cameraMediaPath(const juce::String& deviceName) {
   return std::string(kCameraPrefix) + deviceName.toStdString();
@@ -105,7 +112,7 @@ juce::String cameraDeviceName(const std::string& path) {
   return isCameraMediaPath(path) ? juce::String::fromUTF8(path.c_str() + kCameraPrefix.size()) : juce::String();
 }
 
-#if JUCE_USE_CAMERA
+#if defined(JUCE_USE_CAMERA) && JUCE_USE_CAMERA
 
 juce::StringArray availableCameras() { return juce::CameraDevice::getAvailableDevices(); }
 
@@ -213,7 +220,7 @@ std::shared_ptr<MediaSource> openMediaSource(const std::string& path, std::strin
   }
   if (isCameraMediaPath(path)) {
     const auto name = juce::String::fromUTF8(path.c_str() + kCameraPrefix.size());
-#if JUCE_USE_CAMERA
+#if defined(JUCE_USE_CAMERA) && JUCE_USE_CAMERA
     if (!availableCameras().contains(name)) {
       error = "camera \"" + name.toStdString() + "\" isn't connected";
       return nullptr;

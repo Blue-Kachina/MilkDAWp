@@ -4,6 +4,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace milkdawp::core {
@@ -15,6 +16,16 @@ enum class ParameterType { Float, Bool, Int, Choice };
 /// MigrateFromV1 (via v1Alias). This is the single source of truth: nothing
 /// else in the codebase should hardcode a parameter's id, range, or default.
 struct ParameterSpec {
+  // A constructor rather than aggregate initialisation: the trailing fields
+  // are optional, and GCC/Clang's -Wmissing-field-initializers (an error in
+  // CI) would flag every entry that leaves them out.
+  ParameterSpec(std::string id_, std::string displayName_, ParameterType type_, float minValue_, float maxValue_,
+                float defaultValue_, bool automatable_, std::string v1Alias_,
+                std::vector<std::string> choices_ = {}, std::string group_ = {}, float skewCentre_ = 0.0f)
+      : id(std::move(id_)), displayName(std::move(displayName_)), type(type_), minValue(minValue_),
+        maxValue(maxValue_), defaultValue(defaultValue_), automatable(automatable_), v1Alias(std::move(v1Alias_)),
+        choices(std::move(choices_)), group(std::move(group_)), skewCentre(skewCentre_) {}
+
   std::string id;   // v2 canonical id, stable across releases (never rename without an ADR)
   std::string displayName;
   ParameterType type;
