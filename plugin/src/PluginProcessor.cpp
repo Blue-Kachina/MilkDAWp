@@ -7,14 +7,17 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <utility>
 #include <vector>
 
 #include "PluginEditor.h"
 #include "milkdawp/core/DisplayLayout.h"
+#include "milkdawp/core/MacroLock.h"
 #include "milkdawp/core/ParameterModel.h"
 #include "milkdawp/core/StateSchema.h"
 #include "milkdawp/engine/BundledContent.h"
 #include "milkdawp/engine/ControlMapping.h"
+#include "milkdawp/engine/MediaSource.h"
 #include "milkdawp/ui/OutputSettings.h"
 
 namespace milkdawp::plugin {
@@ -59,39 +62,64 @@ juce::Rectangle<int> toRectangle(const core::WindowBounds& b) noexcept {
 
 } // namespace
 
-juce::AudioProcessorValueTreeState::ParameterLayout MilkDAWpAudioProcessor::createParameterLayout() {
-  std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+namespace {
 
-  for (const auto& spec : core::allParameters()) {
-    const juce::ParameterID id{juce::String(spec.id), 1};
-    switch (spec.type) {
-    case core::ParameterType::Float:
-      params.push_back(std::make_unique<juce::AudioParameterFloat>(id, spec.displayName, spec.minValue,
-                                                                     spec.maxValue, spec.defaultValue));
-      break;
-    case core::ParameterType::Bool:
-      params.push_back(
-          std::make_unique<juce::AudioParameterBool>(id, spec.displayName, spec.defaultValue != 0.0f));
-      break;
-    case core::ParameterType::Int:
-      params.push_back(std::make_unique<juce::AudioParameterInt>(id, spec.displayName,
-                                                                   static_cast<int>(spec.minValue),
-                                                                   static_cast<int>(spec.maxValue),
-                                                                   static_cast<int>(spec.defaultValue)));
-      break;
-    case core::ParameterType::Choice: {
-      juce::StringArray choices;
-      for (const auto& choice : spec.choices) {
-        choices.add(choice);
-      }
-      params.push_back(std::make_unique<juce::AudioParameterChoice>(id, spec.displayName, choices,
-                                                                      static_cast<int>(spec.defaultValue)));
-      break;
+std::unique_ptr<juce::RangedAudioParameter> makeParameter(const core::ParameterSpec& spec) {
+  const juce::ParameterID id{juce::String(spec.id), 1};
+  switch (spec.type) {
+  case core::ParameterType::Float: {
+    juce::NormalisableRange<float> range(spec.minValue, spec.maxValue);
+    if (spec.skewCentre != 0.0f) {
+      range.setSkewForCentre(spec.skewCentre);
     }
-    }
+    return std::make_unique<juce::AudioParameterFloat>(id, spec.displayName, range, spec.defaultValue);
   }
+  case core::ParameterType::Bool:
+    return std::make_unique<juce::AudioParameterBool>(id, spec.displayName, spec.defaultValue != 0.0f);
+  case core::ParameterType::Int:
+    return std::make_unique<juce::AudioParameterInt>(id, spec.displayName, static_cast<int>(spec.minValue),
+                                                     static_cast<int>(spec.maxValue),
+                                                     static_cast<int>(spec.defaultValue));
+  case core::ParameterType::Choice: {
+    juce::StringArray choices;
+    for (const auto& choice : spec.choices) {
+      choices.add(choice);
+    }
+    return std::make_unique<juce::AudioParameterChoice>(id, spec.displayName, choices,
+                                                        static_cast<int>(spec.defaultValue));
+  }
+  }
+  return nullptr;
+}
 
-  return {params.begin(), params.end()};
+} // namespace
+
+juce::AudioProcessorValueTreeState::ParameterLayout MilkDAWpAudioProcessor::createParameterLayout() {
+  // Groups (ADR-0011) are contiguous runs of `allParameters()`, so adding each
+  // run as one group keeps the flattened order, and with it every parameter's
+  // index, exactly as the model lists it.
+  juce::AudioProcessorValueTreeState::ParameterLayout layout;
+  const auto& params = core::allParameters();
+  for (std::size_t i = 0; i < params.size();) {
+    const auto& group = params[i].group;
+    if (group.empty()) {
+      layout.add(makeParameter(params[i]));
+      ++i;
+      continue;
+    }
+    juce::String name(group);
+    for (const auto& g : core::parameterGroups()) {
+      if (g.id == group) {
+        name = g.displayName;
+      }
+    }
+    auto hostGroup = std::make_unique<juce::AudioProcessorParameterGroup>(juce::String(group), name, "|");
+    for (; i < params.size() && params[i].group == group; ++i) {
+      hostGroup->addChild(makeParameter(params[i]));
+    }
+    layout.add(std::move(hostGroup));
+  }
+  return layout;
 }
 
 MilkDAWpAudioProcessor::MilkDAWpAudioProcessor()
@@ -125,28 +153,19 @@ MilkDAWpAudioProcessor::MilkDAWpAudioProcessor()
     std::fprintf(stderr, "MilkDAWp: projectM %s loaded\n", version.c_str());
   }
 
-  raw_.beatSensitivity = apvts.getRawParameterValue("beatSensitivity");
-  raw_.transitionDurationSeconds = apvts.getRawParameterValue("transitionDurationSeconds");
-  raw_.shuffle = apvts.getRawParameterValue("shuffle");
-  raw_.lockCurrentPreset = apvts.getRawParameterValue("lockCurrentPreset");
-  raw_.presetIndex = apvts.getRawParameterValue("presetIndex");
-  raw_.transitionJitterEnabled = apvts.getRawParameterValue("transitionJitterEnabled");
-  raw_.transitionDurationMin = apvts.getRawParameterValue("transitionDurationMin");
-  raw_.transitionDurationMax = apvts.getRawParameterValue("transitionDurationMax");
-  raw_.hardCutEnabled = apvts.getRawParameterValue("hardCutEnabled");
-  raw_.softCutDuration = apvts.getRawParameterValue("softCutDuration");
-  raw_.qualityOverride = apvts.getRawParameterValue("qualityOverride");
-  raw_.transitionMode = apvts.getRawParameterValue("transitionMode");
-  raw_.transitionBars = apvts.getRawParameterValue("transitionBars");
-  raw_.presetSelectionPolicy = apvts.getRawParameterValue("presetSelectionPolicy");
-  raw_.energyThreshold = apvts.getRawParameterValue("energyThreshold");
-  raw_.useHostTempo = apvts.getRawParameterValue("useHostTempo");
+  // Every parameter the engine reads, looked up once: processBlock copies them
+  // into ParameterValues without searching.
+  for (const auto& spec : core::allParameters()) {
+    const auto member = engine::parameterMember(spec.id);
+    auto* raw = apvts.getRawParameterValue(juce::String(spec.id));
+    if (member != nullptr && raw != nullptr) {
+      engineParameters_.push_back({member, raw});
+    }
+  }
   raw_.layerOpacity = apvts.getRawParameterValue("layerOpacity");
   raw_.layerBlend = apvts.getRawParameterValue("layerBlend");
   raw_.layerMute = apvts.getRawParameterValue("layerMute");
   raw_.layerOrder = apvts.getRawParameterValue("layerOrder");
-  raw_.transitionGridSync = apvts.getRawParameterValue("transitionGridSync");
-  raw_.transitionGridOffset = apvts.getRawParameterValue("transitionGridOffset");
 
   // Momentary commands: react to the 0 -> 1 edge wherever it comes from
   // (editor pulse, host automation, MIDI learn later). A per-block poll
@@ -185,9 +204,94 @@ MilkDAWpAudioProcessor::MilkDAWpAudioProcessor()
   refreshRegistryName();
   applyLayerParams();
   registryListener_ = LayerRegistry::get().addListener([this] { triggerAsyncUpdate(); });
+  startTimerHz(10);
+
+  // 8.4: OSC reaches this instance by its display name or id. Moves are
+  // gestures, so the host records them as automation in a recording pass.
+  {
+    engine::OscRemote::Endpoint endpoint;
+    endpoint.name = [this] { return instanceDisplayName(); };
+    endpoint.id = [this] { return instanceId(); };
+    endpoint.setParameter = [this](const std::string& id, float value, bool normalized) {
+      const juce::String jid(id);
+      auto* parameter = apvts.getParameter(jid);
+      if (parameter == nullptr) {
+        return false;
+      }
+      const float target = normalized ? juce::jlimit(0.0f, 1.0f, value) : apvts.getParameterRange(jid).convertTo0to1(value);
+      parameter->beginChangeGesture();
+      parameter->setValueNotifyingHost(target);
+      parameter->endChangeGesture();
+      return true;
+    };
+    endpoint.next = [this] { visualizer_->director().requestNext(); };
+    endpoint.previous = [this] { visualizer_->director().requestPrevious(); };
+    endpoint.status = [this] { return visualizer_->director().status(); };
+    endpoint.presetName = [this] {
+      const auto index = visualizer_->director().status().currentIndex;
+      return index >= 0 ? visualizer_->director().presetName(index) : std::string{};
+    };
+    oscHandle_ = osc_->add(std::move(endpoint));
+  }
+}
+
+void MilkDAWpAudioProcessor::setMediaSourcePath(const std::string& path) {
+  std::string error;
+  auto source = engine::openMediaSource(path, error);
+  if (!error.empty()) {
+    visualizer_->renderEngine().errors().add("media", error);
+  }
+  visualizer_->renderEngine().primaryLayer().setMediaSource(std::move(source));
+  const std::lock_guard lock(layoutMutex_);
+  mediaSourcePath_ = path; // kept even if missing now: the file may come back (an unplugged drive)
+}
+
+std::string MilkDAWpAudioProcessor::mediaSourcePath() const {
+  const std::lock_guard lock(layoutMutex_);
+  return mediaSourcePath_;
+}
+
+void MilkDAWpAudioProcessor::timerCallback() {
+  const auto current = visualizer_->director().currentPresetPath();
+  if (current.empty() || current == lastPresetPath_) {
+    return;
+  }
+  const auto previous = std::exchange(lastPresetPath_, current);
+  {
+    const std::lock_guard lock(layoutMutex_);
+    if (!pendingRestorePath_.empty()) {
+      // A restored session is still finding its preset. Whatever plays until it
+      // lands (or gives up) is not the user changing presets.
+      if (current == pendingRestorePath_ || juce::Time::getMillisecondCounter() > restoreDeadlineMs_) {
+        pendingRestorePath_.clear();
+      }
+      return;
+    }
+  }
+  if (previous.empty()) {
+    return; // the first preset this instance shows: nothing changed from anything
+  }
+  const bool locked = load(apvts.getRawParameterValue("lockMacros"), 0.0f) > 0.5f;
+  // A .milk declares no Macros; .milkdawp presets will (Stage B).
+  const auto moves = core::macrosAfterPresetChange(locked, core::MacroDefaults{});
+  for (int slot = 0; slot < core::kMacroCount; ++slot) {
+    const auto& move = moves[static_cast<std::size_t>(slot)];
+    const juce::String id(core::macroParameterId(slot));
+    auto* parameter = apvts.getParameter(id);
+    if (!move.has_value() || parameter == nullptr || load(apvts.getRawParameterValue(id), 0.0f) == *move) {
+      continue;
+    }
+    // A gesture, as a mouse move would be: an automation lane playing back still
+    // wins on its next block (§6.3).
+    parameter->beginChangeGesture();
+    parameter->setValueNotifyingHost(apvts.getParameterRange(id).convertTo0to1(*move));
+    parameter->endChangeGesture();
+  }
 }
 
 MilkDAWpAudioProcessor::~MilkDAWpAudioProcessor() {
+  stopTimer();
+  osc_->remove(oscHandle_);
   // Stop being told about other instances first, then let go of any hub (or any
   // senders) while this instance's engine, which they use, still exists.
   LayerRegistry::get().removeListener(registryListener_);
@@ -236,25 +340,9 @@ engine::EngineControls MilkDAWpAudioProcessor::readControls() const noexcept {
   // this only copies the APVTS atomics into it, keeping the model's defaults
   // for any parameter that is missing.
   engine::ParameterValues values;
-  const auto copy = [](float& field, const std::atomic<float>* value) { field = load(value, field); };
-  copy(values.beatSensitivity, raw_.beatSensitivity);
-  copy(values.transitionDurationSeconds, raw_.transitionDurationSeconds);
-  copy(values.shuffle, raw_.shuffle);
-  copy(values.lockCurrentPreset, raw_.lockCurrentPreset);
-  copy(values.presetIndex, raw_.presetIndex);
-  copy(values.transitionJitterEnabled, raw_.transitionJitterEnabled);
-  copy(values.transitionDurationMin, raw_.transitionDurationMin);
-  copy(values.transitionDurationMax, raw_.transitionDurationMax);
-  copy(values.hardCutEnabled, raw_.hardCutEnabled);
-  copy(values.softCutDuration, raw_.softCutDuration);
-  copy(values.qualityOverride, raw_.qualityOverride);
-  copy(values.transitionMode, raw_.transitionMode);
-  copy(values.transitionBars, raw_.transitionBars);
-  copy(values.presetSelectionPolicy, raw_.presetSelectionPolicy);
-  copy(values.energyThreshold, raw_.energyThreshold);
-  copy(values.useHostTempo, raw_.useHostTempo);
-  copy(values.transitionGridSync, raw_.transitionGridSync);
-  copy(values.transitionGridOffset, raw_.transitionGridOffset);
+  for (const auto& [member, raw] : engineParameters_) {
+    values.*member = raw->load(std::memory_order_relaxed);
+  }
   return engine::toEngineControls(values);
 }
 
@@ -558,6 +646,8 @@ void MilkDAWpAudioProcessor::getStateInformation(juce::MemoryBlock& destData) {
   state.instanceId = instanceId();
   state.instanceLabel = instanceLabel();
   state.tagFilter = visualizer_->director().tagFilter();
+  state.mediaSourcePath = mediaSourcePath();
+  state.mediaBlend = static_cast<int>(mediaBlend());
   for (const auto& spec : core::allParameters()) {
     if (auto* raw = apvts.getRawParameterValue(juce::String(spec.id))) {
       state.paramValues[spec.id] = raw->load(std::memory_order_relaxed);
@@ -592,6 +682,9 @@ void MilkDAWpAudioProcessor::setStateInformation(const void* data, int sizeInByt
     const std::lock_guard lock(layoutMutex_);
     layout_ = state.windows;
     instanceLabel_ = state.instanceLabel;
+    // Lock Macros must not treat the restored preset arriving as a preset change.
+    pendingRestorePath_ = state.presetAbsolutePath;
+    restoreDeadlineMs_ = juce::Time::getMillisecondCounter() + 10000;
   }
   // Take back the identity this instance had when it was saved, so instances
   // that point at it still find it. (If another live instance already has that
@@ -600,6 +693,10 @@ void MilkDAWpAudioProcessor::setStateInformation(const void* data, int sizeInByt
     LayerRegistry::get().claimId(registryEntry_, state.instanceId);
   }
   visualizer_->director().setTagFilter(state.tagFilter);
+  if (state.mediaSourcePath != mediaSourcePath()) {
+    setMediaSourcePath(state.mediaSourcePath);
+  }
+  setMediaBlend(static_cast<engine::LayerBlend>(std::clamp(state.mediaBlend, 0, engine::kMediaBlendCount - 1)));
   refreshRegistryName();
   triggerAsyncUpdate(); // opens/closes the Output window, and links to the Output target, on the message thread
 

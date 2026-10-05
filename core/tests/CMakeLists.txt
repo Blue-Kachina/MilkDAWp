@@ -23,6 +23,9 @@ add_executable(milkdawp_core_tests
   WavTests.cpp
   ScoringTests.cpp
   SeqlockSnapshotTests.cpp
+  VisualControlsTests.cpp
+  LayerGateTests.cpp
+  OscAddressTests.cpp
 )
 milkdawp_test_no_crash_dialogs(milkdawp_core_tests)
 

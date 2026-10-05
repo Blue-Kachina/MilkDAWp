@@ -36,6 +36,26 @@ TEST_CASE("MilkDAWpAudioProcessor exposes every ParameterModel parameter through
   }
 }
 
+TEST_CASE("MilkDAWpAudioProcessor gives hosts the parameters in ParameterModel order, grouped",
+          "[plugin][MilkDAWpAudioProcessor]") {
+  // Hosts such as REAPER store automation by index: grouping must not reorder (ADR-0011).
+  MilkDAWpAudioProcessor processor;
+  const auto& hostParams = processor.getParameters();
+  const auto& specs = milkdawp::core::allParameters();
+  REQUIRE(static_cast<std::size_t>(hostParams.size()) == specs.size());
+  for (std::size_t i = 0; i < specs.size(); ++i) {
+    INFO("index " << i);
+    const auto* withId = dynamic_cast<const juce::HostedAudioProcessorParameter*>(hostParams[static_cast<int>(i)]);
+    REQUIRE(withId != nullptr);
+    CHECK(withId->getParameterID() == juce::String(specs[i].id));
+  }
+  const auto* visual = processor.getParameterTree().getGroupsForParameter(processor.apvts.getParameter("visualHue"))
+                           .getFirst();
+  REQUIRE(visual != nullptr);
+  CHECK(visual->getName() == "Visual");
+  CHECK(processor.getParameterTree().getGroupsForParameter(processor.apvts.getParameter("shuffle")).isEmpty());
+}
+
 TEST_CASE("MilkDAWpAudioProcessor parameters start at ParameterModel's defaults",
           "[plugin][MilkDAWpAudioProcessor]") {
   MilkDAWpAudioProcessor processor;
@@ -150,6 +170,20 @@ TEST_CASE("MilkDAWpAudioProcessor state round-trips the detached-controls layout
   CHECK(layout.controlsFloating);
   CHECK(layout.controlsWindowBounds == milkdawp::core::WindowBounds{50, 60, 700, 44});
   CHECK_FALSE(layout.outputWindowOpen);
+}
+
+TEST_CASE("MilkDAWpAudioProcessor saves its media source, even one that is missing now",
+          "[plugin][MilkDAWpAudioProcessor]") {
+  MilkDAWpAudioProcessor source;
+  source.setMediaSourcePath("Z:/unplugged/logo.png"); // can't open: no source, but the choice is kept
+  CHECK(source.mediaSourcePath() == "Z:/unplugged/logo.png");
+
+  juce::MemoryBlock block;
+  source.getStateInformation(block);
+  MilkDAWpAudioProcessor destination;
+  destination.setStateInformation(block.getData(), static_cast<int>(block.getSize()));
+  CHECK(destination.mediaSourcePath() == "Z:/unplugged/logo.png");
+  CHECK(destination.visualizer().renderEngine().primaryLayer().mediaSource() == nullptr);
 }
 
 TEST_CASE("MilkDAWpAudioProcessor survives a garbage state blob", "[plugin][MilkDAWpAudioProcessor]") {

@@ -8,11 +8,7 @@
 
 namespace milkdawp::engine {
 
-float* parameterField(ParameterValues& values, std::string_view id) noexcept {
-  return const_cast<float*>(parameterField(static_cast<const ParameterValues&>(values), id));
-}
-
-const float* parameterField(const ParameterValues& values, std::string_view id) noexcept {
+float ParameterValues::* parameterMember(std::string_view id) noexcept {
   struct Entry {
     std::string_view id;
     float ParameterValues::*field;
@@ -40,13 +36,51 @@ const float* parameterField(const ParameterValues& values, std::string_view id) 
       {"layerOrder", &ParameterValues::layerOrder},
       {"transitionGridSync", &ParameterValues::transitionGridSync},
       {"transitionGridOffset", &ParameterValues::transitionGridOffset},
+      {"visualHue", &ParameterValues::visualHue},
+      {"visualSaturation", &ParameterValues::visualSaturation},
+      {"visualBrightness", &ParameterValues::visualBrightness},
+      {"visualSpeed", &ParameterValues::visualSpeed},
+      {"visualZoom", &ParameterValues::visualZoom},
+      {"visualRotation", &ParameterValues::visualRotation},
+      {"visualWarp", &ParameterValues::visualWarp},
+      {"visualTrails", &ParameterValues::visualTrails},
+      {"visualWaveSize", &ParameterValues::visualWaveSize},
+      {"visualPixelate", &ParameterValues::visualPixelate},
+      {"visualGlow", &ParameterValues::visualGlow},
+      {"visualBlur", &ParameterValues::visualBlur},
+      {"visualMirror", &ParameterValues::visualMirror},
+      {"visualKaleidoscope", &ParameterValues::visualKaleidoscope},
+      {"visualRgbSplit", &ParameterValues::visualRgbSplit},
+      {"visualMediaMix", &ParameterValues::visualMediaMix},
+      {"macro1", &ParameterValues::macro1},
+      {"macro2", &ParameterValues::macro2},
+      {"macro3", &ParameterValues::macro3},
+      {"macro4", &ParameterValues::macro4},
+      {"macro5", &ParameterValues::macro5},
+      {"macro6", &ParameterValues::macro6},
+      {"macro7", &ParameterValues::macro7},
+      {"macro8", &ParameterValues::macro8},
+      {"lockMacros", &ParameterValues::lockMacros},
+      {"layerGateEnabled", &ParameterValues::layerGateEnabled},
+      {"layerGateThreshold", &ParameterValues::layerGateThreshold},
+      {"layerGateRelease", &ParameterValues::layerGateRelease},
   };
   for (const auto& entry : kFields) {
     if (entry.id == id) {
-      return &(values.*entry.field);
+      return entry.field;
     }
   }
   return nullptr;
+}
+
+float* parameterField(ParameterValues& values, std::string_view id) noexcept {
+  const auto member = parameterMember(id);
+  return member != nullptr ? &(values.*member) : nullptr;
+}
+
+const float* parameterField(const ParameterValues& values, std::string_view id) noexcept {
+  const auto member = parameterMember(id);
+  return member != nullptr ? &(values.*member) : nullptr;
 }
 
 float qualityScaleFor(int choice) noexcept {
@@ -60,6 +94,29 @@ float qualityScaleFor(int choice) noexcept {
   default:
     return 0.0f; // Auto
   }
+}
+
+core::VisualControls toVisualControls(const ParameterValues& values) noexcept {
+  core::VisualControls visual;
+  visual.hueDegrees = std::clamp(values.visualHue, -180.0f, 180.0f);
+  visual.saturation = std::clamp(values.visualSaturation, 0.0f, 2.0f);
+  visual.brightness = std::clamp(values.visualBrightness, 0.0f, 2.0f);
+  visual.speed = std::clamp(values.visualSpeed, 0.0f, 4.0f);
+  visual.zoom = std::clamp(values.visualZoom, -1.0f, 1.0f);
+  visual.rotation = std::clamp(values.visualRotation, -1.0f, 1.0f);
+  visual.warp = std::clamp(values.visualWarp, 0.0f, 3.0f);
+  visual.trails = std::clamp(values.visualTrails, 0.0f, 1.0f);
+  visual.waveSize = std::clamp(values.visualWaveSize, 0.0f, 3.0f);
+  visual.pixelate = std::clamp(values.visualPixelate, 0.0f, 1.0f);
+  visual.glow = std::clamp(values.visualGlow, 0.0f, 1.0f);
+  visual.blur = std::clamp(values.visualBlur, 0.0f, 1.0f);
+  visual.mirror = static_cast<core::MirrorMode>(std::clamp(static_cast<int>(std::lround(values.visualMirror)), 0, 3));
+  const auto kaleidoscope = std::clamp(static_cast<int>(std::lround(values.visualKaleidoscope)), 0,
+                                       static_cast<int>(core::kKaleidoscopeSegments.size()) - 1);
+  visual.kaleidoscopeSegments = core::kKaleidoscopeSegments[static_cast<std::size_t>(kaleidoscope)];
+  visual.rgbSplit = std::clamp(values.visualRgbSplit, 0.0f, 1.0f);
+  visual.mediaMix = std::clamp(values.visualMediaMix, 0.0f, 1.0f);
+  return visual;
 }
 
 EngineControls toEngineControls(const ParameterValues& values) noexcept {
@@ -85,6 +142,10 @@ EngineControls toEngineControls(const ParameterValues& values) noexcept {
   controls.presetIndex = static_cast<std::int32_t>(std::lround(values.presetIndex));
   controls.beatSensitivity = values.beatSensitivity;
   controls.qualityScale = qualityScaleFor(static_cast<int>(values.qualityOverride));
+  controls.visual = toVisualControls(values);
+  controls.gate.enabled = values.layerGateEnabled > 0.5f;
+  controls.gate.thresholdDb = std::clamp(values.layerGateThreshold, -100.0f, 0.0f);
+  controls.gate.releaseMs = std::clamp(values.layerGateRelease, 0.0f, 2000.0f);
   return controls;
 }
 

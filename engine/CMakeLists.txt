@@ -28,6 +28,16 @@ add_library(milkdawp_engine STATIC
   include/milkdawp/engine/LayerChannel.h
   include/milkdawp/engine/LayerCompositor.h
   src/LayerCompositor.cpp
+  include/milkdawp/engine/EffectsChain.h
+  src/EffectsChain.cpp
+  src/GlUtil.h
+  src/GlUtil.cpp
+  include/milkdawp/engine/OscRemote.h
+  src/OscRemote.cpp
+  include/milkdawp/engine/MediaSource.h
+  src/MediaSource.cpp
+  src/VideoMediaSource.cpp
+  include/milkdawp/engine/VideoDecoder.h
   include/milkdawp/engine/PresetCompileTimeCache.h
   include/milkdawp/engine/PresetMetadataStore.h
   src/PresetMetadataStore.cpp
@@ -51,6 +61,8 @@ target_compile_features(milkdawp_engine PUBLIC cxx_std_20)
 target_compile_definitions(milkdawp_engine PUBLIC
   JUCE_WEB_BROWSER=0
   JUCE_USE_CURL=0
+  # 8.6b: JUCE's CameraDevice exists on Windows and macOS only (Linux: V4L2, 8.6d).
+  $<IF:$<OR:$<PLATFORM_ID:Windows>,$<PLATFORM_ID:Darwin>>,JUCE_USE_CAMERA=1,JUCE_USE_CAMERA=0>
 )
 target_link_libraries(milkdawp_engine
   PUBLIC
@@ -58,6 +70,8 @@ target_link_libraries(milkdawp_engine
     milkdawp_sanitizers
     juce::juce_core   # ProjectMLibrary.h is a public header exposing juce::File/DynamicLibrary
     juce::juce_opengl # RenderEngine.h/OutputSurface.h are public headers exposing juce::OpenGLContext
+    juce::juce_osc    # OscRemote (8.4)
+    juce::juce_video  # camera media sources (8.6b)
   PRIVATE
     milkdawp_warnings
 )
@@ -85,6 +99,15 @@ if(MILKDAWP_WITH_PROJECTM AND MILKDAWP_PROJECTM_TARGET AND TARGET ${MILKDAWP_PRO
   target_compile_definitions(milkdawp_engine PRIVATE MILKDAWP_HAS_PROJECTM=1)
 else()
   target_compile_definitions(milkdawp_engine PRIVATE MILKDAWP_HAS_PROJECTM=0)
+endif()
+
+# 8.6c: video through the platform's own decoders. Windows: Media Foundation.
+# macOS (AVFoundation) and Linux (GStreamer at runtime) come in 8.6d.
+if(WIN32)
+  target_sources(milkdawp_engine PRIVATE src/VideoDecoderWindows.cpp)
+  target_link_libraries(milkdawp_engine PRIVATE mfplat mfreadwrite mfuuid propsys ole32)
+else()
+  target_sources(milkdawp_engine PRIVATE src/VideoDecoderUnsupported.cpp)
 endif()
 
 if(BUILD_TESTING)

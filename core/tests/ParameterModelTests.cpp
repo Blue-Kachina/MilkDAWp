@@ -58,6 +58,90 @@ TEST_CASE("v2-only parameters have an empty v1 alias", "[core][ParameterModel]")
   }
 }
 
+TEST_CASE("the 1.0 parameters keep their indexes", "[core][ParameterModel]") {
+  // REAPER (and other hosts) store automation envelopes by parameter index, so
+  // new parameters are appended and the 1.0 list never moves (ADR-0011).
+  const std::vector<std::string> v1_0{
+      "beatSensitivity",      "transitionDurationSeconds", "shuffle",           "lockCurrentPreset",
+      "presetIndex",          "triggerNext",               "triggerPrev",       "transitionJitterEnabled",
+      "transitionDurationMin", "transitionDurationMax",    "hardCutEnabled",    "hardCutSensitivity",
+      "softCutDuration",      "hardCutDuration",           "qualityOverride",   "transitionMode",
+      "transitionBars",       "presetSelectionPolicy",     "energyThreshold",   "useHostTempo",
+      "layerOpacity",         "layerBlend",                "layerMute",         "layerOrder",
+      "transitionGridSync",   "transitionGridOffset"};
+  const auto& params = allParameters();
+  REQUIRE(params.size() >= v1_0.size());
+  for (std::size_t i = 0; i < v1_0.size(); ++i) {
+    INFO("index " << i);
+    CHECK(params[i].id == v1_0[i]);
+    CHECK(params[i].group.empty()); // grouping them now would change nothing for hosts, but isn't needed
+  }
+}
+
+TEST_CASE("parameter groups are known and contiguous", "[core][ParameterModel]") {
+  const auto& params = allParameters();
+  std::set<std::string> known;
+  for (const auto& group : parameterGroups()) {
+    CHECK(known.insert(group.id).second);
+  }
+  std::set<std::string> finished;
+  std::string current;
+  for (const auto& p : params) {
+    INFO("parameter " << p.id);
+    if (!p.group.empty()) {
+      CHECK(known.contains(p.group));
+    }
+    if (p.group != current) {
+      if (!current.empty()) {
+        finished.insert(current);
+      }
+      // A group that already ended must not start again: JUCE would build two groups.
+      CHECK_FALSE(finished.contains(p.group));
+      current = p.group;
+    }
+  }
+}
+
+TEST_CASE("Phase 8 adds 16 Visual globals, 8 Macros, Lock Macros and the gate", "[core][ParameterModel]") {
+  const auto& params = allParameters();
+  int visual = 0;
+  int macros = 0;
+  int gate = 0;
+  for (const auto& p : params) {
+    visual += p.group == "visual" ? 1 : 0;
+    macros += p.group == "macros" ? 1 : 0;
+    gate += p.group == "layerGate" ? 1 : 0;
+  }
+  CHECK(visual == 16);
+  CHECK(macros == kMacroCount + 1);
+  CHECK(gate == 3);
+  for (int slot = 0; slot < kMacroCount; ++slot) {
+    const auto* macro = findParameter(params, macroParameterId(slot));
+    REQUIRE(macro != nullptr);
+    CHECK(macro->group == "macros");
+  }
+  const auto* lock = findParameter(params, "lockMacros");
+  REQUIRE(lock != nullptr);
+  CHECK(lock->defaultValue == 0.0f); // Off by default (§6.3)
+  const auto* threshold = findParameter(params, "layerGateThreshold");
+  REQUIRE(threshold != nullptr);
+  CHECK(threshold->defaultValue == -80.0f);
+  const auto* release = findParameter(params, "layerGateRelease");
+  REQUIRE(release != nullptr);
+  CHECK(release->defaultValue == 80.0f);
+}
+
+TEST_CASE("skew centres sit inside their ranges", "[core][ParameterModel]") {
+  for (const auto& p : allParameters()) {
+    if (p.skewCentre != 0.0f) {
+      INFO("parameter " << p.id);
+      CHECK(p.type == ParameterType::Float);
+      CHECK(p.skewCentre > p.minValue);
+      CHECK(p.skewCentre < p.maxValue);
+    }
+  }
+}
+
 TEST_CASE("renderParameterDocsMarkdown produces one row per parameter plus a header",
           "[core][ParameterModel]") {
   const auto& params = allParameters();

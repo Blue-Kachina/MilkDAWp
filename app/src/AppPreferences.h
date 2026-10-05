@@ -38,6 +38,10 @@ struct AppState {
 
   /// 5.2: Settings -> Transitions -> "Only tags" (Director::setTagFilter).
   juce::String tagFilter;
+  /// 8.6: the image Media Mix shows (empty: none).
+  juce::String mediaSourcePath;
+  /// 8.6e: how the media meets the picture (engine::LayerBlend, Displace included).
+  int mediaBlend = 0;
 
   juce::Rectangle<int> mainWindowBounds; // empty: centre a default size
   bool mainWindowFullscreen = false;

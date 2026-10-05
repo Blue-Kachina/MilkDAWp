@@ -14,6 +14,7 @@
 #include "ParameterBinding.h"
 #include "SignalMonitor.h"
 #include "milkdawp/engine/OutputSurface.h"
+#include "milkdawp/engine/OscRemote.h"
 #include "milkdawp/engine/OutputWindow.h"
 #include "milkdawp/engine/UpdateCheck.h"
 #include "milkdawp/engine/Visualizer.h"
@@ -25,6 +26,7 @@
 #include "milkdawp/ui/PresetBrowser.h"
 #include "milkdawp/ui/PresetInfoMenu.h"
 #include "milkdawp/ui/TransitionSettings.h"
+#include "milkdawp/ui/VisualSettings.h"
 
 namespace milkdawp::app {
 
@@ -63,6 +65,12 @@ public:
   /// drop (§4.6). Ignored if `path` is neither.
   void openPath(const juce::String& path);
   void setTransitionSettingsVisible(bool visible);
+  /// Phase 8.1: the Visual popover (globals, Macros, gate).
+  void setVisualSettingsVisible(bool visible);
+  [[nodiscard]] bool isVisualSettingsVisible() const { return visualSettings_.isVisible(); }
+  /// 8.6: the image Media Mix shows (empty: none), and a chooser for one.
+  void setMediaSource(const juce::String& path);
+  void chooseMediaSource();
   /// Settings -> Output: fullscreen default and which screen the window opens on.
   void setOutputSettingsVisible(bool visible);
   /// The drawer's Output button: closes the window if open, else opens it
@@ -124,6 +132,7 @@ private:
   void timerCallback() override;
   void publishControls();
   void layoutTransitionSettings();
+  void layoutVisualSettings();
   void layoutOutputSettings();
   void layoutPresetBrowser();
   void layoutAbout();
@@ -135,6 +144,8 @@ private:
   void updateStatusText();
   void notifyStateChanged();
   void recordRecentlyPlayed(const juce::String& absolutePath);
+  /// Phase 8.1: on a preset change, un-locked Macros move to its defaults.
+  void applyMacroLock();
 
   // juce::FileDragAndDropTarget (§4.6): a .milk file or a preset folder
   // dropped on the main window.
@@ -150,6 +161,7 @@ private:
   juce::TextButton inputHint_;
   ui::ControlDrawer drawer_;
   ui::TransitionSettingsPanel transitionSettings_;
+  ui::VisualSettingsPanel visualSettings_; // Phase 8.1
   ui::OutputSettingsPanel outputSettings_;
   ui::PresetBrowser presetBrowser_; // 6.1b
   ui::AboutPanel aboutPanel_;       // 6.7
@@ -163,7 +175,12 @@ private:
   SignalMonitor signalMonitor_;
   bool pinnedBeforeFullscreen_ = false;
   bool fullscreen_ = false;
+  bool presetSeen_ = false; // a preset has played this session (Lock Macros)
+  // 8.4: the process's OSC remote; this component is its one endpoint.
+  juce::SharedResourcePointer<engine::OscRemote> osc_;
+  int oscHandle_ = 0;
   std::unique_ptr<juce::FileChooser> folderChooser_;
+  std::unique_ptr<juce::FileChooser> mediaChooser_; // 8.6
   std::unique_ptr<engine::OutputWindow> outputWindow_;
   // Declared after drawer_ so it is destroyed first: it only borrows the
   // drawer, and hands it back in its destructor.

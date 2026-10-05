@@ -30,6 +30,8 @@ constexpr const char* kFavourites = "favouritePresets";
 constexpr const char* kRecentlyPlayed = "recentlyPlayedPresets";
 constexpr const char* kMidiMappings = "midiMappings";
 constexpr const char* kTagFilter = "tagFilter";
+constexpr const char* kMediaSource = "mediaSource";
+constexpr const char* kMediaBlend = "mediaBlend";
 constexpr const char* kParameterPrefix = "param.";
 
 // One path per line; paths never contain newlines.
@@ -83,6 +85,8 @@ AppState loadAppState(const juce::PropertySet& properties) {
   state.recentlyPlayedPresets = readList(properties, kRecentlyPlayed);
   state.midiMappings = properties.getValue(kMidiMappings);
   state.tagFilter = properties.getValue(kTagFilter);
+  state.mediaSourcePath = properties.getValue(kMediaSource);
+  state.mediaBlend = properties.getIntValue(kMediaBlend, 0);
   state.mainWindowBounds = readBounds(properties, kMainBounds);
   state.mainWindowFullscreen = properties.getBoolValue(kMainFullscreen, false);
   state.outputWindowOpen = properties.getBoolValue(kOutputOpen, false);
@@ -112,6 +116,8 @@ void saveAppState(const AppState& state, juce::PropertySet& properties) {
   writeList(properties, kRecentlyPlayed, state.recentlyPlayedPresets);
   properties.setValue(kMidiMappings, state.midiMappings);
   properties.setValue(kTagFilter, state.tagFilter);
+  properties.setValue(kMediaSource, state.mediaSourcePath);
+  properties.setValue(kMediaBlend, state.mediaBlend);
   writeBounds(properties, kMainBounds, state.mainWindowBounds);
   properties.setValue(kMainFullscreen, state.mainWindowFullscreen);
   properties.setValue(kOutputOpen, state.outputWindowOpen);

@@ -87,6 +87,10 @@ struct ProjectMFunctions {
   // 4.2: renders into the given FBO. (4.1.7's projectm_opengl_render_frame
   // always drew its final composite to framebuffer 0; see ADR-0008.)
   void (*openglRenderFrameFbo)(ProjectMHandle instance, std::uint32_t framebufferObjectId) = nullptr;
+  // 4.2: draws a texture into the active preset(s)' main texture, so it feeds
+  // the preset's own warp and decay (8.6f, media "Burn in").
+  void (*openglBurnTexture)(ProjectMHandle instance, std::uint32_t texture, int left, int top, int width,
+                            int height) = nullptr;
 
   void (*setPresetSwitchFailedEventCallback)(ProjectMHandle instance,
                                               ProjectMPresetSwitchFailedCallback callback,

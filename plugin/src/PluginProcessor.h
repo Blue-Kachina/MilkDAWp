@@ -13,6 +13,8 @@
 #include "milkdawp/core/HostTransport.h"
 #include "milkdawp/core/SeqlockSnapshot.h"
 #include "milkdawp/core/StateSchema.h"
+#include "milkdawp/engine/ControlMapping.h"
+#include "milkdawp/engine/OscRemote.h"
 #include "milkdawp/engine/OutputWindow.h"
 #include "milkdawp/engine/Visualizer.h"
 
@@ -51,7 +53,8 @@ namespace milkdawp::plugin {
 /// from the actual bytes of a v1 blob, and no real one has been provided yet.
 class MilkDAWpAudioProcessor final : public juce::AudioProcessor,
                                      private juce::AudioProcessorValueTreeState::Listener,
-                                     private juce::AsyncUpdater {
+                                     private juce::AsyncUpdater,
+                                     private juce::Timer {
 public:
   MilkDAWpAudioProcessor();
   ~MilkDAWpAudioProcessor() override;
@@ -163,6 +166,16 @@ public:
   [[nodiscard]] core::WindowLayout windowLayout() const;
   /// Message thread: the editor reports its detached-controls window.
   void setControlsLayout(bool floating, juce::Rectangle<int> bounds);
+  /// 8.6: the media source Media Mix shows (an image file; empty: none).
+  /// Saved with the state. A file that can't be opened leaves no source and
+  /// lands in the recent errors. Any thread.
+  void setMediaSourcePath(const std::string& path);
+  [[nodiscard]] std::string mediaSourcePath() const;
+  /// 8.6e: how the media meets the picture (Displace included). Saved with the state.
+  void setMediaBlend(engine::LayerBlend blend) noexcept { visualizer_->renderEngine().primaryLayer().setMediaBlend(blend); }
+  [[nodiscard]] engine::LayerBlend mediaBlend() noexcept { return visualizer_->renderEngine().primaryLayer().mediaBlend(); }
+  /// 8.4: the process-wide OSC remote (Settings > OSC remote control).
+  [[nodiscard]] engine::OscRemote& oscRemote() noexcept { return *osc_; }
 
   juce::AudioProcessorValueTreeState apvts;
 
@@ -170,6 +183,9 @@ private:
   /// Restored state reopens (or closes) the Output window here, on the
   /// message thread, whatever thread setStateInformation ran on.
   void handleAsyncUpdate() override;
+  /// Message thread, 10 Hz: Lock Macros (Phase 8.1). When the playing preset
+  /// changes, un-locked Macros move to the new preset's defaults as gestures.
+  void timerCallback() override;
   void updateOutputLayout();
   /// Windowed bounds for a new Output window: the saved ones, moved onto the
   /// chosen target display when Settings -> Output picked one that is connected.
@@ -190,6 +206,9 @@ private:
 
   std::unique_ptr<engine::Visualizer> visualizer_;
   std::unique_ptr<engine::OutputWindow> outputWindow_;
+  // 8.4: the process's OSC remote, shared with every other instance.
+  juce::SharedResourcePointer<engine::OscRemote> osc_;
+  int oscHandle_ = 0;
   // Layers. `registryEntry_` is this instance in the process-wide registry;
   // `hub_` is the entry it currently sends its picture to (null: own window).
   std::shared_ptr<LayerRegistry::Entry> registryEntry_;
@@ -205,31 +224,29 @@ private:
   std::unique_ptr<core::HostTransport> hostTransport_;
   core::SeqlockSnapshot<core::BeatClockState> beatClockSnapshot_;
 
-  // Raw parameter values, read on the audio thread every block.
+  // Every engine-read parameter and its APVTS atomic, copied into
+  // ParameterValues on the audio thread every block (readControls). Filled once
+  // in the constructor; never resized after.
+  struct EngineParameter {
+    float engine::ParameterValues::*member;
+    std::atomic<float>* raw;
+  };
+  std::vector<EngineParameter> engineParameters_;
+  // The layer parameters, also read on parameter-change callbacks (applyLayerParams).
   struct RawParameters {
-    std::atomic<float>* beatSensitivity = nullptr;
-    std::atomic<float>* transitionDurationSeconds = nullptr;
-    std::atomic<float>* shuffle = nullptr;
-    std::atomic<float>* lockCurrentPreset = nullptr;
-    std::atomic<float>* presetIndex = nullptr;
-    std::atomic<float>* transitionJitterEnabled = nullptr;
-    std::atomic<float>* transitionDurationMin = nullptr;
-    std::atomic<float>* transitionDurationMax = nullptr;
-    std::atomic<float>* hardCutEnabled = nullptr;
-    std::atomic<float>* softCutDuration = nullptr;
-    std::atomic<float>* qualityOverride = nullptr;
-    std::atomic<float>* transitionMode = nullptr;
-    std::atomic<float>* transitionBars = nullptr;
-    std::atomic<float>* presetSelectionPolicy = nullptr;
-    std::atomic<float>* energyThreshold = nullptr;
-    std::atomic<float>* useHostTempo = nullptr;
     std::atomic<float>* layerOpacity = nullptr;
     std::atomic<float>* layerBlend = nullptr;
     std::atomic<float>* layerMute = nullptr;
     std::atomic<float>* layerOrder = nullptr;
-    std::atomic<float>* transitionGridSync = nullptr;
-    std::atomic<float>* transitionGridOffset = nullptr;
   } raw_;
+
+  // Lock Macros: the preset last seen playing (message thread), and the one a
+  // restored session is about to bring back. Changes from nothing, and the
+  // restore landing, are not preset changes: the session's own Macro values stay.
+  std::string lastPresetPath_;
+  std::string pendingRestorePath_; // guarded by layoutMutex_
+  std::string mediaSourcePath_;    // guarded by layoutMutex_
+  juce::uint32 restoreDeadlineMs_ = 0;
 
   int editorWidth_ = 480;
   int editorHeight_ = 270;

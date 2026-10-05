@@ -5,6 +5,7 @@
 
 #include <string_view>
 
+#include "milkdawp/core/VisualControls.h"
 #include "milkdawp/engine/Director.h"
 
 namespace milkdawp::engine {
@@ -41,13 +42,50 @@ struct ParameterValues {
   float layerOrder = 0.0f;
   float transitionGridSync = 0.0f;
   float transitionGridOffset = 0.0f;
+  // Phase 8.1: the Visual globals (EngineControls::visual), at their neutral values.
+  float visualHue = 0.0f;
+  float visualSaturation = 1.0f;
+  float visualBrightness = 1.0f;
+  float visualSpeed = 1.0f;
+  float visualZoom = 0.0f;
+  float visualRotation = 0.0f;
+  float visualWarp = 1.0f;
+  float visualTrails = 0.0f;
+  float visualWaveSize = 1.0f;
+  float visualPixelate = 0.0f;
+  float visualGlow = 0.0f;
+  float visualBlur = 0.0f;
+  float visualMirror = 0.0f;
+  float visualKaleidoscope = 0.0f;
+  float visualRgbSplit = 0.0f;
+  float visualMediaMix = 0.0f;
+  // Macros carry no engine meaning until Stage B gives presets a use for them.
+  float macro1 = 0.0f;
+  float macro2 = 0.0f;
+  float macro3 = 0.0f;
+  float macro4 = 0.0f;
+  float macro5 = 0.0f;
+  float macro6 = 0.0f;
+  float macro7 = 0.0f;
+  float macro8 = 0.0f;
+  float lockMacros = 0.0f;
+  // 8.2b: the layer gate (EngineControls::gate).
+  float layerGateEnabled = 0.0f;
+  float layerGateThreshold = -80.0f;
+  float layerGateRelease = 80.0f;
 };
 
-/// The field for a `ParameterModel` id, or nullptr for parameters the engine
+/// The member for a `ParameterModel` id, or nullptr for parameters the engine
 /// does not read (the momentary triggers, and v1's hard-cut sensitivity and
-/// interval, which have no v2 meaning yet).
+/// interval, which have no v2 meaning yet). Lets a shell look each id up once
+/// and copy its values every block without searching again.
+[[nodiscard]] float ParameterValues::* parameterMember(std::string_view id) noexcept;
+/// The field for a `ParameterModel` id (see `parameterMember`).
 [[nodiscard]] float* parameterField(ParameterValues& values, std::string_view id) noexcept;
 [[nodiscard]] const float* parameterField(const ParameterValues& values, std::string_view id) noexcept;
+
+/// The Visual globals in engine units. Real-time safe.
+[[nodiscard]] core::VisualControls toVisualControls(const ParameterValues& values) noexcept;
 
 /// qualityOverride's choices (Auto / Low / Medium / High) as an FBO scale.
 /// Auto is 0: the render engine picks the scale itself (adaptive quality, 5.3).

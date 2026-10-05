@@ -42,6 +42,10 @@ juce_add_plugin(milkdawp_plugin
   # editor without a DAW); the shipped app is milkdawp_app.
   FORMATS                     ${_mdw_formats}
   VST3_CATEGORIES             "Fx" "Analyzer"
+  # 8.6b: for the Standalone. In a DAW, macOS asks in the host's name and uses
+  # the host's own camera permission (some hosts have none: then no camera).
+  CAMERA_PERMISSION_ENABLED   TRUE
+  CAMERA_PERMISSION_TEXT      "MilkDAWp shows your camera in the visuals when you choose it as the media source. Nothing is recorded."
   PRODUCT_NAME                "${_mdw_product_name}"
 )
 unset(_mdw_plugin_code)

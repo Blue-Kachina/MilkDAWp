@@ -24,14 +24,33 @@ struct ParameterSpec {
   bool automatable = true;
   std::string v1Alias;                // v1's parameter id, or "" if this parameter is new in v2
   std::vector<std::string> choices;   // Choice only, in index order (defaultValue is the index)
+  /// The host's parameter group this belongs to ("" = top level). Groups must
+  /// be contiguous runs in `allParameters()`: hosts such as REAPER store
+  /// automation by parameter index, so grouping must never reorder (ADR-0011).
+  std::string group;
+  /// Float only: the value at the middle of the knob's travel, for ranges
+  /// that want more resolution at one end (0 = linear).
+  float skewCentre = 0.0f;
 };
 
-/// The full v1.0 parameter surface: v1's 15 parameters carried forward
-/// unchanged (§2.9: "a good 1.0 surface... basis for state migration") plus
-/// the new v2-only transition-scheduling parameters from §4.4 (mode, bar
-/// count, preset-selection policy), defaulted per §7 Phase 3.4 ("Beat-quantized,
-/// 4 bars, soft 2 beats").
+/// The parameter groups `ParameterSpec::group` names, as (id, display name).
+struct ParameterGroup {
+  std::string id;
+  std::string displayName;
+};
+[[nodiscard]] const std::vector<ParameterGroup>& parameterGroups();
+
+/// The number of Macro slots (Phase 8.1): `macro1` .. `macro8`.
+inline constexpr int kMacroCount = 8;
+
+/// The full parameter surface: v1's 15 parameters carried forward unchanged
+/// (§2.9: "a good 1.0 surface... basis for state migration"), the v2-only
+/// transition-scheduling and Layers parameters, then Phase 8's Visual globals,
+/// Macros and layer gate (ADR-0011). New parameters are only ever appended.
 [[nodiscard]] const std::vector<ParameterSpec>& allParameters();
+
+/// "macro1" .. "macro8" for slot 0 .. 7.
+[[nodiscard]] std::string macroParameterId(int slot);
 
 /// Look up a parameter by its v2 id. Returns nullptr if not found.
 [[nodiscard]] const ParameterSpec* findParameter(const std::vector<ParameterSpec>& params,

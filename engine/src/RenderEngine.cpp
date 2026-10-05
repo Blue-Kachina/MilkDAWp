@@ -12,8 +12,12 @@
 #include <juce_opengl/juce_opengl.h>
 
 #include "milkdawp/core/AdaptiveQuality.h"
+#include "milkdawp/core/LayerGate.h"
+#include "milkdawp/core/PresetClock.h"
+#include "milkdawp/engine/EffectsChain.h"
 #include "milkdawp/engine/GlFrameTarget.h"
 #include "milkdawp/engine/LayerCompositor.h"
+#include "milkdawp/engine/MediaSource.h"
 #include "milkdawp/engine/OffscreenGLContext.h"
 #include "milkdawp/engine/PcmFeeder.h"
 #include "milkdawp/engine/ProjectMInstance.h"
@@ -131,6 +135,85 @@ void onProjectMLog(const char* message, int, void* userData) {
   }
 }
 
+// A media source's newest frame as a GL texture (8.6), uploaded only when the
+// source hands over a new one. Render thread only, with the context current.
+class MediaTexture {
+public:
+  MediaTexture() = default;
+  ~MediaTexture() { release(); }
+  MediaTexture(const MediaTexture&) = delete;
+  MediaTexture& operator=(const MediaTexture&) = delete;
+
+  /// Follows `source` (null: none). False while there is nothing to show.
+  bool update(const std::shared_ptr<MediaSource>& source) {
+    using namespace ::juce::gl;
+    if (source == nullptr) {
+      release();
+      return false;
+    }
+    std::uint64_t serial = 0;
+    const auto frame = source->latestFrame(serial);
+    if (frame == nullptr || serial == 0 || frame->width <= 0 || frame->height <= 0) {
+      return false;
+    }
+    if (source == source_ && serial == serial_) {
+      return true;
+    }
+    if (texture_ == 0) {
+      glGenTextures(1, &texture_);
+      glBindTexture(GL_TEXTURE_2D, texture_);
+      // Mipmapped: Displace reads a smoothed copy, and big images shrink cleanly.
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    } else {
+      glBindTexture(GL_TEXTURE_2D, texture_);
+    }
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    if (frame->width == width_ && frame->height == height_) {
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width_, height_, GL_RGBA, GL_UNSIGNED_BYTE, frame->rgba.data());
+    } else {
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, frame->width, frame->height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                   frame->rgba.data());
+      width_ = frame->width;
+      height_ = frame->height;
+    }
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    source_ = source;
+    serial_ = serial;
+    return true;
+  }
+
+  /// How it goes over a `width` x `height` picture at `opacity` with `blend`: filling it,
+  /// centred, cropped rather than stretched, its own transparency kept.
+  [[nodiscard]] LayerDraw draw(float opacity, LayerBlend blend, int width, int height) const {
+    const auto uv = coverUvScale(width_, height_, width, height);
+    return {texture_, opacity, blend, true, uv.x, uv.y};
+  }
+  /// For Burn in (8.6f), which hands the texture to projectM as is.
+  [[nodiscard]] std::uint32_t texture() const noexcept { return texture_; }
+
+private:
+  void release() {
+    if (texture_ != 0) {
+      ::juce::gl::glDeleteTextures(1, &texture_);
+    }
+    texture_ = 0;
+    width_ = 0;
+    height_ = 0;
+    source_.reset();
+    serial_ = 0;
+  }
+
+  std::uint32_t texture_ = 0; // a GLuint
+  int width_ = 0;
+  int height_ = 0;
+  std::shared_ptr<MediaSource> source_;
+  std::uint64_t serial_ = 0;
+};
+
 // Render-thread state for one layer: its projectM instance, the cursor it
 // reads its channel's audio with, and its load-failure flag. Always held by
 // unique_ptr: projectM keeps a pointer to `loadFailure`, so a Layer must never
@@ -150,10 +233,36 @@ struct Layer {
   PcmFeeder feeder;
   LoadFailureFlag loadFailure;
   float appliedBeatSensitivity;
-  // Where this layer draws before the compositor mixes it. Only exists while
-  // there is more than one layer: a lone layer draws straight into the output.
+  // Where this layer draws before the compositor mixes it or effects run over
+  // it. A lone layer with neutral effects and an open gate never makes one: it
+  // draws straight into the output.
   std::unique_ptr<GlFrameTarget> target;
+  // Phase 8: this frame's Visual globals, the effects over this layer (or, for
+  // the primary layer, over the whole canvas), and where they draw when the
+  // result still has to be mixed.
+  core::VisualControls visual;
+  EffectsState effects;
+  std::unique_ptr<GlFrameTarget> fxTarget;
+  // 8.3: the clock this layer's preset runs on, so Speed never jumps it.
+  core::PresetClock clock;
+  // 8.2b: the gate, and the level it listens to. Hosts with large buffers
+  // deliver audio less often than once a frame, so a frame with no new audio
+  // keeps the last level for a while instead of counting as silence.
+  core::LayerGate gate;
+  float lastPeakDb = -200.0f;
+  float secondsWithoutAudio = 0.0f;
+  float gateEnvelope = 1.0f;
+  // 8.6: the layer's media source on the GPU, and whether Media Mix shows it this frame.
+  MediaTexture media;
+  bool mediaShown = false;
+  // Burn in (8.6f): drawn into the preset rather than over it, through urnTarget.
+  bool mediaBurns = false;
+  std::unique_ptr<GlFrameTarget> burnTarget;
 };
+
+// How long a layer's level holds when no new audio arrives, before it counts as
+// silence (the transport stopped, or the host stopped calling).
+constexpr float kAudioGapSeconds = 0.15f;
 
 // The readback fallback's GPU half (ADR-0009): two pixel-pack buffers used in
 // turn. Each frame's glReadPixels goes into one while the other, filled a
@@ -476,6 +585,14 @@ void RenderEngine::run() {
   // Mixes the layers once there are several; a lone layer never uses it. If it
   // fails to build, several layers degrade to showing the primary one.
   LayerCompositor compositor;
+  // Phase 8.2: the Visual globals' post effects. If its shaders don't build,
+  // pictures go out without effects and the reason is in the recent errors.
+  EffectsChain effectsChain;
+  if (!effectsChain.ok()) {
+    errors_.add("effects", effectsChain.error());
+  }
+  // The mixed canvas, when the primary layer's effects run over it.
+  std::unique_ptr<GlFrameTarget> canvasTarget;
 
   // addLayer()/removeLayer() requests, answered between frames. Creating and
   // destroying a projectM instance needs this thread's context, hence here.
@@ -543,6 +660,8 @@ void RenderEngine::run() {
   adaptive.setTargetFps(static_cast<float>(std::max(config_.fps, 1)));
   bool wasAutoQuality = false;
   auto lastFrameEnd = Clock::now();
+  // Phase 8: the step every layer's preset clock, gate and effects advance by.
+  auto lastFrameStart = Clock::now() - frameInterval;
   // 5.6: this engine's part of the process-wide GPU load, and its own cost
   // smoothed for the others to read (same time constant as AdaptiveQuality).
   GpuShare gpuShare;
@@ -589,6 +708,7 @@ void RenderEngine::run() {
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
       nextFrame = Clock::now();
+      lastFrameStart = nextFrame - frameInterval; // a pause is not time the presets lived through
       fpsWindowStart = nextFrame;
       framesInWindow = 0;
       continue;
@@ -600,6 +720,10 @@ void RenderEngine::run() {
     if (Clock::now() - nextFrame > frameInterval * 4) {
       nextFrame = Clock::now(); // fell far behind (a slow preset load): don't try to catch up
     }
+    const auto frameStart = Clock::now();
+    const float frameDt = std::clamp(static_cast<float>(millisecondsBetween(lastFrameStart, frameStart) / 1000.0),
+                                     0.0f, static_cast<float>(core::PresetClock::kMaxStepSeconds));
+    lastFrameStart = frameStart;
 
     const float beatSensitivity = beatSensitivity_.load();
     for (auto& layer : layers) {
@@ -650,7 +774,9 @@ void RenderEngine::run() {
             }
             const bool soft = due.request.cutStyle == core::CutStyle::Soft;
             if (soft) {
-              layer->instance->setSoftCutDuration(std::max(static_cast<double>(due.request.blendSeconds), 0.1));
+              const double blend = std::max(static_cast<double>(due.request.blendSeconds), 0.1);
+              layer->instance->setSoftCutDuration(blend);
+              layer->clock.onSoftCut(blend); // a slow Speed must not stall the blend
             }
             layer->loadFailure.failed = false;
             const auto loadStart = Clock::now();
@@ -683,12 +809,60 @@ void RenderEngine::run() {
 
       // A layer that will not be drawn this frame is not fed either: the feeder
       // only ever hands over the newest audio, so it picks up from "now" later.
+      // A gated layer is still fed: closing the gate hides it, it doesn't stop it.
+      std::size_t fed = 0;
+      float peakDb = -200.0f;
       if (!multiLayer || (channel.visible() && channel.opacity() > 0.0f)) {
-        layer->feeder.feed(channel.audio(), [&](const float* samples, std::size_t frames, int channels) {
+        fed = layer->feeder.feed(channel.audio(), [&](const float* samples, std::size_t frames, int channels) {
           layer->instance->addPcm(samples, frames, channels);
+          peakDb = core::peakDbfs(samples, frames * static_cast<std::size_t>(std::max(channels, 1)));
         });
       }
+      if (fed > 0) {
+        layer->lastPeakDb = peakDb;
+        layer->secondsWithoutAudio = 0.0f;
+      } else {
+        layer->secondsWithoutAudio += frameDt;
+        if (layer->secondsWithoutAudio > kAudioGapSeconds) {
+          layer->lastPeakDb = -200.0f;
+        }
+      }
+      layer->gateEnvelope = layer->gate.process(layer->lastPeakDb, frameDt, channel.gate());
+      channel.reportGate(layer->lastPeakDb, layer->gate.isOpen(), layer->gateEnvelope);
+
+      layer->visual = channel.visual();
+      layer->effects.advance(layer->visual, frameDt);
+      // The texture follows the source even at Media Mix 0, so turning it up is instant.
+      const auto mediaSource = channel.mediaSource();
+      if (mediaSource != nullptr) {
+        mediaSource->setTimeline(channel.mediaTimeline()); // a video follows the host (8.6c)
+      }
+      layer->mediaShown = layer->media.update(mediaSource) && layer->visual.mediaMix > 0.0f;
+      layer->mediaBurns = layer->mediaShown && channel.mediaBlend() == LayerBlend::BurnIn;
+      if (layer->mediaBurns) {
+        layer->mediaShown = false; // never drawn over the picture
+      }
     }
+
+    // Renders one layer's preset into `framebuffer`, on its own clock (8.3).
+    const auto renderLayer = [&](Layer& layer, std::uint32_t framebuffer) {
+      layer.instance->setFrameTime(layer.clock.advance(frameDt, layer.visual.speed));
+      if (layer.mediaBurns) {
+        // Every frame, with Media Mix as the burn's alpha. (Burning only every
+        // few frames at low Media Mix strobed: the preset faded it in between.)
+        // Through a frame-sized copy, so it is cropped to fit like the other modes.
+        const int w = layer.instance->width();
+        const int h = layer.instance->height();
+        if (!layer.burnTarget) {
+          layer.burnTarget = std::make_unique<GlFrameTarget>(w, h);
+        } else {
+          layer.burnTarget->resize(w, h);
+        }
+        compositor.stamp(*layer.burnTarget, layer.media.draw(layer.visual.mediaMix, LayerBlend::Normal, w, h));
+        layer.instance->burnTexture(layer.burnTarget->texture());
+      }
+      layer.instance->renderTo(framebuffer);
+    };
 
     const std::size_t index = (lastIndex + 1) % kFrameCount;
     const auto renderStart = Clock::now();
@@ -697,11 +871,48 @@ void RenderEngine::run() {
     // whole, several are timed layer by layer (and the mix) and summed.
     std::array<Layer*, kMaxLayers> drawn{};
     std::size_t drawnCount = 0;
+    const int frameWidth = targets[index]->width();
+    const int frameHeight = targets[index]->height();
+    const auto frameSized = [&](std::unique_ptr<GlFrameTarget>& target) -> GlFrameTarget& {
+      if (!target) {
+        target = std::make_unique<GlFrameTarget>(frameWidth, frameHeight);
+      } else {
+        target->resize(frameWidth, frameHeight);
+      }
+      return *target;
+    };
     if (!composited) {
-      // One layer draws straight into the output frame (so does the primary
-      // alone if the compositor could not be built).
+      // One layer (or the primary alone if the compositor could not be built).
+      // With neutral effects and an open gate it draws straight into the
+      // output frame (media, if shown, over it there); otherwise through its
+      // own target, its media, its effects, then a fade from black by the gate.
       glBeginQuery(GL_TIME_ELAPSED, timerQuery);
-      primary.instance->renderTo(targets[index]->framebuffer());
+      const bool effects = effectsChain.ok() && primary.effects.active();
+      const bool fade = compositor.ok() && primary.gateEnvelope < 1.0f;
+      const auto overlayMedia = [&](const GlFrameTarget& target) {
+        if (primary.mediaShown) {
+          const auto draw = primary.media.draw(primary.visual.mediaMix, primary.channel.mediaBlend(), target.width(), target.height());
+          compositor.overlay(target, std::span<const LayerDraw>(&draw, 1));
+        }
+      };
+      if (!effects && !fade) {
+        renderLayer(primary, targets[index]->framebuffer());
+        overlayMedia(*targets[index]);
+      } else {
+        auto& raw = frameSized(primary.target);
+        renderLayer(primary, raw.framebuffer());
+        overlayMedia(raw);
+        std::uint32_t texture = raw.texture();
+        if (effects) {
+          const auto& out = fade ? frameSized(primary.fxTarget) : *targets[index];
+          effectsChain.apply(primary.effects, texture, out);
+          texture = out.texture();
+        }
+        if (fade) {
+          const LayerDraw draw{texture, primary.gateEnvelope, LayerBlend::Normal};
+          compositor.compose(*targets[index], std::span<const LayerDraw>(&draw, 1));
+        }
+      }
       glEndQuery(GL_TIME_ELAPSED);
     } else {
       // Several: each drawn layer renders into its own target, then the
@@ -717,21 +928,49 @@ void RenderEngine::run() {
           drawn[at] = layer.get();
         }
       }
+      // A sender's effects run over its own layer; the primary layer's (this
+      // instance's, which owns the window) run over the mixed canvas below. A
+      // gated-out layer still renders, so it is where it should be on reopening,
+      // but is left out of the mix.
       std::array<LayerDraw, kMaxLayers> draws{};
+      std::size_t drawCount = 0;
       for (std::size_t i = 0; i < drawnCount; ++i) {
         Layer& layer = *drawn[i];
-        if (!layer.target) {
-          layer.target = std::make_unique<GlFrameTarget>(targets[index]->width(), targets[index]->height());
-        } else {
-          layer.target->resize(targets[index]->width(), targets[index]->height());
-        }
+        auto& raw = frameSized(layer.target);
         glBeginQuery(GL_TIME_ELAPSED, layerQueries[i]);
-        layer.instance->renderTo(layer.target->framebuffer());
+        renderLayer(layer, raw.framebuffer());
+        if (&layer != &primary && layer.mediaShown) {
+          const auto draw = layer.media.draw(layer.visual.mediaMix, layer.channel.mediaBlend(), raw.width(), raw.height());
+          compositor.overlay(raw, std::span<const LayerDraw>(&draw, 1));
+        }
+        std::uint32_t texture = raw.texture();
+        if (&layer != &primary && effectsChain.ok() && layer.effects.active()) {
+          auto& out = frameSized(layer.fxTarget);
+          effectsChain.apply(layer.effects, texture, out);
+          texture = out.texture();
+        }
         glEndQuery(GL_TIME_ELAPSED);
-        draws[i] = {layer.target->texture(), layer.channel.opacity(), layer.channel.blend()};
+        const float opacity = layer.channel.opacity() * layer.gateEnvelope;
+        if (opacity > 0.0f) {
+          draws[drawCount++] = {texture, opacity, layer.channel.blend()};
+        }
       }
       glBeginQuery(GL_TIME_ELAPSED, layerQueries[kMaxLayers]);
-      compositor.compose(*targets[index], std::span<const LayerDraw>(draws.data(), drawnCount));
+      const std::span<const LayerDraw> mix(draws.data(), drawCount);
+      // The window owner's media and effects go over the whole mix.
+      const bool canvasEffects = effectsChain.ok() && primary.effects.active();
+      if (!canvasEffects) {
+        canvasTarget.reset();
+      }
+      const auto& canvas = canvasEffects ? frameSized(canvasTarget) : *targets[index];
+      compositor.compose(canvas, mix);
+      if (primary.mediaShown) {
+        const auto draw = primary.media.draw(primary.visual.mediaMix, primary.channel.mediaBlend(), canvas.width(), canvas.height());
+        compositor.overlay(canvas, std::span<const LayerDraw>(&draw, 1));
+      }
+      if (canvasEffects) {
+        effectsChain.apply(primary.effects, canvas.texture(), *targets[index]);
+      }
       glEndQuery(GL_TIME_ELAPSED);
     }
     // Other contexts sample this texture next; it must be complete first.

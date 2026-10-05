@@ -8,9 +8,14 @@
 
 #include "AudioSettingsPanel.h"
 #include "milkdawp/core/DisplayLayout.h"
+#include "milkdawp/core/MacroLock.h"
 #include "milkdawp/core/ParameterModel.h"
 #include "milkdawp/core/Version.h"
+#include "milkdawp/core/OscAddress.h"
+#include "milkdawp/engine/MediaSource.h"
 #include "milkdawp/ui/Icons.h"
+#include "milkdawp/ui/MediaMenu.h"
+#include "milkdawp/ui/OscSettingsDialog.h"
 #include "milkdawp/ui/PresetInfoMenu.h"
 #include "milkdawp/ui/PresetMenu.h"
 #include "milkdawp/ui/Shortcuts.h"
@@ -103,6 +108,8 @@ MainComponent::MainComponent(engine::Visualizer& visualizer, AudioSourceRouter& 
   // Above the drawer; hidden until chosen.
   surface_.addChildComponent(transitionSettings_);
   transitionSettings_.onCloseRequested = [this] { setTransitionSettingsVisible(false); };
+  surface_.addChildComponent(visualSettings_); // Phase 8.1
+  visualSettings_.onCloseRequested = [this] { setVisualSettingsVisible(false); };
 
   // 6.1b: the preset browser, a popover like the others.
   surface_.addChildComponent(presetBrowser_);
@@ -210,7 +217,19 @@ MainComponent::MainComponent(engine::Visualizer& visualizer, AudioSourceRouter& 
   binding_.bind(transitionSettings_.gridToggle, "transitionGridSync");
   binding_.bind(transitionSettings_.gridOffsetSlider, "transitionGridOffset");
   transitionSettings_.refreshRelevance();
+  for (const auto& [id, slider] : visualSettings_.sliders()) {
+    binding_.bind(*slider, id);
+  }
+  for (const auto& [id, toggle] : visualSettings_.toggles()) {
+    binding_.bind(*toggle, id);
+  }
+  for (const auto& [id, combo] : visualSettings_.combos()) {
+    binding_.bind(*combo, id);
+  }
   transitionSettings_.tagFilterEditor.setText(state_.tagFilter, juce::dontSendNotification);
+  setMediaSource(state_.mediaSourcePath); // 8.6: as it was last time
+  visualizer_.renderEngine().primaryLayer().setMediaBlend(
+      static_cast<engine::LayerBlend>(juce::jlimit(0, engine::kMediaBlendCount - 1, state_.mediaBlend)));
   transitionSettings_.onTagFilterChanged = [this](const juce::String& text) {
     state_.tagFilter = text;
     visualizer_.director().setTagFilter(text.toStdString());
@@ -240,6 +259,36 @@ MainComponent::MainComponent(engine::Visualizer& visualizer, AudioSourceRouter& 
   };
   binding_.refreshMidiLearnTooltips();
 
+  // 8.4: OSC addresses the app as "app" (or with no instance at all).
+  {
+    engine::OscRemote::Endpoint endpoint;
+    endpoint.name = [] { return std::string("app"); };
+    endpoint.id = [] { return std::string("app"); };
+    endpoint.setParameter = [this](const std::string& id, float value, bool normalized) {
+      if (id == "triggerNext" || id == "triggerPrev") {
+        if (value > 0.5f) {
+          id == "triggerNext" ? nextPreset() : previousPreset();
+        }
+        return true;
+      }
+      const auto* spec = core::findParameter(core::allParameters(), id);
+      if (spec == nullptr || engine::parameterField(state_.parameters, id) == nullptr) {
+        return false;
+      }
+      binding_.set(id, normalized ? core::plainFromNormalized(*spec, value)
+                                  : juce::jlimit(spec->minValue, spec->maxValue, value));
+      return true;
+    };
+    endpoint.next = [this] { nextPreset(); };
+    endpoint.previous = [this] { previousPreset(); };
+    endpoint.status = [this] { return visualizer_.director().status(); };
+    endpoint.presetName = [this] {
+      const auto index = visualizer_.director().status().currentIndex;
+      return index >= 0 ? visualizer_.director().presetName(index) : std::string{};
+    };
+    oscHandle_ = osc_->add(std::move(endpoint));
+  }
+
   publishControls();
   setWantsKeyboardFocus(true);
   setSize(kDefaultWidth, kDefaultHeight);
@@ -249,6 +298,7 @@ MainComponent::MainComponent(engine::Visualizer& visualizer, AudioSourceRouter& 
 
 MainComponent::~MainComponent() {
   stopTimer();
+  osc_->remove(oscHandle_);
   input_.device().onDeviceChanged = nullptr;
   input_.systemAudio().onPermissionChanged = nullptr;
   midiLearn_.onChanged = nullptr;
@@ -328,6 +378,9 @@ void MainComponent::setPresetBrowserVisible(bool visible) {
     // One popover at a time: at small window sizes they would overlap.
     setTransitionSettingsVisible(false);
     setOutputSettingsVisible(false);
+    if (visualSettings_.isVisible()) {
+      setVisualSettingsVisible(false);
+    }
     layoutPresetBrowser();
   }
   presetBrowser_.setVisible(visible);
@@ -419,6 +472,9 @@ void MainComponent::setOutputSettingsVisible(bool visible) {
   if (visible) {
     setTransitionSettingsVisible(false);
     setPresetBrowserVisible(false);
+    if (visualSettings_.isVisible()) {
+      setVisualSettingsVisible(false);
+    }
     outputSettings_.refresh(state_.outputDefaultFullscreen,
                             {state_.outputTargetDisplay.getX(), state_.outputTargetDisplay.getY(),
                              state_.outputTargetDisplay.getWidth(), state_.outputTargetDisplay.getHeight()});
@@ -449,6 +505,9 @@ void MainComponent::setTransitionSettingsVisible(bool visible) {
   if (visible && presetBrowser_.isVisible()) {
     setPresetBrowserVisible(false);
   }
+  if (visible && visualSettings_.isVisible()) {
+    setVisualSettingsVisible(false);
+  }
   transitionSettings_.setVisible(visible);
   if (visible) {
     transitionSettings_.refreshRelevance();
@@ -458,6 +517,58 @@ void MainComponent::setTransitionSettingsVisible(bool visible) {
   } else {
     grabKeyboardFocus(); // the panel's widgets may have taken it; shortcuts need it back
   }
+}
+
+void MainComponent::setVisualSettingsVisible(bool visible) {
+  if (visible) {
+    // One popover at a time: at small window sizes they would overlap.
+    setTransitionSettingsVisible(false);
+    setOutputSettingsVisible(false);
+    setPresetBrowserVisible(false);
+    layoutVisualSettings();
+  }
+  visualSettings_.setVisible(visible);
+  if (visible) {
+    visualSettings_.toFront(false);
+    drawer_.reveal();
+    ui::focusFirstControl(visualSettings_); // 5.8: Tab through it, Esc closes
+  } else {
+    grabKeyboardFocus();
+  }
+}
+
+void MainComponent::setMediaSource(const juce::String& path) {
+  std::string error;
+  auto source = engine::openMediaSource(path.toStdString(), error);
+  if (!error.empty()) {
+    visualizer_.renderEngine().errors().add("media", error);
+  }
+  visualizer_.renderEngine().primaryLayer().setMediaSource(std::move(source));
+  if (state_.mediaSourcePath != path) {
+    state_.mediaSourcePath = path; // kept even if missing now: the file may come back
+    notifyStateChanged();
+  }
+}
+
+void MainComponent::chooseMediaSource() {
+  mediaChooser_ = std::make_unique<juce::FileChooser>(
+      "Choose an image or video for Media Mix", juce::File::getSpecialLocation(juce::File::userPicturesDirectory),
+      engine::mediaFileWildcard());
+  mediaChooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                             [this](const juce::FileChooser& chooser) {
+                               if (const auto result = chooser.getResult(); result.existsAsFile()) {
+                                 setMediaSource(result.getFullPathName());
+                               }
+                             });
+}
+
+void MainComponent::layoutVisualSettings() {
+  // Same slot as the transition popover; it scrolls when the window is small.
+  const int drawerHeight = controlsWindow_ != nullptr ? 0 : ui::ControlDrawer::controlsHeight;
+  auto area = surface_.getLocalBounds().withTrimmedBottom(drawerHeight).reduced(6);
+  const auto width = std::min(ui::VisualSettingsPanel::preferredWidth, area.getWidth());
+  const auto height = std::min(visualSettings_.preferredHeight(width), area.getHeight());
+  visualSettings_.setBounds(area.removeFromBottom(height).removeFromRight(width));
 }
 
 void MainComponent::toggleOutputWindow(bool fullscreen) {
@@ -525,6 +636,7 @@ void MainComponent::setControlsFloating(bool floating) {
     drawer_.setFloating(false);
     surface_.addAndMakeVisible(drawer_);
     transitionSettings_.toFront(false); // the popover stays above the drawer
+    visualSettings_.toFront(false);
     outputSettings_.toFront(false);
     grabKeyboardFocus();
   }
@@ -619,6 +731,40 @@ juce::PopupMenu MainComponent::createMenu(int menuIndex) {
   if (all || menuIndex == PlaybackMenu) {
     menu.addItem(makeItem("Transition settings...", [this] { setTransitionSettingsVisible(!isTransitionSettingsVisible()); },
                           isTransitionSettingsVisible()));
+    menu.addItem(makeItem("Visual...", [this] { setVisualSettingsVisible(!isVisualSettingsVisible()); },
+                          isVisualSettingsVisible()));
+    {
+      juce::PopupMenu media;
+      const auto current = engine::mediaSourceDisplayName(state_.mediaSourcePath.toStdString());
+      media.addSectionHeader(current.isEmpty() ? juce::String("No media source") : current);
+      media.addSubMenu("Camera", ui::cameraMenu(engine::camerasSupported(), engine::availableCameras(),
+                                                engine::cameraDeviceName(state_.mediaSourcePath.toStdString()),
+                                                [this](const juce::String& device) {
+                                                  setMediaSource(juce::String(engine::cameraMediaPath(device)));
+                                                }));
+      media.addItem("Choose image or video...", [this] { chooseMediaSource(); });
+      media.addItem("None", true, state_.mediaSourcePath.isEmpty(), [this] { setMediaSource({}); });
+      media.addSeparator();
+      juce::PopupMenu blend; // 8.6e
+      for (int i = 0; i < engine::kMediaBlendCount; ++i) {
+        blend.addItem(engine::kMediaBlendNames[i], true, state_.mediaBlend == i, [this, i] {
+          state_.mediaBlend = i;
+          visualizer_.renderEngine().primaryLayer().setMediaBlend(static_cast<engine::LayerBlend>(i));
+          notifyStateChanged();
+        });
+      }
+      media.addSubMenu("Blend", blend);
+      menu.addSubMenu("Media source (Media Mix)", media);
+    }
+    menu.addItem(makeItem("OSC remote control...", [this] {
+      ui::showOscSettingsDialog(osc_->settings(), osc_->statusText(),
+                                [shared = juce::SharedResourcePointer<engine::OscRemote>()](
+                                    const core::OscSettings& settings) {
+                                  shared->apply(settings);
+                                  engine::saveOscSettings(settings, engine::oscSettingsFile());
+                                },
+                                this);
+    }, false));
   }
 
   if (all || menuIndex == ViewMenu) {
@@ -714,6 +860,7 @@ void MainComponent::resized() {
     drawer_.setBounds(surface_.getLocalBounds().removeFromBottom(ui::ControlDrawer::preferredHeight));
   }
   layoutTransitionSettings();
+  layoutVisualSettings();
   layoutOutputSettings();
   layoutPresetBrowser();
   layoutAbout();
@@ -755,6 +902,8 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
       setOutputSettingsVisible(false);
     } else if (transitionSettings_.isVisible()) {
       setTransitionSettingsVisible(false);
+    } else if (visualSettings_.isVisible()) {
+      setVisualSettingsVisible(false);
     } else if (diagnosticsPanel_.isVisible()) {
       setDiagnosticsVisible(false);
     } else if (isMainFullscreen && isMainFullscreen() && onToggleMainFullscreen) {
@@ -819,7 +968,26 @@ void MainComponent::timerCallback() {
       current.isNotEmpty() && current != state_.currentPresetPath) {
     state_.currentPresetPath = current;
     recordRecentlyPlayed(current);
+    if (presetSeen_) {
+      applyMacroLock();
+    }
     notifyStateChanged();
+  }
+  // The first preset this session shows (the restored one, or whatever the
+  // folder starts on) is not a change: the saved Macro values stay.
+  presetSeen_ = presetSeen_ || visualizer_.director().currentPresetPath().size() > 0;
+}
+
+void MainComponent::applyMacroLock() {
+  // Phase 8.1: un-locked Macros move to the new preset's defaults. A .milk
+  // declares none; .milkdawp presets will (Stage B).
+  const auto moves = core::macrosAfterPresetChange(binding_.get("lockMacros") > 0.5f, core::MacroDefaults{});
+  for (int slot = 0; slot < core::kMacroCount; ++slot) {
+    const auto& move = moves[static_cast<std::size_t>(slot)];
+    const auto id = core::macroParameterId(slot);
+    if (move.has_value() && binding_.get(id) != *move) {
+      binding_.set(id, *move);
+    }
   }
 }
 
@@ -884,6 +1052,10 @@ void MainComponent::updateStatusText() {
     }
   }
 
+  if (visualSettings_.isVisible()) {
+    const auto& layer = visualizer_.renderEngine().primaryLayer();
+    visualSettings_.setGateMeter(layer.gateLevelDb(), layer.gateOpen());
+  }
   if (transitionSettings_.isVisible()) {
     transitionSettings_.refreshRelevance();
     const auto tagStatus = ui::describeAutoSelection(status.autoSelectable, status.playlistSize,

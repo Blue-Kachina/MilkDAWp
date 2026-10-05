@@ -7,6 +7,10 @@ add_executable(milkdawp_engine_tests
   TransitionExecutorTests.cpp
   HeadlessRenderTests.cpp
   LayerCompositorTests.cpp
+  EffectsChainTests.cpp
+  OscRemoteTests.cpp
+  MediaSourceTests.cpp
+  VideoTests.cpp
   PcmFeederTests.cpp
   PresetHandoffTests.cpp
   PresetCompileTimeCacheTests.cpp

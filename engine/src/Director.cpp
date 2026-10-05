@@ -529,6 +529,8 @@ void Director::run() {
 
       status.bpm = beat.bpm;
       status.beatConfidence = beat.confidence;
+      status.beatIndex = beat.beatIndex;
+      status.barIndex = beat.barIndex;
       status.beatSource = hostDrives ? BeatSource::Host
                                      : (detected.confidence > 0.0f ? BeatSource::Detected : BeatSource::None);
       status.transportPlaying = playing;

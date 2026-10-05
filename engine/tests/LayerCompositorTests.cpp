@@ -286,6 +286,97 @@ TEST_CASE("LayerCompositor: add, screen and multiply", "[engine][layers][composi
   }
 }
 
+TEST_CASE("LayerCompositor: overlay draws media over the picture without clearing it", "[engine][media][compositor]") {
+  using namespace ::juce::gl;
+  CompositorRig rig;
+  if (!rig.ready()) {
+    reportUnavailable(rig.skipReason);
+    return;
+  }
+  // The picture already on the canvas.
+  glBindFramebuffer(GL_FRAMEBUFFER, rig.canvas->framebuffer());
+  glClearColor(200.0f / 255.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+  // Media: green at half its own alpha.
+  auto media = std::make_unique<GlFrameTarget>(kSize, kSize);
+  glBindFramebuffer(GL_FRAMEBUFFER, media->framebuffer());
+  glClearColor(0.0f, 200.0f / 255.0f, 0.0f, 0.5f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+  SECTION("its alpha counts when asked") {
+    const std::array draw{LayerDraw{media->texture(), 1.0f, LayerBlend::Normal, true}};
+    rig.compositor->overlay(*rig.canvas, draw);
+    checkNear(rig.centre(), {100, 100, 0});
+  }
+  SECTION("and opacity scales it further") {
+    const std::array draw{LayerDraw{media->texture(), 0.5f, LayerBlend::Normal, true}};
+    rig.compositor->overlay(*rig.canvas, draw);
+    checkNear(rig.centre(), {150, 50, 0});
+  }
+}
+
+TEST_CASE("LayerCompositor: displace pushes what is below by the media's red and green", "[engine][media][compositor]") {
+  using namespace ::juce::gl;
+  CompositorRig rig;
+  if (!rig.ready()) {
+    reportUnavailable(rig.skipReason);
+    return;
+  }
+  // Below: a left-to-right ramp, 30 per pixel.
+  std::vector<std::uint8_t> ramp(static_cast<std::size_t>(kSize * kSize) * 4);
+  for (int y = 0; y < kSize; ++y) {
+    for (int x = 0; x < kSize; ++x) {
+      auto* p = ramp.data() + static_cast<std::size_t>(y * kSize + x) * 4;
+      p[0] = static_cast<std::uint8_t>(x * 30);
+      p[1] = 0;
+      p[2] = 0;
+      p[3] = 255;
+    }
+  }
+  const auto fillCanvas = [&] {
+    glBindTexture(GL_TEXTURE_2D, rig.canvas->texture());
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kSize, kSize, GL_RGBA, GL_UNSIGNED_BYTE, ramp.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+  };
+
+  SECTION("full red pushes a tenth of the frame to the right") {
+    fillCanvas();
+    const auto media = CompositorRig::solid(255, 128, 0);
+    const std::array draw{LayerDraw{media->texture(), 1.0f, LayerBlend::Displace}};
+    rig.compositor->overlay(*rig.canvas, draw);
+    // Centre pixel 4 samples x = 4.5 + 0.8 = 5.3: 0.2 * 120 + 0.8 * 150.
+    checkNear(rig.centre(), {144, 0, 0});
+  }
+  SECTION("mid-grey moves nothing, and opacity 0 moves nothing") {
+    fillCanvas();
+    const auto grey = CompositorRig::solid(128, 128, 0);
+    const std::array still{LayerDraw{grey->texture(), 1.0f, LayerBlend::Displace}};
+    rig.compositor->overlay(*rig.canvas, still);
+    checkNear(rig.centre(), {120, 0, 0});
+    const auto red = CompositorRig::solid(255, 128, 0);
+    const std::array off{LayerDraw{red->texture(), 0.0f, LayerBlend::Displace}};
+    rig.compositor->overlay(*rig.canvas, off);
+    checkNear(rig.centre(), {120, 0, 0});
+  }
+}
+
+TEST_CASE("LayerCompositor: stamp replaces the target, opacity going into alpha", "[engine][media][compositor]") {
+  CompositorRig rig;
+  if (!rig.ready()) {
+    reportUnavailable(rig.skipReason);
+    return;
+  }
+  const auto media = CompositorRig::solid(0, 200, 0); // opaque green
+  rig.compositor->stamp(*rig.canvas, LayerDraw{media->texture(), 0.25f, LayerBlend::Normal, true});
+  int alpha = 0;
+  checkNear(rig.centre(&alpha), {0, 200, 0}); // the colour as it is, nothing mixed in
+  CHECK(std::abs(alpha - 64) <= kTolerance);  // Burn in's strength rides in alpha
+}
+
 TEST_CASE("LayerCompositor puts back the GL state projectM relies on", "[engine][layers][compositor]") {
   using namespace ::juce::gl;
   CompositorRig rig;

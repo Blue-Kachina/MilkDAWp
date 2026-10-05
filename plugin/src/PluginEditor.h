@@ -18,6 +18,7 @@
 #include "milkdawp/ui/OutputSettings.h"
 #include "milkdawp/ui/PresetBrowser.h"
 #include "milkdawp/ui/TransitionSettings.h"
+#include "milkdawp/ui/VisualSettings.h"
 
 namespace milkdawp::plugin {
 
@@ -58,6 +59,9 @@ private:
   void choosePresetFolder();
   void setTransitionSettingsVisible(bool visible);
   void layoutTransitionSettings();
+  /// Phase 8.1: Settings -> Visual (globals, Macros, gate). Shares the popover slot.
+  void setVisualSettingsVisible(bool visible);
+  void layoutVisualSettings();
   /// Settings -> Output: fullscreen default and target screen. Shares the
   /// popover slot with the transition settings, so only one shows at a time.
   void setOutputSettingsVisible(bool visible);
@@ -86,6 +90,7 @@ private:
   juce::Label sendingLabel;
   milkdawp::ui::ControlDrawer controlDrawer;
   milkdawp::ui::TransitionSettingsPanel transitionSettings;
+  milkdawp::ui::VisualSettingsPanel visualSettings;
   milkdawp::ui::OutputSettingsPanel outputSettings;
   milkdawp::ui::PresetBrowser presetBrowser;
   milkdawp::ui::AboutPanel aboutPanel;
@@ -103,7 +108,12 @@ private:
   std::vector<std::unique_ptr<SliderAttachment>> layerSliderAttachments_;
   std::unique_ptr<ComboBoxAttachment> layerBlendAttachment_;
   std::unique_ptr<ButtonAttachment> layerMuteAttachment_;
+  // The Visual panel's controls (Phase 8.1).
+  std::vector<std::unique_ptr<SliderAttachment>> visualSliderAttachments_;
+  std::vector<std::unique_ptr<ButtonAttachment>> visualButtonAttachments_;
+  std::vector<std::unique_ptr<ComboBoxAttachment>> visualComboAttachments_;
   std::unique_ptr<juce::FileChooser> folderChooser_;
+  std::unique_ptr<juce::FileChooser> mediaChooser_; // 8.6
   // Declared after controlDrawer so it is destroyed first: it only borrows
   // the drawer, and hands it back in its destructor.
   std::unique_ptr<milkdawp::ui::DetachedControlsWindow> controlsWindow_;

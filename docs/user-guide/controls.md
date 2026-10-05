@@ -58,11 +58,54 @@ window) puts it back.
 ## Panels
 
 - **Transitions** (Settings > Transition settings): how and when presets change.
+- **Visual** (Settings > Visual): how the picture looks, the Macros, and the gate.
+  See [Visual controls](#visual-controls) below.
 - **Output** (Settings > Output settings): the Output window, and layers in the plugin.
 - **Diagnostics** (`D`): what the renderer is doing, frame times, the beat, and
   recent errors. **Copy diagnostics** puts it all on the clipboard for a bug report.
 - **About** (Settings > About, or Help > About in the app): versions, credits,
   licences, and the update check.
+
+## Visual controls
+
+Every control here is a parameter, so a DAW can automate it. Double-click a
+control to put it back to its starting value, or press **Reset visual** to
+reset them all. At their starting values the picture is exactly what the preset
+draws, at no extra cost.
+
+- **Hue**, **Saturation**, **Brightness**: the colours.
+- **Speed**: how fast the preset's own motion runs. Turning it never jumps the
+  picture. It can't slow the preset's reaction to the music.
+- **Zoom** and **Rotation**: zoom in or out, and spin (Rotation is a speed; back
+  at 0 the picture settles upright).
+- **Trails**, **Pixelate**, **Glow**, **Blur**, **Mirror**, **Kaleidoscope**,
+  **RGB Split**: effects over the picture.
+- **Media Mix**: how much of the media source shows over the visual. Choose an
+  image or a camera in **Settings > Media source**; it fills the picture
+  (cropped, not stretched), an image's transparent parts stay clear, and the
+  effects above apply to it too. Cameras work on Windows and macOS (macOS asks for
+  permission the first time; in a DAW it asks in the DAW's name). Videos loop; in
+  a DAW they follow the playhead, so the same bar always shows the same frame and
+  a rendered mix is repeatable. Video files play on Windows for now (H.264 MP4
+  always works; other formats if Windows can decode them).
+  **Settings > Media source > Blend** picks how the media meets the picture:
+  Normal, Add, Screen, Multiply, Luma key, or **Displace**, where the media isn't
+  shown at all but bends the picture: its red pushes sideways, its green up and
+  down, mid-grey leaves it alone, and Media Mix sets how far. **Burn in**
+  paints the media into the preset itself, so the preset's own motion swirls and
+  fades it like anything it drew; Media Mix sets how strongly.
+- **Warp**, **Wave Size** and the **Macros** are dimmed: they need features that
+  aren't released yet, but you can already set and automate them.
+- **Lock Macros**: off, the Macros go back to the new preset's starting values
+  whenever the preset changes; on, they keep their values.
+- **Gate**: like a noise gate on a guitar. While this instance's input is below
+  **Threshold**, the picture fades out over **Release**, and it is back on the
+  next note. The meter shows the input level, the threshold as a line, and a light
+  that is lit while the picture shows. The visual keeps running while hidden.
+
+In the plugin, an instance whose Output window shows other instances as layers
+applies its Visual controls to the whole mixed picture; an instance sending its
+picture to another applies them to its own layer.
 
 ## Quality
 

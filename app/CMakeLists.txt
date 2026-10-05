@@ -83,6 +83,9 @@ juce_add_gui_app(milkdawp_app
   # Microphone access (macOS asks for permission on first input).
   MICROPHONE_PERMISSION_ENABLED TRUE
   MICROPHONE_PERMISSION_TEXT "MilkDAWp listens to your audio input to animate the visuals. Nothing is recorded."
+  # 8.6b: a camera as the media source (macOS asks the first time one opens).
+  CAMERA_PERMISSION_ENABLED TRUE
+  CAMERA_PERMISSION_TEXT "MilkDAWp shows your camera in the visuals when you choose it as the media source. Nothing is recorded."
   # §4.6: macOS Info.plist document-type metadata for double-clicking a
   # .milk file. Windows/Linux registry/desktop-file registration is
   # installer work (§9, not started); Main.cpp already handles the file or

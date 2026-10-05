@@ -8,8 +8,11 @@
 
 #include "milkdawp/core/ParameterModel.h"
 #include "milkdawp/core/Version.h"
+#include "milkdawp/engine/MediaSource.h"
 #include "milkdawp/engine/UpdateCheck.h"
 #include "milkdawp/ui/Icons.h"
+#include "milkdawp/ui/MediaMenu.h"
+#include "milkdawp/ui/OscSettingsDialog.h"
 #include "milkdawp/ui/PresetInfoMenu.h"
 #include "milkdawp/ui/PresetMenu.h"
 #include "milkdawp/ui/Shortcuts.h"
@@ -141,6 +144,19 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
     processorRef.visualizer().director().setTagFilter(text.toStdString());
   };
 
+  // Settings -> Visual (Phase 8.1), same compositing rules as the transition popover.
+  outputSurface.addChildComponent(visualSettings);
+  visualSettings.onCloseRequested = [this] { setVisualSettingsVisible(false); };
+  for (const auto& [id, slider] : visualSettings.sliders()) {
+    visualSliderAttachments_.push_back(std::make_unique<SliderAttachment>(apvts, id, *slider));
+  }
+  for (const auto& [id, toggle] : visualSettings.toggles()) {
+    visualButtonAttachments_.push_back(std::make_unique<ButtonAttachment>(apvts, id, *toggle));
+  }
+  for (const auto& [id, combo] : visualSettings.combos()) {
+    visualComboAttachments_.push_back(std::make_unique<ComboBoxAttachment>(apvts, id, *combo));
+  }
+
   // Settings -> Output, same compositing rules as the transition popover.
   outputSurface.addChildComponent(outputSettings);
   outputSettings.onCloseRequested = [this] { setOutputSettingsVisible(false); };
@@ -214,6 +230,7 @@ void MilkDAWpAudioProcessorEditor::resized() {
     controlDrawer.setBounds(outputSurface.getLocalBounds().removeFromBottom(kDrawerHeight));
   }
   layoutTransitionSettings();
+  layoutVisualSettings();
   layoutOutputSettings();
   layoutPresetBrowser();
   layoutAbout();
@@ -253,6 +270,7 @@ void MilkDAWpAudioProcessorEditor::setControlsFloating(bool floating) {
     controlDrawer.setFloating(false);
     outputSurface.addAndMakeVisible(controlDrawer);
     transitionSettings.toFront(false); // the popover stays above the drawer
+    visualSettings.toFront(false);
     outputSettings.toFront(false);
     milkdawp::ui::focusFirstControl(outputSettings); // 5.8: Tab through it, Esc closes
     grabKeyboardFocus();
@@ -269,6 +287,33 @@ void MilkDAWpAudioProcessorEditor::layoutTransitionSettings() {
   const auto width = std::min(milkdawp::ui::TransitionSettingsPanel::preferredWidth, area.getWidth());
   const auto height = std::min(milkdawp::ui::TransitionSettingsPanel::preferredHeight, area.getHeight());
   transitionSettings.setBounds(area.removeFromBottom(height).removeFromRight(width));
+}
+
+void MilkDAWpAudioProcessorEditor::layoutVisualSettings() {
+  // Same slot as the transition popover; it scrolls when the editor is small.
+  const int drawerHeight = controlsWindow_ != nullptr ? 0 : milkdawp::ui::ControlDrawer::controlsHeight;
+  auto area = outputSurface.getLocalBounds().withTrimmedBottom(drawerHeight).reduced(6);
+  const auto width = std::min(milkdawp::ui::VisualSettingsPanel::preferredWidth, area.getWidth());
+  const auto height = std::min(visualSettings.preferredHeight(width), area.getHeight());
+  visualSettings.setBounds(area.removeFromBottom(height).removeFromRight(width));
+}
+
+void MilkDAWpAudioProcessorEditor::setVisualSettingsVisible(bool visible) {
+  if (visible) {
+    // One popover at a time: at small sizes they would overlap.
+    setTransitionSettingsVisible(false);
+    setOutputSettingsVisible(false);
+    setPresetBrowserVisible(false);
+    layoutVisualSettings();
+  }
+  visualSettings.setVisible(visible);
+  if (visible) {
+    visualSettings.toFront(false);
+    controlDrawer.reveal();
+    milkdawp::ui::focusFirstControl(visualSettings); // 5.8: Tab through it, Esc closes
+  } else {
+    grabKeyboardFocus();
+  }
 }
 
 void MilkDAWpAudioProcessorEditor::layoutOutputSettings() {
@@ -384,6 +429,9 @@ void MilkDAWpAudioProcessorEditor::setPresetBrowserVisible(bool visible) {
     // One popover at a time: at small sizes they would overlap.
     setTransitionSettingsVisible(false);
     setOutputSettingsVisible(false);
+    if (visualSettings.isVisible()) {
+      setVisualSettingsVisible(false);
+    }
     layoutPresetBrowser();
   }
   presetBrowser.setVisible(visible);
@@ -400,6 +448,9 @@ void MilkDAWpAudioProcessorEditor::setOutputSettingsVisible(bool visible) {
   if (visible) {
     setTransitionSettingsVisible(false);
     setPresetBrowserVisible(false);
+    if (visualSettings.isVisible()) {
+      setVisualSettingsVisible(false);
+    }
     const auto layout = processorRef.windowLayout();
     outputSettings.refresh(layout.outputDefaultFullscreen, layout.outputTargetDisplay);
     refreshOutputSettingsInstances();
@@ -421,6 +472,9 @@ void MilkDAWpAudioProcessorEditor::setTransitionSettingsVisible(bool visible) {
   }
   if (visible && presetBrowser.isVisible()) {
     setPresetBrowserVisible(false);
+  }
+  if (visible && visualSettings.isVisible()) {
+    setVisualSettingsVisible(false);
   }
   transitionSettings.setVisible(visible);
   if (visible) {
@@ -453,6 +507,8 @@ bool MilkDAWpAudioProcessorEditor::keyPressed(const juce::KeyPress& key) {
       setOutputSettingsVisible(false);
     } else if (transitionSettings.isVisible()) {
       setTransitionSettingsVisible(false);
+    } else if (visualSettings.isVisible()) {
+      setVisualSettingsVisible(false);
     } else if (diagnosticsPanel.isVisible()) {
       setDiagnosticsVisible(false);
     } else {
@@ -528,6 +584,52 @@ void MilkDAWpAudioProcessorEditor::showSettingsMenu() {
   menu.addSeparator();
   menu.addItem("Transition settings...", true, transitionSettings.isVisible(),
                [this] { setTransitionSettingsVisible(!transitionSettings.isVisible()); });
+  menu.addItem("Visual...", true, visualSettings.isVisible(),
+               [this] { setVisualSettingsVisible(!visualSettings.isVisible()); });
+  {
+    // 8.6: what Media Mix shows.
+    const auto currentPath = processorRef.mediaSourcePath();
+    const auto current = engine::mediaSourceDisplayName(currentPath);
+    juce::PopupMenu media;
+    media.addSectionHeader(current.isEmpty() ? juce::String("No media source") : current);
+    media.addSubMenu("Camera", milkdawp::ui::cameraMenu(engine::camerasSupported(), engine::availableCameras(),
+                                                        engine::cameraDeviceName(currentPath),
+                                                        [this](const juce::String& device) {
+                                                          processorRef.setMediaSourcePath(engine::cameraMediaPath(device));
+                                                        }));
+    media.addItem("Choose image or video...", [this] {
+      mediaChooser_ = std::make_unique<juce::FileChooser>(
+          "Choose an image or video for Media Mix", juce::File::getSpecialLocation(juce::File::userPicturesDirectory),
+          engine::mediaFileWildcard());
+      mediaChooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                 [this](const juce::FileChooser& chooser) {
+                                   const auto result = chooser.getResult();
+                                   if (result.existsAsFile()) {
+                                     processorRef.setMediaSourcePath(result.getFullPathName().toStdString());
+                                   }
+                                 });
+    });
+    media.addItem("None", true, currentPath.empty(), [this] { processorRef.setMediaSourcePath({}); });
+    media.addSeparator();
+    juce::PopupMenu blend; // 8.6e
+    for (int i = 0; i < engine::kMediaBlendCount; ++i) {
+      blend.addItem(engine::kMediaBlendNames[i], true, static_cast<int>(processorRef.mediaBlend()) == i,
+                    [this, i] { processorRef.setMediaBlend(static_cast<engine::LayerBlend>(i)); });
+    }
+    media.addSubMenu("Blend", blend);
+    menu.addSubMenu("Media source (Media Mix)", media);
+  }
+  menu.addItem("OSC remote control...", [this] {
+    auto& remote = processorRef.oscRemote();
+    // The dialog may outlive this editor: it keeps the (process-wide) remote alive itself.
+    milkdawp::ui::showOscSettingsDialog(remote.settings(), remote.statusText(),
+                                        [shared = juce::SharedResourcePointer<engine::OscRemote>()](
+                                            const milkdawp::core::OscSettings& settings) {
+                                          shared->apply(settings);
+                                          engine::saveOscSettings(settings, engine::oscSettingsFile());
+                                        },
+                                        this);
+  });
   menu.addItem("Output settings...", true, outputSettings.isVisible(),
                [this] { setOutputSettingsVisible(!outputSettings.isVisible()); });
   const bool floating = controlsWindow_ != nullptr;
@@ -641,6 +743,10 @@ void MilkDAWpAudioProcessorEditor::timerCallback() {
   // Host automation moves the attached widgets but not their dimming.
   if (transitionSettings.isVisible()) {
     transitionSettings.refreshRelevance();
+  }
+  if (visualSettings.isVisible()) {
+    const auto& layer = engine.primaryLayer();
+    visualSettings.setGateMeter(layer.gateLevelDb(), layer.gateOpen());
   }
   // Other instances come and go (and link up) while the panel is open.
   if (outputSettings.isVisible()) {

@@ -2887,6 +2887,13 @@ Stage A, controls that work on any renderer:
 - [ ] 8.2 (M) `EffectsChain` in the engine: colour, pixelate, blur, glow, RGB split, mirror,
       kaleidoscope, extra feedback, per layer and on the canvas; GPU tests against
       hand-computed values; zero cost when every amount is neutral.
+- [ ] 8.2b (M) **Gate**, like a guitar noise gate: with `layerGateEnabled` on, a layer
+      disappears while its own input is below `layerGateThreshold` (-100..0 dBFS, default
+      -80 dB, suited to DI guitar) and comes back the moment it returns, so clean stops in the
+      music are clean stops in the picture. `layerGateRelease` (0..2000 ms, default 80 ms)
+      sets the fade-out. Instant open, 3 dB hysteresis, short fixed hold; the gated layer keeps rendering so it
+      doesn't freeze; drawer meter with threshold line. Layer parameter group, not one of the
+      16 globals. Exploration doc §4.4.
 - [ ] 8.3 (S) Speed: integrate `dt × speed` into `projectm_set_frame_time` (never multiply
       time, so turning the knob never jumps). Document what it can't slow.
 - [ ] 8.4 (M) OSC in/out via `juce_osc`; outbound beat/bar/drop signals.
@@ -2932,7 +2939,9 @@ Details in the exploration doc, §4.7.
 Hand test: automate Hue, Speed and Macro 1 on a converted preset in REAPER and play it back;
 send OSC from another machine while recording and confirm the lane appears; add a camera
 layer with Luma key and a displacement blend; switch presets with Lock Macros on (the Macro
-lanes carry on) and off (un-automated Macros jump to the new preset's defaults).
+lanes carry on) and off (un-automated Macros jump to the new preset's defaults); gate a
+guitar layer over a drum layer, play a riff with hard stops, and check the guitar visual
+vanishes on each stop without flicker on sustained notes.
 
 ### Phase 9 — Web remote: control from a phone (post-1.0)
 

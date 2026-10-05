@@ -7,10 +7,13 @@
 // the first place a human can watch beat-aligned transitions against music
 // they can hear, without a DAW.
 //
-//   mdw-view [--output] [audio-file] [preset-folder]
+//   mdw-view [--output] [--set id=value ...] [--media file] [--media-blend 0-5] [audio-file] [preset-folder]
 //
 // --output opens the Output window (windowed) at startup, to see the
-// primary window and the Output window showing the same frames.
+// primary window and the Output window showing the same frames. --set sets a
+// Visual global or gate parameter (Phase 8), e.g. --set visualGlow=0.8, in the
+// parameter's own units (a Choice is its index). --media sets the image or video Media Mix shows,
+// --media-blend how it meets the picture (5 = Displace) (8.6).
 //
 // Both arguments are optional: without a folder it uses the repo's test
 // presets (fixtures/presets); the drawer's "Set" menu opens other files and
@@ -22,6 +25,8 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 
 #include "milkdawp/engine/OutputSurface.h"
+#include "milkdawp/engine/ControlMapping.h"
+#include "milkdawp/engine/MediaSource.h"
 #include "milkdawp/engine/OutputWindow.h"
 #include "milkdawp/engine/BundledContent.h"
 #include "milkdawp/engine/Visualizer.h"
@@ -168,6 +173,20 @@ public:
     }
   }
 
+  /// --set id=value: a Visual global or gate parameter, in its model units.
+  bool setParameter(const juce::String& id, float value) {
+    float* field = engine::parameterField(parameters_, id.toStdString());
+    if (field == nullptr) {
+      return false;
+    }
+    *field = value;
+    const auto mapped = engine::toEngineControls(parameters_);
+    controls_.visual = mapped.visual;
+    controls_.gate = mapped.gate;
+    publish();
+    return true;
+  }
+
 private:
   void publish() { visualizer_.setControls(controls_); }
 
@@ -295,6 +314,7 @@ private:
   juce::Label info_;
   ui::ControlDrawer drawer_;
   engine::EngineControls controls_;
+  engine::ParameterValues parameters_; // only the Visual and gate values are used (--set)
   std::unique_ptr<juce::AudioFormatReaderSource> readerSource_;
   std::unique_ptr<juce::FileChooser> chooser_;
   std::unique_ptr<engine::OutputWindow> outputWindow_;
@@ -333,9 +353,31 @@ public:
     juce::File audio;
     juce::File presets(juce::File(MILKDAWP_FIXTURES_DIR).getChildFile("presets"));
     bool openOutput = false;
-    for (auto arg : args) {
+    juce::StringPairArray settings;
+    for (int i = 0; i < args.size(); ++i) {
+      const auto arg = args[i];
       if (arg == "--output") {
         openOutput = true;
+        continue;
+      }
+      if (arg == "--media" && i + 1 < args.size()) {
+        std::string error;
+        const auto path = juce::File::getCurrentWorkingDirectory().getChildFile(args[++i].unquoted());
+        visualizer_->renderEngine().primaryLayer().setMediaSource(
+            engine::openMediaSource(path.getFullPathName().toStdString(), error));
+        if (!error.empty()) {
+          DBG("mdw-view: --media: " << error);
+        }
+        continue;
+      }
+      if (arg == "--media-blend" && i + 1 < args.size()) {
+        const int blend = juce::jlimit(0, engine::kMediaBlendCount - 1, args[++i].getIntValue());
+        visualizer_->renderEngine().primaryLayer().setMediaBlend(static_cast<engine::LayerBlend>(blend));
+        continue;
+      }
+      if (arg == "--set" && i + 1 < args.size()) {
+        const auto pair = args[++i];
+        settings.set(pair.upToFirstOccurrenceOf("=", false, false), pair.fromFirstOccurrenceOf("=", false, false));
         continue;
       }
       const juce::File file(juce::File::getCurrentWorkingDirectory().getChildFile(arg.unquoted()));
@@ -359,6 +401,11 @@ public:
       content->loadAudioFile(audio);
     }
     auto* viewer = content.get();
+    for (const auto& id : settings.getAllKeys()) {
+      if (!viewer->setParameter(id, settings[id].getFloatValue())) {
+        DBG("mdw-view: --set " << id << ": not a parameter the engine reads");
+      }
+    }
     window_ = std::make_unique<MainWindow>(std::move(content));
     if (openOutput) {
       viewer->openOutputWindow();

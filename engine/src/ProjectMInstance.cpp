@@ -90,6 +90,10 @@ void ProjectMInstance::setFrameTime(double seconds) { library_.functions().setFr
 
 void ProjectMInstance::renderTo(std::uint32_t fbo) { library_.functions().openglRenderFrameFbo(handle_, fbo); }
 
+void ProjectMInstance::burnTexture(std::uint32_t texture) {
+  library_.functions().openglBurnTexture(handle_, texture, 0, 0, width_, height_);
+}
+
 void ProjectMInstance::setPresetSwitchFailedCallback(ProjectMPresetSwitchFailedCallback callback, void* userData) {
   library_.functions().setPresetSwitchFailedEventCallback(handle_, callback, userData);
 }

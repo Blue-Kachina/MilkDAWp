@@ -44,6 +44,39 @@ TEST_CASE("toEngineControls maps the bar-grid sync and offset", "[engine][Contro
   CHECK(engine::toEngineControls(values).gridOffsetBeats == 0);
 }
 
+TEST_CASE("toEngineControls maps the Visual globals and the gate", "[engine][ControlMapping]") {
+  engine::ParameterValues values;
+  auto controls = engine::toEngineControls(values);
+  CHECK(controls.visual == core::VisualControls{}); // defaults are neutral
+  CHECK_FALSE(controls.gate.enabled);
+  CHECK(controls.gate.thresholdDb == -80.0f);
+  CHECK(controls.gate.releaseMs == 80.0f);
+
+  values.visualHue = 90.0f;
+  values.visualMirror = 3.0f;
+  values.visualKaleidoscope = 5.0f; // the sixth choice: 8 segments
+  values.visualSpeed = 9.0f;        // out of range: clamped
+  values.layerGateEnabled = 1.0f;
+  values.layerGateThreshold = -30.0f;
+  controls = engine::toEngineControls(values);
+  CHECK(controls.visual.hueDegrees == 90.0f);
+  CHECK(controls.visual.mirror == core::MirrorMode::Quad);
+  CHECK(controls.visual.kaleidoscopeSegments == 8);
+  CHECK(controls.visual.speed == 4.0f);
+  CHECK(controls.gate.enabled);
+  CHECK(controls.gate.thresholdDb == -30.0f);
+}
+
+TEST_CASE("visualKaleidoscope's choices line up with kKaleidoscopeSegments", "[engine][ControlMapping]") {
+  const auto* spec = core::findParameter(core::allParameters(), "visualKaleidoscope");
+  REQUIRE(spec != nullptr);
+  REQUIRE(spec->choices.size() == core::kKaleidoscopeSegments.size());
+  CHECK(spec->choices[0] == "Off");
+  for (std::size_t i = 1; i < spec->choices.size(); ++i) {
+    CHECK(spec->choices[i] == std::to_string(core::kKaleidoscopeSegments[i]));
+  }
+}
+
 TEST_CASE("parameterField writes through to the struct", "[engine][ControlMapping]") {
   engine::ParameterValues values;
   *engine::parameterField(values, "transitionBars") = 8.0f;

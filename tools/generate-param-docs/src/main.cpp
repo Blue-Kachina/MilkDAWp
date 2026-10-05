@@ -24,6 +24,21 @@ int main() {
          "fail on the test fixtures at both ends of the range (roadmap 5.5).\n"
          "- **How easily MilkDAWp cuts** is set by the transition mode and its settings: Bars, the timed "
          "interval, and in Energy mode the **Energy Threshold**, how sharply the bass must come back after a "
-         "breakdown to count as a drop (4 + 3 x the value, in dB: 5.5 to 16 dB, default 10).\n";
+         "breakdown to count as a drop (4 + 3 x the value, in dB: 5.5 to 16 dB, default 10).\n"
+         "- **Visual, Macros and Layer Gate** (Phase 8, ADR-0011) are grouped in hosts that show parameter "
+         "groups. They come after every 1.0 parameter, so sessions automating 1.0 parameters by index keep "
+         "working. Each Visual default is its neutral value, which leaves the picture untouched and costs "
+         "nothing. **Warp**, **Wave Size** and the **Macros** need a `.milkdawp` preset; until then they do "
+         "nothing. **Media Mix** is the opacity of the media source chosen in Settings > Media source (an "
+         "image; camera and video later). On an instance whose Output shows other "
+         "instances as layers, its Visual controls act on the whole mixed picture; on an instance sending "
+         "to another, on its own layer.\n"
+         "- **Speed** changes how fast a preset's clock runs from now on; it never jumps the picture. It can't "
+         "slow what a preset does once per frame (decay, feedback) or its reaction to the music.\n"
+         "- **Lock Macros** off (the default): when the preset changes, the Macros move to the new preset's "
+         "starting values (0 for a `.milk`). On: they keep their values.\n"
+         "- **Gate**: the layer fades out while its own input stays 3 dB below **Gate Threshold** (after a "
+         "50 ms hold, over **Gate Release**), and is back at once when the input reaches the threshold. It "
+         "keeps running while hidden.\n";
   return 0;
 }

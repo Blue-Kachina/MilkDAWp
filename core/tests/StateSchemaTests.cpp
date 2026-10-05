@@ -170,6 +170,16 @@ TEST_CASE("StateSchemaV2 round-trips the tag filter, and older states have none 
   CHECK(deserializeStateSchemaV2("schemaVersion=2\n").tagFilter.empty());
 }
 
+TEST_CASE("StateSchemaV2 round-trips the media source, and older states have none (8.6)", "[core][StateSchema]") {
+  StateSchemaV2 original;
+  original.mediaSourcePath = "C:/Pictures/logo.png";
+  CHECK(deserializeStateSchemaV2(serializeStateSchemaV2(original)).mediaSourcePath == "C:/Pictures/logo.png");
+  CHECK(deserializeStateSchemaV2("schemaVersion=2\n").mediaSourcePath.empty());
+  original.mediaBlend = 5;
+  CHECK(deserializeStateSchemaV2(serializeStateSchemaV2(original)).mediaBlend == 5);
+  CHECK(deserializeStateSchemaV2("schemaVersion=2\n").mediaBlend == 0);
+}
+
 TEST_CASE("StateSchemaV2 keeps a label with a line break from corrupting the lines after it", "[core][StateSchema]") {
   StateSchemaV2 original;
   original.instanceLabel = "Lead\nsynth\r\nbus";

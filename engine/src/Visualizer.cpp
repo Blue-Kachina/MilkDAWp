@@ -14,7 +14,8 @@ constexpr int kDefaultScratchFrames = 4096;
 Visualizer::Visualizer(const Config& config)
     : render_(RenderEngine::create(ring_, config.render, config.bundleDirectoryHint)),
       director_(std::make_unique<Director>(ring_, *render_, config.followHostTransport)),
-      interleaveScratch_(static_cast<std::size_t>(kDefaultScratchFrames) * kRingChannels, 0.0f) {
+      interleaveScratch_(static_cast<std::size_t>(kDefaultScratchFrames) * kRingChannels, 0.0f),
+      followHostTransport_(config.followHostTransport), sampleRate_(config.render.sampleRate) {
   director_->setSampleRate(config.render.sampleRate);
 }
 
@@ -29,11 +30,18 @@ void Visualizer::prepare(double sampleRate, int maxBlockSize) {
                             0.0f);
   render_->setSampleRate(sampleRate);
   director_->setSampleRate(sampleRate);
+  sampleRate_.store(sampleRate > 0.0 ? sampleRate : 48000.0);
 }
 
 void Visualizer::processAudio(const float* const* channels, int numChannels, int numSamples,
                               const core::TransportInfo* hostTransport) noexcept {
   if (hostTransport != nullptr) {
+    if (followHostTransport_) {
+      // The host's own sample clock, not the ring's: it is the session's
+      // timeline, so a rendered session shows the same video frames each time.
+      render_->primaryLayer().setMediaTimeline(
+          {true, hostTransport->isPlaying, static_cast<double>(hostTransport->samplePos) / sampleRate_.load()});
+    }
     auto info = *hostTransport;
     info.samplePos = ring_.samplePosition(); // this block's first frame, in ring numbering
     director_->publishHostTransport(info);
@@ -103,6 +111,8 @@ core::DiagnosticsInfo Visualizer::diagnostics() {
 void Visualizer::setControls(const EngineControls& controls) noexcept {
   render_->setBeatSensitivity(controls.beatSensitivity);
   render_->setQualityScale(controls.qualityScale);
+  render_->primaryLayer().setVisual(controls.visual);
+  render_->primaryLayer().setGate(controls.gate);
   director_->setControls(controls);
 }
 

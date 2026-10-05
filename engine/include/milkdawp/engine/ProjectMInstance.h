@@ -67,6 +67,10 @@ public:
 
   /// Renders one frame into `fbo` (sized to the last setOutputSize()).
   void renderTo(std::uint32_t fbo);
+  /// Draws `texture` over the whole of the preset's own picture (both presets
+  /// during a soft cut) before the next render, so the preset's warp and decay
+  /// carry it on (8.6f).
+  void burnTexture(std::uint32_t texture);
 
   /// Called synchronously from inside loadPresetData()/loadPresetFile()
   /// when projectM rejects a preset.

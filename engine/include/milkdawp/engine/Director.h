@@ -14,10 +14,12 @@
 
 #include "milkdawp/core/AudioRing.h"
 #include "milkdawp/core/HostTransport.h"
+#include "milkdawp/core/LayerGate.h"
 #include "milkdawp/core/Messages.h"
 #include "milkdawp/core/Playlist.h"
 #include "milkdawp/core/SeqlockSnapshot.h"
 #include "milkdawp/core/TransitionScheduler.h"
+#include "milkdawp/core/VisualControls.h"
 #include "milkdawp/engine/PresetMetadataStore.h"
 #include "milkdawp/engine/RenderEngine.h"
 
@@ -52,6 +54,12 @@ struct EngineControls {
   std::int32_t presetIndex = 0;
   float beatSensitivity = 1.0f;
   float qualityScale = 0.0f; // <= 0: adaptive (Auto, 5.3); else a fixed FBO scale
+  /// Phase 8.1/8.2b: how this instance's layer looks, and when it hides. Not
+  /// the director's: `Visualizer::setControls` hands them to the primary
+  /// layer's channel, which the render thread (this engine's, or a hub's)
+  /// reads every frame.
+  core::VisualControls visual;
+  core::LayerGateSettings gate;
 };
 
 enum class BeatSource : std::uint8_t { None, Detected, Host };
@@ -62,6 +70,10 @@ struct DirectorStatus {
   float beatConfidence = 0.0f;
   BeatSource beatSource = BeatSource::None;
   bool transportPlaying = false;
+  /// The beat clock's count (host or detected): changes once per beat while
+  /// there is a beat (8.4's outbound OSC beat and bar signals).
+  std::uint64_t beatIndex = 0;
+  std::uint32_t barIndex = 0;
   std::int32_t currentIndex = -1;  // -1: no playlist loaded
   std::uint32_t playlistSize = 0;
   std::uint32_t transitionsIssued = 0;

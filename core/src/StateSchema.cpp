@@ -130,6 +130,8 @@ std::string serializeStateSchemaV2(const StateSchemaV2& state) {
   out << "instanceId=" << singleLine(state.instanceId) << "\n";
   out << "instanceLabel=" << singleLine(state.instanceLabel) << "\n";
   out << "tagFilter=" << singleLine(state.tagFilter) << "\n";
+  out << "mediaSourcePath=" << singleLine(state.mediaSourcePath) << "\n";
+  out << "mediaBlend=" << state.mediaBlend << "\n";
   for (const auto& [id, value] : state.paramValues) {
     out << "param." << id << "=" << value << "\n";
   }
@@ -181,6 +183,10 @@ StateSchemaV2 deserializeStateSchemaV2(const std::string& text) {
       state.instanceId = value;
     } else if (key == "tagFilter") {
       state.tagFilter = value;
+    } else if (key == "mediaSourcePath") {
+      state.mediaSourcePath = value;
+    } else if (key == "mediaBlend") {
+      parseInt(value, state.mediaBlend);
     } else if (key == "instanceLabel") {
       state.instanceLabel = value;
     } else if (key.rfind("param.", 0) == 0) {

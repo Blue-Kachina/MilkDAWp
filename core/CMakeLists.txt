@@ -42,6 +42,16 @@ add_library(milkdawp_core STATIC
   src/Scoring.cpp
   include/milkdawp/core/SeqlockSnapshot.h
   include/milkdawp/core/Diagnostics.h
+  include/milkdawp/core/VisualControls.h
+  src/VisualControls.cpp
+  include/milkdawp/core/MacroLock.h
+  src/MacroLock.cpp
+  include/milkdawp/core/LayerGate.h
+  src/LayerGate.cpp
+  include/milkdawp/core/PresetClock.h
+  src/PresetClock.cpp
+  include/milkdawp/core/OscAddress.h
+  src/OscAddress.cpp
 )
 
 target_include_directories(milkdawp_core PUBLIC

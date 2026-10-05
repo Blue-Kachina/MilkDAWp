@@ -165,6 +165,42 @@ any preset or a camera into a trail machine. Every amount is an automatable para
 HDR: move layer/frame targets to `RGBA16F` when glow and feedback are on (fosfora's lesson), otherwise
 8-bit stays.
 
+#### Gate (proposed 2026-10-05)
+
+Works like a noise gate on a guitar: when a layer's own audio input falls below a threshold, the layer
+disappears, and it comes back the moment the input returns. Clean stops in technical passages show up as
+clean stops in the picture. Renderer-agnostic (Stage A), no projectM change.
+
+- **Parameters** (in the host's "Layer" group beside Opacity / Blend / Mute, not among the 16 Visual
+  globals, because it acts on the layer's visibility, not on the picture):
+  - `layerGateEnabled`: Bool, default Off. The toggle.
+  - `layerGateThreshold`: Float, -100..0 dBFS, default **-80 dB** (decided 2026-10-05: sensible for a DI
+    guitar; the range goes below the default so the knob isn't parked at its end stop). The threshold knob.
+  - `layerGateRelease`: Float, 0..2000 ms (skewed so the short end has most of the travel), default
+    80 ms. How long the layer takes to fade out once the gate closes: 0 is a hard cut, long values are a
+    slow fade. Included from the start (decided 2026-10-05).
+- **Detector:** the layer's *own* input (the instance's track; in Layers, each sender's own ring, so a
+  gated guitar layer vanishes while the drum layer keeps going). Peak envelope in dBFS with a fast attack,
+  read by the render thread from the audio ring each frame: at most one frame of latency, sample-accurate
+  detection isn't needed for a picture. Uses what MilkDAWp receives, so its place in the FX chain matters
+  (after the user's own gate it simply follows that gate).
+- **Behaviour:** opens above the threshold, closes 3 dB below it (fixed hysteresis so a decaying note
+  doesn't flicker), holds 50 ms, then fades out over the Release time. Opens with no fade, so the hit
+  lands on time. Hold is fixed for v1.
+- **"Not visible" means** the layer's draw opacity is multiplied by the gate envelope (0..1). Below it,
+  other layers show through; on a lone instance the canvas fades to black.
+- **The visual keeps running while gated.** Unlike Opacity 0 or Mute (which today stop feeding and
+  drawing the layer, `RenderEngine::run()`), a closed gate still feeds audio and renders, so on reopen the
+  preset is where it would have been, not frozen at the moment it closed. Costs GPU during silence, which is
+  accepted for short gaps. Implementation: a separate gate atomic on `LayerChannel`, not a write to
+  `opacity_`.
+- **Lone instance:** today one layer draws straight into the output without the compositor, so the gate
+  needs that path to go through `LayerCompositor` (or a one-pass fade) while the gate is enabled.
+- **UI:** a level meter with the threshold line and an open/closed light in the Layer section of the
+  drawer, as on any hardware gate, so the threshold can be set by eye. Shown on single instances too.
+- **Later:** expose Hold; a gate *mode* (hide / freeze the last frame / fade to black only);
+  side-chain key (gate one layer from another input); gate a media layer by an audio input.
+
 ### 4.5 Media sources
 
 `MediaSource` → a GL texture updated on the render thread when a new frame exists (uploaded only on change).
@@ -335,7 +371,9 @@ patchy across hosts (JUCE can signal a name change; many hosts ignore it). So:
   preset's names ("Macro 1: Swirl"); the host shows "Macro 1". Like Ableton's rack macros.
 - **Lock Macros** (§6.3): an automatable on/off that decides whether Macros survive a preset change.
 
-New parameters: 16 + 8 + 1 = 25, on top of today's 26. Grouped in the host (JUCE parameter groups
+- **Gate** (§4.4): Gate on/off, Gate Threshold, Gate Release, in the Layer group.
+
+New parameters: 16 + 8 + 1 + 3 = 28, on top of today's 26. Grouped in the host (JUCE parameter groups
 "Visual", "Macros") so the list stays navigable.
 
 ### 6.2 The 16 Visual globals (proposed 2026-10-05)
@@ -418,6 +456,12 @@ splitting before starting.
 - [ ] 8.2 (M) `EffectsChain` in the engine: hue/sat/brightness/tint, pixelate, blur, glow, RGB split,
       mirror, kaleidoscope, extra feedback; per-layer and canvas placement; GPU-tested against
       hand-computed values like `LayerCompositorTests`; skipped entirely when all amounts are neutral.
+- [ ] 8.2b (M) Gate (§4.4): `layerGateEnabled` / `layerGateThreshold` (default -80 dB) /
+      `layerGateRelease` (default 80 ms), peak envelope from the layer's own ring with 3 dB hysteresis,
+      50 ms hold, fade-out over Release, instant open; gated layers keep feeding
+      and rendering; lone-instance path through the compositor while enabled; drawer meter with threshold
+      line and open light. Tests: a fixture with clean stops (`breakdown_drop` or a new staccato one) opens
+      and closes on the right frames; no flicker on a decaying tone at the threshold.
 - [ ] 8.3 (S) Speed: integrate `dt × speed` into the time passed to `projectm_set_frame_time`; document
       what it does not slow (per-frame decay, audio response).
 - [ ] 8.4 (M) OSC in/out (`juce_osc`), per-process in the plugin, outbound beat/bar/drop signals.
@@ -504,6 +548,8 @@ splitting before starting.
 8. ~~Control editor?~~ Decided (2026-10-05): **no, mappings stay static for now.** `.milkdawp` files come
    from `mdw-convert` and hand editing; the app only plays them. The 1.0 non-goal "we do not author
    presets" stands.
+9. ~~Gate release and default threshold~~: decided (2026-10-05), Release is a parameter from the start
+   (default 80 ms); default threshold -80 dB (§4.4).
 
 ## 10. Decisions log
 
@@ -518,3 +564,6 @@ splitting before starting.
   (patents, LGPL bookkeeping, size), pending confirmation.
 - (2026-10-05) Matthew confirmed: **superset** format (§5.0), **platform decoders** for video (§4.5), and
   **Lock Macros defaults to Off** (§6.3). Spike 8.8 is now a compatibility note, not a format decision.
+- (2026-10-05) Matthew: add a **Gate** effect: a layer disappears while its input is below a threshold,
+  toggleable, like the gate on his guitar for clean stops. Design in §4.4, item 8.2b.
+- (2026-10-05) Gate: Release is its own parameter from the start; default threshold -80 dB (DI guitar).

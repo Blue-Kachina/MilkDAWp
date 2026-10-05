@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <memory>
 #include <vector>
@@ -68,6 +69,9 @@ private:
   std::unique_ptr<RenderEngine> render_;
   std::unique_ptr<Director> director_;
   std::vector<float> interleaveScratch_;
+  // 8.6c: a video source follows the host's position (plugin only).
+  bool followHostTransport_ = false;
+  std::atomic<double> sampleRate_{48000.0};
 };
 
 } // namespace milkdawp::engine

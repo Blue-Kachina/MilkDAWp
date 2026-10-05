@@ -4,36 +4,68 @@
 
 The canonical parameter surface (Phase 1.13), shared by the plugin's APVTS layout, the app's preferences/MIDI-learn targets, and `MigrateFromV1` (via the v1 alias column).
 
-| ID | Name | Type | Range / Choices | Default | Automatable | v1 alias |
-|---|---|---|---|---|---|---|
-| `beatSensitivity` | Beat Sensitivity | Float | 0 .. 2 | 1 | yes | `beatSensitivity` |
-| `transitionDurationSeconds` | Transition Duration (s) | Float | 0.1 .. 30 | 5 | yes | `transitionDurationSeconds` |
-| `shuffle` | Shuffle | Bool | true / false | false | yes | `shuffle` |
-| `lockCurrentPreset` | Lock Current Preset | Bool | true / false | false | yes | `lockCurrentPreset` |
-| `presetIndex` | Preset Index | Int | 0 .. 4095 | 0 | yes | `presetIndex` |
-| `triggerNext` | Next Preset | Bool | true / false | false | yes | `triggerNext` |
-| `triggerPrev` | Previous Preset | Bool | true / false | false | yes | `triggerPrev` |
-| `transitionJitterEnabled` | Transition Jitter | Bool | true / false | false | yes | `transitionJitterEnabled` |
-| `transitionDurationMin` | Transition Duration Min (s) | Float | 0.1 .. 30 | 3 | yes | `transitionDurationMin` |
-| `transitionDurationMax` | Transition Duration Max (s) | Float | 0.1 .. 30 | 15 | yes | `transitionDurationMax` |
-| `hardCutEnabled` | Hard Cuts | Bool | true / false | false | yes | `hardCutEnabled` |
-| `hardCutSensitivity` | Hard Cut Sensitivity | Float | 0 .. 1 | 0.5 | yes | `hardCutSensitivity` |
-| `softCutDuration` | Blend Time (s) | Float | 0.5 .. 10 | 3 | yes | `softCutDuration` |
-| `hardCutDuration` | Min. Cut Interval (s) | Float | 1 .. 30 | 5 | yes | `hardCutDuration` |
-| `qualityOverride` | Quality | Choice | Auto / Low / Medium / High | Auto | yes | `qualityOverride` |
-| `transitionMode` | Transition Mode | Choice | Manual / Timed / BeatQuantized / Hybrid / Energy | BeatQuantized | yes | *(new in v2)* |
-| `transitionBars` | Transition Bars (N) | Int | 1 .. 16 | 4 | yes | *(new in v2)* |
-| `presetSelectionPolicy` | Preset Selection | Choice | Sequential / ShuffleNoRepeat / Weighted | Sequential | yes | *(new in v2)* |
-| `energyThreshold` | Energy Threshold | Float | 0.5 .. 4 | 2 | yes | *(new in v2)* |
-| `useHostTempo` | BPM From DAW | Bool | true / false | false | yes | *(new in v2)* |
-| `layerOpacity` | Layer Opacity | Float | 0 .. 1 | 1 | yes | *(new in v2)* |
-| `layerBlend` | Layer Blend | Choice | Normal / Add / Screen / Multiply / Luma key | Normal | yes | *(new in v2)* |
-| `layerMute` | Layer Mute | Bool | true / false | false | yes | *(new in v2)* |
-| `layerOrder` | Layer Order | Int | 0 .. 7 | 0 | yes | *(new in v2)* |
-| `transitionGridSync` | Sync Cuts to Bar Grid | Bool | true / false | false | yes | *(new in v2)* |
-| `transitionGridOffset` | Grid Offset (beats) | Int | 0 .. 15 | 0 | yes | *(new in v2)* |
+| ID | Name | Group | Type | Range / Choices | Default | Automatable | v1 alias |
+|---|---|---|---|---|---|---|---|
+| `beatSensitivity` | Beat Sensitivity |  | Float | 0 .. 2 | 1 | yes | `beatSensitivity` |
+| `transitionDurationSeconds` | Transition Duration (s) |  | Float | 0.1 .. 30 | 5 | yes | `transitionDurationSeconds` |
+| `shuffle` | Shuffle |  | Bool | true / false | false | yes | `shuffle` |
+| `lockCurrentPreset` | Lock Current Preset |  | Bool | true / false | false | yes | `lockCurrentPreset` |
+| `presetIndex` | Preset Index |  | Int | 0 .. 4095 | 0 | yes | `presetIndex` |
+| `triggerNext` | Next Preset |  | Bool | true / false | false | yes | `triggerNext` |
+| `triggerPrev` | Previous Preset |  | Bool | true / false | false | yes | `triggerPrev` |
+| `transitionJitterEnabled` | Transition Jitter |  | Bool | true / false | false | yes | `transitionJitterEnabled` |
+| `transitionDurationMin` | Transition Duration Min (s) |  | Float | 0.1 .. 30 | 3 | yes | `transitionDurationMin` |
+| `transitionDurationMax` | Transition Duration Max (s) |  | Float | 0.1 .. 30 | 15 | yes | `transitionDurationMax` |
+| `hardCutEnabled` | Hard Cuts |  | Bool | true / false | false | yes | `hardCutEnabled` |
+| `hardCutSensitivity` | Hard Cut Sensitivity |  | Float | 0 .. 1 | 0.5 | yes | `hardCutSensitivity` |
+| `softCutDuration` | Blend Time (s) |  | Float | 0.5 .. 10 | 3 | yes | `softCutDuration` |
+| `hardCutDuration` | Min. Cut Interval (s) |  | Float | 1 .. 30 | 5 | yes | `hardCutDuration` |
+| `qualityOverride` | Quality |  | Choice | Auto / Low / Medium / High | Auto | yes | `qualityOverride` |
+| `transitionMode` | Transition Mode |  | Choice | Manual / Timed / BeatQuantized / Hybrid / Energy | BeatQuantized | yes | *(new in v2)* |
+| `transitionBars` | Transition Bars (N) |  | Int | 1 .. 16 | 4 | yes | *(new in v2)* |
+| `presetSelectionPolicy` | Preset Selection |  | Choice | Sequential / ShuffleNoRepeat / Weighted | Sequential | yes | *(new in v2)* |
+| `energyThreshold` | Energy Threshold |  | Float | 0.5 .. 4 | 2 | yes | *(new in v2)* |
+| `useHostTempo` | BPM From DAW |  | Bool | true / false | false | yes | *(new in v2)* |
+| `layerOpacity` | Layer Opacity |  | Float | 0 .. 1 | 1 | yes | *(new in v2)* |
+| `layerBlend` | Layer Blend |  | Choice | Normal / Add / Screen / Multiply / Luma key | Normal | yes | *(new in v2)* |
+| `layerMute` | Layer Mute |  | Bool | true / false | false | yes | *(new in v2)* |
+| `layerOrder` | Layer Order |  | Int | 0 .. 7 | 0 | yes | *(new in v2)* |
+| `transitionGridSync` | Sync Cuts to Bar Grid |  | Bool | true / false | false | yes | *(new in v2)* |
+| `transitionGridOffset` | Grid Offset (beats) |  | Int | 0 .. 15 | 0 | yes | *(new in v2)* |
+| `visualHue` | Hue | Visual | Float | -180 .. 180 | 0 | yes | *(new in v2)* |
+| `visualSaturation` | Saturation | Visual | Float | 0 .. 2 | 1 | yes | *(new in v2)* |
+| `visualBrightness` | Brightness | Visual | Float | 0 .. 2 | 1 | yes | *(new in v2)* |
+| `visualSpeed` | Speed | Visual | Float | 0 .. 4 | 1 | yes | *(new in v2)* |
+| `visualZoom` | Zoom | Visual | Float | -1 .. 1 | 0 | yes | *(new in v2)* |
+| `visualRotation` | Rotation | Visual | Float | -1 .. 1 | 0 | yes | *(new in v2)* |
+| `visualWarp` | Warp | Visual | Float | 0 .. 3 | 1 | yes | *(new in v2)* |
+| `visualTrails` | Trails | Visual | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `visualWaveSize` | Wave Size | Visual | Float | 0 .. 3 | 1 | yes | *(new in v2)* |
+| `visualPixelate` | Pixelate | Visual | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `visualGlow` | Glow | Visual | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `visualBlur` | Blur | Visual | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `visualMirror` | Mirror | Visual | Choice | Off / Left-Right / Top-Bottom / Quad | Off | yes | *(new in v2)* |
+| `visualKaleidoscope` | Kaleidoscope | Visual | Choice | Off / 3 / 4 / 5 / 6 / 8 / 12 | Off | yes | *(new in v2)* |
+| `visualRgbSplit` | RGB Split | Visual | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `visualMediaMix` | Media Mix | Visual | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `macro1` | Macro 1 | Macros | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `macro2` | Macro 2 | Macros | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `macro3` | Macro 3 | Macros | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `macro4` | Macro 4 | Macros | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `macro5` | Macro 5 | Macros | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `macro6` | Macro 6 | Macros | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `macro7` | Macro 7 | Macros | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `macro8` | Macro 8 | Macros | Float | 0 .. 1 | 0 | yes | *(new in v2)* |
+| `lockMacros` | Lock Macros | Macros | Bool | true / false | false | yes | *(new in v2)* |
+| `layerGateEnabled` | Gate | Layer Gate | Bool | true / false | false | yes | *(new in v2)* |
+| `layerGateThreshold` | Gate Threshold (dB) | Layer Gate | Float | -100 .. 0 | -80 | yes | *(new in v2)* |
+| `layerGateRelease` | Gate Release (ms) | Layer Gate | Float | 0 .. 2000 | 80 | yes | *(new in v2)* |
 
 ## Notes
 
 - **Beat Sensitivity** ("Reactivity" in the Transitions panel) is projectM's own setting: how strongly presets react to the bass, mid and treble levels they animate from. 0 is calm, 1 is MilkDrop's usual response, 2 is twice as jumpy. It detects no beats and causes no transitions. MilkDAWp's beat detector keeps its own fixed threshold: tying it to this knob made beat tracking fail on the test fixtures at both ends of the range (roadmap 5.5).
 - **How easily MilkDAWp cuts** is set by the transition mode and its settings: Bars, the timed interval, and in Energy mode the **Energy Threshold**, how sharply the bass must come back after a breakdown to count as a drop (4 + 3 x the value, in dB: 5.5 to 16 dB, default 10).
+- **Visual, Macros and Layer Gate** (Phase 8, ADR-0011) are grouped in hosts that show parameter groups. They come after every 1.0 parameter, so sessions automating 1.0 parameters by index keep working. Each Visual default is its neutral value, which leaves the picture untouched and costs nothing. **Warp**, **Wave Size** and the **Macros** need a `.milkdawp` preset; until then they do nothing. **Media Mix** is the opacity of the media source chosen in Settings > Media source (an image; camera and video later). On an instance whose Output shows other instances as layers, its Visual controls act on the whole mixed picture; on an instance sending to another, on its own layer.
+- **Speed** changes how fast a preset's clock runs from now on; it never jumps the picture. It can't slow what a preset does once per frame (decay, feedback) or its reaction to the music.
+- **Lock Macros** off (the default): when the preset changes, the Macros move to the new preset's starting values (0 for a `.milk`). On: they keep their values.
+- **Gate**: the layer fades out while its own input stays 3 dB below **Gate Threshold** (after a 50 ms hold, over **Gate Release**), and is back at once when the input reaches the threshold. It keeps running while hidden.

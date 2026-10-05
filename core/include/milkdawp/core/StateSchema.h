@@ -81,6 +81,12 @@ struct StateSchemaV2 {
   std::string instanceLabel;
   /// 5.2: Transitions -> "Only tags" (Director::setTagFilter). Additive key.
   std::string tagFilter;
+  /// 8.6: the media source Media Mix shows (an image file for now). Empty:
+  /// none. Additive key.
+  std::string mediaSourcePath;
+  /// 8.6e: how the media meets the picture (engine::LayerBlend, Displace
+  /// included). Additive key.
+  int mediaBlend = 0;
   WindowLayout windows; // additive keys: older v2 states load with everything closed
   std::map<std::string, float> paramValues; // keyed by ParameterModel's v2 ids
 };
