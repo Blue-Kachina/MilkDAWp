@@ -208,8 +208,9 @@ validator runs.
 | Adaptive quality (FBO resolution scaling that affects real output) | | ✔ | |
 | Host automation of all parameters | ✔ | ✔ | |
 | MIDI learn (standalone) | | ✔ | |
-| Bundled preset pack | | ✔ | |
-| Signed, notarized installers | | ✔ | |
+| Bundled preset pack (Cream of the Crop + textures, D12) | | ✔ | |
+| Searchable preset browser (needed at ~10k bundled presets) | | ✔ | |
+| Installers for all platforms, signed where free (D11) | | ✔ | |
 | Texture sharing output (Spout / Syphon / NDI) | | | ✔ |
 | Scenes and snapshot morphing | | | ✔ |
 | Setlists and cues | | | ✔ |
@@ -541,8 +542,8 @@ call from Matthew before the phase that depends on them.
 | D8 | Standalone shell | Recommended | Phase 3 uses JUCE's `Standalone` plugin format to get an app early. Phase 4 replaces it with a real `juce_add_gui_app` shell sharing `milkdawp_ui`. |
 | D9 | Minimum OS | Recommended | Windows 10 21H2+, macOS 12+ (universal x86_64 + arm64), Ubuntu 22.04+ / glibc 2.35+. Loopback on macOS needs 13+/14.2+ and is feature-gated at runtime. |
 | D10 | Licensing | Recommended | Project stays AGPL-3.0-or-later (JUCE 9 AGPLv3 path), projectM LGPL-2.1 dynamically linked, notices shipped in installers. Moving off AGPL would require the commercial JUCE 9 licence. |
-| D11 | Signing accounts | **Open** (needed before Phase 6) | Apple Developer ID (notarization) and a Windows code-signing certificate (EV or OV via Azure Trusted Signing) are prerequisites for 1.0 installers. Budget and account ownership to be confirmed. |
-| D12 | Bundled presets | **Open** (needed before Phase 6) | Curate a licence-clean subset of the projectM community packs; confirm per-pack licences before bundling. |
+| D11 | Signing | Decided (2026-10-04) | **Free options only**: this is a hobby project with no budget for certificates or developer accounts. **Windows:** apply to the [SignPath Foundation](https://signpath.org/) free open-source programme once a release exists (their terms require an already-published release and a fully automated build from this repo; SignPath Foundation is then named as publisher on the certificate). Before applying, ask whether JUCE's AGPL/commercial dual licence conflicts with their "no commercial dual-licensing" rule (we use JUCE only under the AGPL). Until accepted, or if refused, Windows ships unsigned. **macOS:** ad-hoc signed in CI (`codesign -s -`, which Apple Silicon requires before it will load the code), not notarized; the docs give first-run steps (System Settings → Privacy & Security → "Open Anyway", or `xattr -dr com.apple.quarantine`). **Linux:** nothing needed. **All platforms:** SHA-256 checksums in every release, plus GitHub artifact attestations (`actions/attest-build-provenance`, free) so a download can be checked against the CI run that built it. Revisit if a free notarization route ever appears. |
+| D12 | Bundled presets | Decided (2026-10-04) | Bundle projectM's **Cream of the Crop** pack (~9,800 presets, curated by Jason Fletcher / ISOSCELES; [presets-cream-of-the-crop](https://github.com/projectM-visualizer/presets-cream-of-the-crop)) together with the projectM **texture pack** its presets reference, the same content projectM's own Steam release ships. Licence position (from the pack's LICENSE.md): MilkDrop presets carry no formal licence; authors keep copyright, but freely released presets are treated as public domain after decades of redistribution, and authors may ask for removal. We ship the pack's LICENSE.md and attribution unchanged, credit the curator in About and the docs, and honour removal requests (follow upstream removals; a takedown note in the docs). Consequences: installer size is measured before choosing full pack vs a subset with an in-app "download the full pack"; the first-run scan, Weighted shuffle and preset metadata must stay fast at ~10k entries; the click-the-name popup menu can't handle ~10k presets, so the searchable preset browser moves from the post-1.0 backlog into Phase 6 (6.1b). |
 | D13 | Window model | Decided | Video-first primary window with a hover/tap/pinned control drawer; a separately owned Output window for fullscreen on another display; detached-controls window as a secondary feature (§4.9). Replaces v1's control-strip-plus-pop-out-video layout. |
 | D14 | Development environment | Decided | Single container image (devcontainer + CI + agent sessions) covering core, CLI, headless render, and lint; CI as the Windows/macOS build farm; idempotent native bootstrap with a doctor mode for those who want local builds (§4.10). No Nix. |
 | D15 | projectM version | Recommended | Minimum projectM **4.2**, built from a pinned upstream `master` commit through a vcpkg overlay port until 4.2.0 is tagged. 4.1.7 draws its final image to framebuffer 0 whatever FBO is bound, which breaks §4.5. It also uses GLEW without initializing it, and times presets only by the wall clock. 4.2 adds `render_frame_fbo`, a GL-loader create call (no GLEW) and `set_frame_time`. Amends D4. See ADR-0008. |
@@ -2405,27 +2406,65 @@ that felt wrong and file it with the timestamp.
 
 ### Phase 6 — Content, packaging, release
 
-**Goal:** 1.0. **Exit:** signed installers for all platforms published by the tag workflow;
-docs live; v1 repo archived with a pointer.
+**Goal:** 1.0. **Exit:** installers for all platforms published by the tag workflow, signed
+where it's free (D11: Windows via SignPath if accepted, macOS ad-hoc with documented first-run
+steps), with checksums and build attestations; docs live; this repository renamed to MilkDAWp
+and the v1 repo archived with a pointer.
 
-- [ ] 6.1 (S) Curate and licence-check the bundled preset pack (D12); default preset chosen;
-      first-run library root points at it.
+**Order of work** (numbers are labels, not sequence): 6.5 first, unsigned, so every later item
+is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first `-beta` release (6.8) →
+6.10 (SignPath needs a published release) → 6.6/6.7 alongside → 6.9.
+
+- [ ] 6.1 (S) Bundle Cream of the Crop + the projectM texture pack (D12): measure installer
+      size (full pack vs subset plus an in-app download), ship the pack's LICENSE.md and
+      curator credit, default preset chosen (pleasant and cheap), first-run library root
+      points at it. Check that the first-run scan, Weighted shuffle and preset metadata stay
+      fast at ~10k presets.
+- [ ] 6.1b (M) Searchable preset browser (moved up from the post-1.0 backlog by D12):
+      filter-as-you-type over ~10k presets, favourites and ratings (5.2), keyboard
+      navigable (5.8). Replaces the click-the-preset-name popup menu for large libraries;
+      Phase 7.6 builds on it.
 - [ ] 6.2 (M) Windows installer (Inno Setup or WiX): VST3 to `Common Files\VST3`, app to
-      Program Files, optional desktop shortcut, uninstaller; signed (D11). Installs the
+      Program Files, optional desktop shortcut, uninstaller. Unsigned until 6.10 succeeds,
+      then signed through SignPath in the release workflow (D11). Installs the
       Microsoft Visual C++ 2015-2022 Redistributable (x64) when it's missing: the plugin,
       app and projectM all link the dynamic MSVC runtime (3.10, decided 2026-09-26).
-- [ ] 6.3 (M) macOS: `.pkg` with VST3 + AU + app, Developer ID signed, notarized, stapled;
-      universal binary.
+- [ ] 6.3 (M) macOS: `.pkg` with VST3 + AU + app, universal binary, ad-hoc signed
+      (`codesign -s -`), not notarized (D11: no paid Apple Developer account). The docs and
+      the release notes give the first-run steps for Gatekeeper.
 - [ ] 6.4 (M) Linux: AppImage for the app, tarball for the VST3, `.deb` as stretch.
-- [ ] 6.5 (S) Release workflow: tag → build matrix → sign → package → GitHub Release with
-      generated notes and checksums. Pre-release channel on `-beta` tags.
+- [ ] 6.5 (S) Release workflow: tag → build matrix (Release config, real identity) → sign
+      where available → package → GitHub Release with generated notes, SHA-256 checksums and
+      artifact attestations (`actions/attest-build-provenance`). `-beta` tags publish as
+      pre-releases. Starts unsigned and before the installers exist (zipped bundles), so
+      the pipeline is proven early.
 - [ ] 6.6 (M) Documentation: user guide (plugin + app), capture how-tos per platform, OBS
       workflow, MIDI/automation guide, troubleshooting, FAQ on licences.
 - [ ] 6.7 (S) In-app "About" with versions and licences; update check (opt-in, GitHub
       releases API).
 - [ ] 6.8 (S) Beta programme: two weeks of `-beta` builds, issue template, triage.
-- [ ] 6.9 (S) 1.0 release, archive the v1 repository with a README pointer to this one, transfer
-      open v1 issues that still apply, announce.
+- [ ] 6.9 (S) 1.0 release and repository promotion, in this order:
+      1. Back up v1: `git clone --mirror` plus a `git bundle create … --all`; export issues
+         (`gh issue list --state all --json …`), the wiki and release assets, which a mirror
+         doesn't include; keep a built v1 `.vst3` so old sessions can still be opened in v1.
+      2. Test v1 → v2 state migration (§4.8) on copies of real v1 sessions. A release build
+         uses v1's identity (D1), so installing it replaces v1 in every host, and a session
+         saved by v2 won't reopen in v1.
+      3. Rename the v1 repo (e.g. `MilkDAWp-v1`), commit a README pointer to this one, then
+         archive it (archived repos are read-only).
+      4. Rename this repo `MilkDAWp2` → `MilkDAWp` (GitHub redirects the old URLs; old links to
+         `Blue-Kachina/MilkDAWp` now land here, and links to v1 release downloads break) and
+         `git remote set-url origin` in every clone.
+      5. Sweep leftover `MilkDAWp2` names: the GHCR image `milkdawp2-devcontainer`
+         (`ci.yml`, `devcontainer-image.yml`, `.devcontainer/devcontainer.json`; a package
+         doesn't follow a repo rename, so keep the name or rename it and rebuild), and the
+         text in `app/`, `engine/`, `core/` and the docs. The dev identity's
+         `MilkDAWp2 Dev` names (ADR-0007) stay as they are.
+      6. Transfer open v1 issues that still apply; announce.
+- [ ] 6.10 (S) Windows signing (D11): after the first published `-beta` release, apply to the
+      SignPath Foundation open-source programme (asking first about JUCE's dual licence);
+      on acceptance, add the SignPath step to the release workflow. If refused, record it in
+      D11 and keep shipping unsigned with checksums and attestations.
 
 ### Phase 7 — Android standalone app (post-1.0)
 
@@ -2501,8 +2540,8 @@ preset folder; then try playback capture with a music app.
 - Drawer countdown: `DirectorStatus` publishes the next scheduled transition time and the
   beat phase, so the drawer's (currently empty) progress track fills in Timed/Hybrid modes
   and shows beat pips in BeatQuantized, with "next in 0:11" in the preset detail line.
-- Searchable preset browser panel (filter-as-you-type, favourites) to replace the drawer's
-  click-the-preset-name popup menu for large libraries. Required by Phase 7.6 on Android.
+- ~~Searchable preset browser panel~~: moved into Phase 6 as 6.1b by D12 (the bundled pack
+  has ~10k presets). Phase 7.6 builds on it.
 - **Layers: several inputs, several visuals, one canvas.** N projectM instances in the
   engine's one GL context, each fed its own audio input and rendering to its own FBO
   (`render_frame_fbo`, D15), mixed onto the output by our own compositor pass. Mix options:
@@ -2541,13 +2580,15 @@ smoke tests and validators rather than a percentage.
 
 ## 9. Packaging, signing, distribution
 
-- **Windows:** signed VST3 bundle + signed app installer. Runtime DLLs (projectM, GLEW,
+- **Windows:** VST3 bundle + app installer. Runtime DLLs (projectM, GLEW,
   freetype, png, zlib, brotli) live inside the `.vst3` bundle's binary folder and next to the
-  app exe. Signing via Azure Trusted Signing or an OV/EV certificate (D11).
+  app exe. Signed through the free SignPath Foundation programme if accepted, else unsigned
+  (D11, 6.10).
 - **macOS:** universal `.pkg` installing `MilkDAWp.vst3`, `MilkDAWp.component`, and
-  `MilkDAWp.app`; each bundle carries `Frameworks/` with fixed-up dylibs; hardened runtime,
-  Developer ID signature, notarization, stapling. Loopback capture entitlements/permissions
-  documented.
+  `MilkDAWp.app`; each bundle carries `Frameworks/` with fixed-up dylibs; ad-hoc signed, not
+  notarized (D11: no paid Apple Developer account), with Gatekeeper first-run steps in the
+  docs. Loopback capture entitlements/permissions documented.
+- **Every release:** SHA-256 checksums and GitHub artifact attestations (D11).
 - **Linux:** AppImage for the app (bundles the shared libraries), `.tar.gz` for the VST3 with
   `Contents/Resources/lib` rpath layout from v1; `.deb` stretch.
 - **Android (Phase 7):** signed AAB for Play and APK for sideloading, arm64-v8a;
@@ -2572,13 +2613,14 @@ smoke tests and validators rather than a percentage.
 | Hosts that dislike OpenGL (some macOS hosts, sandboxed AUv3 not in scope) | plugin unusable in that host | pluginval + DAW matrix early (Phase 3); engine can run with zero surfaces; out-of-process renderer is the long-term escape hatch |
 | macOS system audio capture APIs require newer OS and permissions | standalone loopback on older macOS | feature-gate at runtime; document BlackHole fallback; MVP ships without native loopback |
 | Beat tracking on non-electronic or rubato material | wrong-feeling transitions | confidence-gated fallback to Timed mode; host transport wins in the DAW; fixtures include hard cases so the gate is honest |
-| Signing/notarization accounts and costs | blocks 1.0 installers | decide D11 early (Phase 4 at the latest); unsigned dev builds continue via CI artifacts |
+| No budget for signing or notarization (D11) | SmartScreen warnings on Windows; Gatekeeper blocks first launch on macOS | Windows: SignPath Foundation's free OSS programme (6.10); macOS: ad-hoc signing plus documented first-run steps; checksums and build attestations on every release so downloads can still be verified |
 | projectM pinned to an untagged upstream `master` commit (D15) has a regression 4.1.7 did not | broken or different preset rendering, found late | pin a hash, never float; 2.7 headless render over real presets on every push; DAW checklist before each beta; bump on a branch; move to the 4.2.0 tag as soon as it exists |
 | vcpkg baseline drift breaking projectM builds | CI red for reasons unrelated to our code | pinned baseline; bump on a branch with the full matrix; binary cache |
 | JUCE 9 is two months old; 9.0.x point releases may change behaviour we depend on (EGL, Direct2D compositing, CoreAudio rewrite) | surprise breakage on upgrade, or a platform bug we cannot fix | JUCE pinned by tag + hash; upgrades on a branch with the full matrix and the DAW checklist; keep `BREAKING_CHANGES.md` review as a step in the upgrade PR template; report upstream with a minimal repro |
 | Duplicate zlib/libpng between JUCE 9's C-mode bundled copies and vcpkg's | ODR violations, odd crashes on one platform only | single-copy rule decided in 0.1 and checked at link time in CI |
 | Scope creep from post-1.0 ideas (Spout, scenes, OSC) | 1.0 slips | tiers in §3 are the contract; new ideas go to the backlog section, not into phases |
-| Preset pack licensing | cannot bundle content | D12 resolved before Phase 6; ship with a downloader as fallback |
+| Preset pack licensing (D12: MilkDrop presets carry no formal licence) | an author asks for removal | ship the pack's LICENSE.md and attribution; honour removal requests and follow upstream removals; the in-app downloader (6.1) remains the fallback if bundling ever has to stop |
+| ~10k bundled presets (D12) | slow first-run scan, unusable popup menu | searchable browser (6.1b); measure scan and shuffle at full pack size in 6.1 |
 | Android build path (JUCE's CMake API has no Android support; our projectM overlay has never built for an Android triplet) | Phase 7 costs much more than estimated, or needs a second build system | 7.1 spike first, time-boxed, before anything else is scheduled; Phase 4 follows ADR-0010's boundary rules so the shell isn't the problem too |
 | Readback surfaces (Linux, Android, refusing drivers) cost a full-frame GPU→CPU→GPU copy per surface | lower frame rate on weak GPUs, especially phones | only while a readback surface exists; adaptive quality (5.3) shrinks the frame; JUCE sharing patch (7.8) removes it on Android |
 

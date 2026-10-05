@@ -87,7 +87,7 @@ public:
     auto* component = content.get();
     component->onStateChanged = [this] { saveState(); };
     component->onLoggingChanged = [this](bool enabled) { setLogging(enabled); };
-    component->onShowLogFile = [this] { logFile().revealToUser(); };
+    component->onShowLogFile = [] { logFile().revealToUser(); };
     component->onCollectLogs = [this] { collectLogs(); };
     window_ = std::make_unique<MainWindow>(getApplicationName(), std::move(content), state_);
     window_->onStateChanged = [this] { saveState(); };

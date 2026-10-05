@@ -9,14 +9,17 @@ namespace milkdawp::ui {
 
 /// The drawer's palette (design "A: video overlay", docs/design): white
 /// icons over a dark scrim, one accent for "on" states.
+/// Built from literals only, never from juce::Colours: those are globals in
+/// JUCE's own translation unit, and nothing orders their initialization before
+/// ours (on Linux they were still zero, so these came out translucent black).
 namespace drawerTheme {
 inline const juce::Colour accent{0xff6cc4ff};
 inline const juce::Colour text{0xffffffff};
-inline const juce::Colour textSecondary = juce::Colours::white.withAlpha(0.74f);
-inline const juce::Colour hoverFill = juce::Colours::white.withAlpha(0.14f);
-inline const juce::Colour pressFill = juce::Colours::white.withAlpha(0.22f);
-inline const juce::Colour hairline = juce::Colours::white.withAlpha(0.22f);
-inline const juce::Colour track = juce::Colours::white.withAlpha(0.28f);
+inline const juce::Colour textSecondary = text.withAlpha(0.74f);
+inline const juce::Colour hoverFill = text.withAlpha(0.14f);
+inline const juce::Colour pressFill = text.withAlpha(0.22f);
+inline const juce::Colour hairline = text.withAlpha(0.22f);
+inline const juce::Colour track = text.withAlpha(0.28f);
 /// Solid ground for the detached controls window (no video under it).
 inline const juce::Colour panel{0xff101217};
 inline const juce::Colour menuBackground{0xf014161c};
