@@ -43,8 +43,6 @@ add_library(milkdawp_app_lib STATIC
   src/MidiLearn.cpp
   src/ParameterBinding.h
   src/ParameterBinding.cpp
-  src/PresetBrowserPanel.h
-  src/PresetBrowserPanel.cpp
   src/RecentLog.h
   src/RecentLog.cpp
   src/SignalMonitor.h
@@ -80,6 +78,8 @@ juce_add_gui_app(milkdawp_app
   PRODUCT_NAME "${_mdw_app_name}"
   COMPANY_NAME "Otitis Media"
   BUNDLE_ID    ${_mdw_app_bundle_id}
+  # 6.2-6.4: v1's wordmark on a tile (resources/make-icon.ps1); JUCE makes the .ico/.icns.
+  ICON_BIG     "${CMAKE_SOURCE_DIR}/resources/icon.png"
   # Microphone access (macOS asks for permission on first input).
   MICROPHONE_PERMISSION_ENABLED TRUE
   MICROPHONE_PERMISSION_TEXT "MilkDAWp listens to your audio input to animate the visuals. Nothing is recorded."

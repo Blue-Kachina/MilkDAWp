@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- packaging/linux/milkdawp-mime.xml: .milk preset files (§4.6), so the
+     desktop entry's MimeType lets file managers open them in MilkDAWp. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-milkdrop-preset">
+    <comment>MilkDrop preset</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.milk"/>
+  </mime-type>
+</mime-info>

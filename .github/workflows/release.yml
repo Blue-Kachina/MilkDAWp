@@ -13,8 +13,11 @@ name: Release
 # publishing: the archives are left as workflow artifacts. That is how to
 # try a change to this file before tagging.
 #
-# Installers (6.2-6.4) replace the zipped bundles later; Windows signing via
-# SignPath (6.10) slots in before packaging once it's accepted.
+# Each platform job builds its installers (6.2-6.4: Inno Setup .exe, .pkg,
+# AppImage + VST3 tarball + .deb, via scripts/release/package.sh), then
+# installs them on its throwaway runner, checks the result and uninstalls
+# (scripts/release/smoke-test-*). Windows signing via SignPath (6.10) slots in
+# before packaging once it's accepted.
 
 on:
   push:
@@ -22,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version label for a dry run (default: <project version>-dev.<run number>). Nothing is published."
+        description: "Version label for a dry run, e.g. 2.0.0-beta.1 (blank: <project version>-dev.<run number>). Nothing is published."
         required: false
         type: string
 
@@ -58,7 +61,8 @@ jobs:
             label="${GITHUB_REF_NAME#v}"
             publish=true
           else
-            label="${INPUT_VERSION:-$project-dev.$GITHUB_RUN_NUMBER}"
+            label="${INPUT_VERSION#v}"   # accept "v2.0.0-beta.1" like a tag
+            label="${label:-$project-dev.$GITHUB_RUN_NUMBER}"
             publish=false
           fi
           # Same rule as MILKDAWP_VERSION_LABEL's check in CMakeLists.txt,
@@ -110,6 +114,15 @@ jobs:
       - name: Set up MSVC dev environment (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
+
+      # 6.2: builds the installer. Version pinned in toolchain.json.
+      - name: Install Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = (Get-Content toolchain.json -Raw | ConvertFrom-Json).windows.innoSetup.version
+          choco install innosetup --version $version -y --no-progress
+          "MILKDAWP_ISCC=${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" >> $env:GITHUB_ENV
 
       - name: Restore vcpkg binary cache
         uses: actions/cache/restore@v4
@@ -178,6 +191,26 @@ jobs:
           MILKDAWP_VCPKG_TRIPLET_DIR: build-${{ matrix.preset }}/vcpkg_installed/${{ matrix.triplet }}
         run: bash scripts/release/package.sh ${{ matrix.platform }} build-${{ matrix.preset }} "${{ needs.version.outputs.label }}" dist
 
+      # Install what was just packaged on this throwaway runner, check it,
+      # validate the installed plugin, start the app, uninstall. Never run
+      # these on a developer machine: they install the real identity (D1).
+      - name: Smoke test the installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/release/smoke-test-windows.ps1 -Dist dist -Version "${{ needs.version.outputs.label }}"
+
+      - name: Smoke test the installer (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash scripts/release/smoke-test-macos.sh dist "${{ needs.version.outputs.label }}"
+
+      - name: Upload pluginval log
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-pluginval-log-windows
+          path: build-tools/pluginval-logs/
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
@@ -185,42 +218,67 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  # Linux inside the devcontainer image, like ci.yml (projectM's vcpkg tree
-  # is pre-built there).
+  # Linux in a plain ubuntu:22.04 container, not the devcontainer image: the
+  # release must run on D9's floor (glibc 2.35), and binaries built on the
+  # image's 24.04 need glibc 2.38 and GCC 13's libstdc++. linux-setup.sh
+  # installs GCC 12, CMake, JUCE's dependencies and vcpkg; locally the same
+  # script runs in `docker run ubuntu:22.04` (docs/releasing.md).
   build-linux:
     needs: version
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/blue-kachina/milkdawp2-devcontainer:latest
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+      image: ubuntu:22.04
+    # An absolute path inside the container: in a container job
+    # github.workspace is the host's path, not the container's.
+    env:
+      VCPKG_BINARY_CACHE_DIR: /opt/vcpkg-bincache
+      VCPKG_BINARY_SOURCES: "clear;files,/opt/vcpkg-bincache,readwrite"
     steps:
+      - name: Install git
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates > /dev/null
+
       - uses: actions/checkout@v4
 
+      - name: Set up the build environment
+        run: bash scripts/release/linux-setup.sh
+
+      # No CI job builds on 22.04, so this job keeps its own vcpkg cache.
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.VCPKG_BINARY_CACHE_DIR }}
+          key: vcpkg-bin-linux-2204-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'triplets/**', 'vcpkg-overlays/**') }}
+          restore-keys: |
+            vcpkg-bin-linux-2204-${{ env.VCPKG_COMMIT }}-
+
       - name: Configure
-        run: >-
-          cmake --preset release-linux
-          -DMILKDAWP_DEV_ALT_IDENTITY=OFF
-          "-DMILKDAWP_VERSION_LABEL=${{ needs.version.outputs.label }}"
+        run: |
+          mkdir -p "$VCPKG_BINARY_CACHE_DIR"
+          cmake --preset release-linux -DMILKDAWP_DEV_ALT_IDENTITY=OFF \
+            "-DMILKDAWP_VERSION_LABEL=${{ needs.version.outputs.label }}"
+
+      - name: Save vcpkg binary cache
+        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.VCPKG_BINARY_CACHE_DIR }}
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
       - name: Build
         run: cmake --build --preset release-linux
-
-      - name: pluginval (VST3)
-        env:
-          MILKDAWP_REQUIRE_PROJECTM: "1"
-        run: |
-          mkdir -p build-tools/pluginval-logs
-          xvfb-run -a pluginval --strictness-level 5 --timeout-ms 900000 --skip-gui-tests \
-            --output-dir build-tools/pluginval-logs \
-            --validate build-release-linux/plugin/milkdawp_plugin_artefacts/Release/VST3/MilkDAWp.vst3
 
       - name: Package
         shell: bash
         env:
           MILKDAWP_VCPKG_TRIPLET_DIR: build-release-linux/vcpkg_installed/x64-linux-dynamic
         run: bash scripts/release/package.sh linux build-release-linux "${{ needs.version.outputs.label }}" dist
+
+      # glibc floor, the AppImage's contents and start, pluginval on the
+      # tarball's VST3, and the .deb's install / start / removal.
+      - name: Smoke test the packages
+        shell: bash
+        run: bash scripts/release/smoke-test-linux.sh dist "${{ needs.version.outputs.label }}"
 
       - name: Upload
         uses: actions/upload-artifact@v4
@@ -247,7 +305,7 @@ jobs:
       - name: Checksums
         working-directory: dist
         run: |
-          sha256sum MilkDAWp-* > SHA256SUMS.txt
+          sha256sum MilkDAWp-* milkdawp_* > SHA256SUMS.txt
           cat SHA256SUMS.txt
           cat SHA256SUMS.txt >> "$GITHUB_STEP_SUMMARY"
 
@@ -257,7 +315,9 @@ jobs:
         if: needs.version.outputs.publish == 'true'
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: dist/MilkDAWp-*
+          subject-path: |
+            dist/MilkDAWp-*
+            dist/milkdawp_*
 
       - name: Keep the dry run's archives
         if: needs.version.outputs.publish != 'true'
@@ -276,14 +336,18 @@ jobs:
           PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
           cat > notes-header.md <<EOF
-          Zipped builds for Windows (x64), macOS (universal) and Linux (x64). Each archive's
-          README.txt says where to put the plugin and the app.
+          Each installer has the app, the plugin and about 9,800 bundled presets.
 
-          - **Windows:** not code-signed yet, so SmartScreen may warn. Needs the
-            [Visual C++ 2015-2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
-            The \`-symbols.zip\` is only for reading crash reports.
-          - **macOS:** ad-hoc signed, not notarized. macOS blocks it on first launch; README.txt
-            gives the steps to allow it.
+          - **Windows (10 21H2+, x64):** \`MilkDAWp-${LABEL}-windows-x64-setup.exe\` installs the
+            VST3, the app and the presets, plus the Visual C++ runtime if it's missing. Not
+            code-signed yet, so SmartScreen may warn (More info > Run anyway). The
+            \`-symbols.zip\` is only for reading crash reports.
+          - **macOS (12+, Apple Silicon and Intel):** \`MilkDAWp-${LABEL}-macos-universal.pkg\`
+            installs the app, VST3, AU and presets. It isn't from an identified developer, so
+            the first time Control-click it > Open > Open.
+          - **Linux (Ubuntu 22.04+ / glibc 2.35+, x64):** the \`.AppImage\` is the app;
+            \`-linux-x64-vst3.tar.gz\` has the VST3 and an \`install-vst3.sh\`; on Debian/Ubuntu the
+            \`.deb\` installs both system-wide.
 
           **Verify a download:** compare it with \`SHA256SUMS.txt\`, or run
           \`gh attestation verify <file> --repo ${GH_REPO}\`.

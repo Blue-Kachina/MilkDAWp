@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- packaging/macos/distribution.xml: the .pkg's installer UI (6.3).
+     build-pkg.sh fills in @VERSION@ and @NUMERIC_VERSION@. One choice per
+     component, all on by default; "Customize" lets a user skip any. -->
+<installer-gui-script minSpecVersion="2">
+  <title>MilkDAWp @VERSION@</title>
+  <license file="LICENSE.txt"/>
+  <readme file="README.txt"/>
+  <options customize="allow" require-scripts="false" hostArchitectures="x86_64,arm64"/>
+  <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+  <volume-check>
+    <allowed-os-versions>
+      <os-version min="12.0"/>
+    </allowed-os-versions>
+  </volume-check>
+
+  <choices-outline>
+    <line choice="app"/>
+    <line choice="vst3"/>
+    <line choice="au"/>
+    <line choice="presets"/>
+  </choices-outline>
+
+  <choice id="app" title="MilkDAWp app" description="The standalone visualizer, in /Applications.">
+    <pkg-ref id="com.otitismedia.MilkDAWp.pkg.app"/>
+  </choice>
+  <choice id="vst3" title="VST3 plugin" description="/Library/Audio/Plug-Ins/VST3/MilkDAWp.vst3">
+    <pkg-ref id="com.otitismedia.MilkDAWp.pkg.vst3"/>
+  </choice>
+  <choice id="au" title="Audio Unit plugin" description="/Library/Audio/Plug-Ins/Components/MilkDAWp.component (Logic, GarageBand, ...)">
+    <pkg-ref id="com.otitismedia.MilkDAWp.pkg.au"/>
+  </choice>
+  <choice id="presets" title="Cream of the Crop presets" description="About 9,800 MilkDrop presets and their textures, in /Library/Application Support/MilkDAWp, shared by the app and the plugins.">
+    <pkg-ref id="com.otitismedia.MilkDAWp.pkg.presets"/>
+  </choice>
+
+  <pkg-ref id="com.otitismedia.MilkDAWp.pkg.app" version="@NUMERIC_VERSION@" onConclusion="none">app.pkg</pkg-ref>
+  <pkg-ref id="com.otitismedia.MilkDAWp.pkg.vst3" version="@NUMERIC_VERSION@" onConclusion="none">vst3.pkg</pkg-ref>
+  <pkg-ref id="com.otitismedia.MilkDAWp.pkg.au" version="@NUMERIC_VERSION@" onConclusion="none">au.pkg</pkg-ref>
+  <pkg-ref id="com.otitismedia.MilkDAWp.pkg.presets" version="@NUMERIC_VERSION@" onConclusion="none">presets.pkg</pkg-ref>
+</installer-gui-script>

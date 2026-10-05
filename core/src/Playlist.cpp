@@ -132,11 +132,25 @@ std::size_t Playlist::advanceNext(std::mt19937& rng) {
   case PlaylistPolicy::ShuffleNoRepeat:
   case PlaylistPolicy::Weighted: {
     const bool weighted = policy_ == PlaylistPolicy::Weighted;
+    // The no-repeat window as a mask, built once: asking isInNoRepeatWindow()
+    // per entry walks the history for each of ~10k presets (6.1).
+    std::vector<char> recent(entries_.size(), 0);
+    {
+      const std::size_t window = std::min(historyWindowSize_, history_.size());
+      auto it = history_.rbegin();
+      for (std::size_t i = 0; i < window; ++i, ++it) {
+        if (*it < recent.size()) {
+          recent[*it] = 1;
+        }
+      }
+    }
     std::vector<std::size_t> candidates;
     std::vector<double> weights;
+    candidates.reserve(entries_.size());
+    weights.reserve(entries_.size());
     const auto collect = [&](bool skipHistory) {
       for (std::size_t i = 0; i < entries_.size(); ++i) {
-        if (eligible[i] && (skipHistory ? !isInNoRepeatWindow(i) : i != currentIndex_)) {
+        if (eligible[i] && (skipHistory ? recent[i] == 0 : i != currentIndex_)) {
           candidates.push_back(i);
           weights.push_back(std::max(0.0f, entries_[i].weight));
         }

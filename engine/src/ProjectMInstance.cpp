@@ -29,6 +29,14 @@ std::unique_ptr<ProjectMInstance> ProjectMInstance::create(const ProjectMLibrary
   // callback anyway.
   fn.setHardCutEnabled(handle, false);
   fn.setPresetLocked(handle, true);
+  if (!settings.textureSearchPaths.empty()) {
+    std::vector<const char*> paths;
+    paths.reserve(settings.textureSearchPaths.size());
+    for (const auto& path : settings.textureSearchPaths) {
+      paths.push_back(path.c_str());
+    }
+    fn.setTextureSearchPaths(handle, paths.data(), paths.size());
+  }
   instance->setOutputSize(settings.width, settings.height);
   return instance;
 }

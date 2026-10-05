@@ -66,6 +66,9 @@ struct RenderEngineConfig {
   int initialHeight = 720;
   int maxDimension = 4096;  // cap on either FBO dimension
   double sampleRate = 48000.0; // for TransitionExecutor's soft-cut early issue
+  /// Given to every projectM instance (6.1): normally
+  /// BundledContent::textureSearchPaths(), set by the shell.
+  std::vector<std::string> textureSearchPaths;
 };
 
 /// Owns the GL context, the render thread and the projectM instance for the

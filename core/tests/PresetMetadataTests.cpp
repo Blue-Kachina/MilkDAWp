@@ -83,3 +83,29 @@ TEST_CASE("Malformed metadata lines are skipped", "[core][PresetMetadata]") {
   CHECK(metadata.size() == 1);
   CHECK(metadata.get("good.milk") == PresetInfo{4, true, {"calm"}});
 }
+
+TEST_CASE("Favourites round-trip, and older files and readers ignore the new flag", "[core][PresetMetadata]") {
+  PresetMetadata metadata;
+  PresetInfo info;
+  info.favourite = true;
+  info.neverAutoSelect = true;
+  info.rating = 2;
+  metadata.set("C:/a/fav.milk", info);
+  CHECK_FALSE(info.isDefault());
+
+  const auto text = metadata.serialize();
+  CHECK(text.find("2\tnf\t\tfav.milk") != std::string::npos);
+  CHECK(PresetMetadata::parse(text).get("fav.milk") == info);
+
+  // A favourite with nothing else is still kept (not "default").
+  PresetMetadata onlyFavourite;
+  PresetInfo heart;
+  heart.favourite = true;
+  onlyFavourite.set("x.milk", heart);
+  CHECK(onlyFavourite.size() == 1);
+
+  // A file written before 6.1b has no 'f': nothing is a favourite.
+  const auto old = PresetMetadata::parse("3\tn\tcalm\told.milk\n");
+  CHECK_FALSE(old.get("old.milk").favourite);
+  CHECK(old.get("old.milk").neverAutoSelect);
+}

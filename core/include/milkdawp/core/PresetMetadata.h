@@ -15,9 +15,10 @@ struct PresetInfo {
   int rating = 0;                // 0: unrated, else 1-5 stars
   bool neverAutoSelect = false;  // only ever played when picked by hand
   std::vector<std::string> tags; // normalised: lower case, trimmed, sorted, unique
+  bool favourite = false;        // 6.1b: the browser's Favourites tab (last, so {rating, never, tags} still works)
 
   [[nodiscard]] bool isDefault() const noexcept {
-    return rating == 0 && !neverAutoSelect && tags.empty();
+    return rating == 0 && !neverAutoSelect && !favourite && tags.empty();
   }
   bool operator==(const PresetInfo&) const = default;
 };

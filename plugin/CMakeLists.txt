@@ -19,6 +19,11 @@ else()
 endif()
 
 set(_mdw_formats VST3)
+# D2 / ADR-0002: AU on macOS (6.3). Same identity: manufacturer OMda, subtype =
+# the plugin code, type aufx (an effect: IS_SYNTH and IS_MIDI_EFFECT are off).
+if(APPLE)
+  list(APPEND _mdw_formats AU)
+endif()
 if(MILKDAWP_PLUGIN_STANDALONE)
   list(APPEND _mdw_formats Standalone)
 endif()
@@ -75,6 +80,9 @@ target_link_libraries(milkdawp_plugin PRIVATE
 milkdawp_link_external_zlib_libpng(milkdawp_plugin)
 
 set(_mdw_format_targets milkdawp_plugin_VST3)
+if(APPLE)
+  list(APPEND _mdw_format_targets milkdawp_plugin_AU)
+endif()
 if(MILKDAWP_PLUGIN_STANDALONE)
   list(APPEND _mdw_format_targets milkdawp_plugin_Standalone)
 endif()

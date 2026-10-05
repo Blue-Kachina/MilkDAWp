@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=MilkDAWp
+GenericName=Music Visualizer
+Comment=MilkDrop visuals that follow your music
+Exec=milkdawp %f
+Icon=milkdawp
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+MimeType=application/x-milkdrop-preset;
+Keywords=milkdrop;projectm;visualizer;visuals;vj;
+StartupWMClass=MilkDAWp

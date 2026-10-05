@@ -106,6 +106,7 @@ include(cmake/Warnings.cmake)              # milkdawp_warnings interface target 
 include(cmake/Sanitizers.cmake)            # milkdawp_sanitizers interface target (0.4, §8)
 include(cmake/SingleZlibLibpngCheck.cmake) # §4.11 zlib/libpng single-copy decision + link check
 include(cmake/FetchJuce.cmake)             # JUCE 9 via FetchContent, pinned tag+hash (D4)
+include(cmake/BundledContent.cmake)        # Cream of the Crop + texture pack, pinned commit+hash (6.1, D12)
 
 if(MILKDAWP_WITH_PROJECTM)
   include(cmake/ProjectMDependency.cmake)  # vcpkg projectM, validated SHARED (D10)

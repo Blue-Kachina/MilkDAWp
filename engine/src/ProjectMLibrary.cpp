@@ -101,6 +101,7 @@ ProjectMLibrary::LoadResult ProjectMLibrary::load(const juce::File& bundleDirect
   require("projectm_set_soft_cut_duration", fn.setSoftCutDuration);
   require("projectm_set_hard_cut_enabled", fn.setHardCutEnabled);
   require("projectm_set_preset_locked", fn.setPresetLocked);
+  require("projectm_set_texture_search_paths", fn.setTextureSearchPaths);
   require("projectm_pcm_add_float", fn.pcmAddFloat);
   require("projectm_pcm_get_max_samples", fn.pcmGetMaxSamples);
   require("projectm_set_frame_time", fn.setFrameTime);

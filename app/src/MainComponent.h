@@ -12,7 +12,6 @@
 #include "AudioSourceRouter.h"
 #include "MidiLearn.h"
 #include "ParameterBinding.h"
-#include "PresetBrowserPanel.h"
 #include "SignalMonitor.h"
 #include "milkdawp/engine/OutputSurface.h"
 #include "milkdawp/engine/OutputWindow.h"
@@ -21,6 +20,7 @@
 #include "milkdawp/ui/DiagnosticsPanel.h"
 #include "milkdawp/ui/DetachedControlsWindow.h"
 #include "milkdawp/ui/OutputSettings.h"
+#include "milkdawp/ui/PresetBrowser.h"
 #include "milkdawp/ui/PresetInfoMenu.h"
 #include "milkdawp/ui/TransitionSettings.h"
 
@@ -51,12 +51,10 @@ public:
   void nextPreset();
   void choosePresetFolder();
   void rescanPresets();
-  void showPresetPicker();
-  /// 5.2: the rating / never-auto-select / tags of one preset (the shared
-  /// `PresetMetadataStore`), for the picker and the browser.
-  [[nodiscard]] ui::PresetInfoAccess presetInfoAccess(const std::string& path) const;
-  void addCurrentPresetInfo(juce::PopupMenu& menu);
-  void showPresetBrowser();
+  /// 6.1b: the preset browser popover (preset title, `B`, File > Browse
+  /// presets). Replaces the popup picker and the separate library window.
+  void setPresetBrowserVisible(bool visible);
+  [[nodiscard]] bool isPresetBrowserVisible() const { return presetBrowser_.isVisible(); }
   void showAudioSettings();
   /// A `.milk` file (loads its folder, selects the file) or a folder
   /// (loads it) from a command-line argument, another instance's, or a
@@ -120,6 +118,10 @@ private:
   void publishControls();
   void layoutTransitionSettings();
   void layoutOutputSettings();
+  void layoutPresetBrowser();
+  /// Favourites used to be app-only (4.5); since 6.1b they are in the shared
+  /// preset metadata. Moves any saved ones there once.
+  void migrateFavourites();
   void updateInputHint();
   void updateStatusText();
   void notifyStateChanged();
@@ -140,6 +142,7 @@ private:
   ui::ControlDrawer drawer_;
   ui::TransitionSettingsPanel transitionSettings_;
   ui::OutputSettingsPanel outputSettings_;
+  ui::PresetBrowser presetBrowser_; // 6.1b
   juce::SharedResourcePointer<juce::TooltipWindow> tooltipWindow_;
   // After every widget it binds: destroyed first.
   ParameterBinding binding_;

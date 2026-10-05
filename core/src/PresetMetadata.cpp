@@ -86,7 +86,10 @@ std::string PresetMetadata::serialize() const {
   for (const auto& [key, info] : entries_) {
     text += std::to_string(info.rating);
     text += '\t';
+    // Flags, one letter each: n = never auto-select, f = favourite (6.1b).
+    // Readers ignore letters they don't know.
     text += info.neverAutoSelect ? "n" : "";
+    text += info.favourite ? "f" : "";
     text += '\t';
     text += joinTags(info.tags);
     text += '\t';
@@ -113,6 +116,7 @@ PresetMetadata PresetMetadata::parse(std::string_view text) {
     PresetInfo info;
     info.rating = fields[0][0] - '0';
     info.neverAutoSelect = fields[1].find('n') != std::string_view::npos;
+    info.favourite = fields[1].find('f') != std::string_view::npos;
     info.tags = parseTags(fields[2]);
     metadata.set(fields[3], std::move(info));
   }

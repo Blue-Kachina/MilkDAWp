@@ -33,3 +33,11 @@ endif()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   target_compile_options(milkdawp_warnings INTERFACE -Wno-error=maybe-uninitialized)
 endif()
+
+# GCC 12 (the Linux release builds with it on Ubuntu 22.04, 6.4) reports
+# -Wuse-after-free inside libstdc++'s own std::string at -O3
+# (basic_string.tcc), a known false positive fixed in GCC 13. A warning, not
+# an error, on GCC 12 only.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13)
+  target_compile_options(milkdawp_warnings INTERFACE -Wno-error=use-after-free)
+endif()

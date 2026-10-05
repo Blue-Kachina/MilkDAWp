@@ -1,0 +1,5 @@
+#!/bin/sh
+# AppImage entry point (6.4): the app lives in usr/bin beside libprojectM-4.so,
+# and finds the presets in usr/share/milkdawp (engine::BundledContent).
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/bin/MilkDAWp" "$@"

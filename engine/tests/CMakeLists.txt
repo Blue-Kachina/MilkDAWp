@@ -15,6 +15,7 @@ add_executable(milkdawp_engine_tests
   ControlMappingTests.cpp
   DirectorTests.cpp
   RecentErrorsTests.cpp
+  BundledContentTests.cpp
 )
 milkdawp_test_no_crash_dialogs(milkdawp_engine_tests)
 target_compile_definitions(milkdawp_engine_tests PRIVATE
@@ -39,3 +40,8 @@ endif()
 include(CTest)
 include(Catch)
 catch_discover_tests(milkdawp_engine_tests)
+
+# BundledContentTests (6.1): the scale tests use the pack the build fetched.
+if(MILKDAWP_BUNDLE_CONTENT)
+  target_compile_definitions(milkdawp_engine_tests PRIVATE MILKDAWP_TEST_CONTENT_DIR="${MILKDAWP_CONTENT_DIR}")
+endif()

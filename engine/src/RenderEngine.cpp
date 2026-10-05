@@ -452,6 +452,7 @@ void RenderEngine::run() {
   settings.width = config_.initialWidth;
   settings.height = config_.initialHeight;
   settings.beatSensitivity = beatSensitivity_.load();
+  settings.textureSearchPaths = config_.textureSearchPaths;
   std::string error;
   auto primaryInstance = ProjectMInstance::create(*library_, settings, error);
   if (!primaryInstance) {

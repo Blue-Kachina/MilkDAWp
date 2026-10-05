@@ -4,11 +4,13 @@
   "ninja": { "minVersion": "1.11.0" },
   "pluginval": {
     "version": "1.0.4",
-    "note": "Exact version, downloaded by scripts/pluginval.ps1 (Phase 3.9)",
-    "sha256Windows": "C08E61CE3B96DB41636F8EC7E76F4C7E2C13EBDAC7FA1B5A1F52B4F32EC715AB"
+    "note": "Exact version, downloaded by scripts/pluginval.ps1 (Phase 3.9) and the Linux release job (6.4)",
+    "sha256Windows": "C08E61CE3B96DB41636F8EC7E76F4C7E2C13EBDAC7FA1B5A1F52B4F32EC715AB",
+    "sha256Linux": "c01c49d8063965c4c2dea8324468336768f5c9139e0b1caebde14c2400b55352"
   },
   "windows": {
-    "visualStudio": { "minVersion": "17.0", "note": "VS 2022 with the 'Desktop development with C++' workload" }
+    "visualStudio": { "minVersion": "17.0", "note": "VS 2022 with the 'Desktop development with C++' workload" },
+    "innoSetup": { "version": "6.7.3", "note": "Builds the installer (6.2): choco install innosetup --version 6.7.3 in CI, winget JRSoftware.InnoSetup locally" }
   },
   "macos": {
     "xcodeCommandLineTools": { "minVersion": "15.0" },
@@ -16,6 +18,16 @@
   },
   "linux": {
     "gcc": { "minVersion": "12.0" },
-    "clang": { "minVersion": "16.0" }
+    "clang": { "minVersion": "16.0" },
+    "releaseBase": { "image": "ubuntu:22.04", "note": "D9's glibc 2.35 floor: the release builds here with GCC 12 (6.4), scripts/release/linux-setup.sh" },
+    "appimagetool": {
+      "url": "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage",
+      "sha256": "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+    },
+    "appimageRuntime": {
+      "url": "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64",
+      "sha256": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
+      "note": "Static type-2 runtime: AppImages run without libfuse2 installed"
+    }
   }
 }

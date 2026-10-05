@@ -69,6 +69,9 @@ struct ProjectMFunctions {
   // off explicitly so its timers do no work either.
   void (*setHardCutEnabled)(ProjectMHandle instance, bool enabled) = nullptr;
   void (*setPresetLocked)(ProjectMHandle instance, bool locked) = nullptr;
+  // Where presets' textures are looked up (6.1: the bundled texture pack).
+  // Clears and reloads every texture, so it is called once per instance.
+  void (*setTextureSearchPaths)(ProjectMHandle instance, const char** paths, std::size_t count) = nullptr;
 
   // `count` is samples *per channel*; channels: 1 = mono, 2 = stereo.
   void (*pcmAddFloat)(ProjectMHandle instance, const float* samples, unsigned int count, std::int32_t channels) =

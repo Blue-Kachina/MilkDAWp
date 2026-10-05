@@ -23,6 +23,7 @@
 
 #include "milkdawp/engine/OutputSurface.h"
 #include "milkdawp/engine/OutputWindow.h"
+#include "milkdawp/engine/BundledContent.h"
 #include "milkdawp/engine/Visualizer.h"
 #include "milkdawp/ui/ControlDrawer.h"
 #include "milkdawp/ui/PresetMenu.h"
@@ -321,7 +322,11 @@ public:
 
   void initialise(const juce::String& commandLine) override {
     formats_.registerBasicFormats();
-    visualizer_ = std::make_unique<engine::Visualizer>(engine::Visualizer::Config{});
+    engine::Visualizer::Config config;
+    if (const auto content = engine::BundledContent::find()) {
+      config.render.textureSearchPaths = content->textureSearchPaths(); // 6.1
+    }
+    visualizer_ = std::make_unique<engine::Visualizer>(config);
 
     auto args = juce::StringArray::fromTokens(commandLine, true);
     args.removeEmptyStrings();

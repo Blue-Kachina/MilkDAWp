@@ -50,7 +50,7 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
     }
   };
   controlDrawer.settingsButton.onClick = [this] { showSettingsMenu(); };
-  controlDrawer.onPresetTitleClicked = [this] { showPresetPicker(); };
+  controlDrawer.onPresetTitleClicked = [this] { setPresetBrowserVisible(!presetBrowser.isVisible()); };
 
   lockAttachment_ = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
       processorRef.apvts, "lockCurrentPreset", controlDrawer.lockButton);
@@ -64,6 +64,50 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
   // top; hidden until chosen from the settings menu.
   outputSurface.addChildComponent(transitionSettings);
   transitionSettings.onCloseRequested = [this] { setTransitionSettingsVisible(false); };
+
+  // 6.1b: the preset browser, a popover like the others. The director and
+  // the metadata store outlive the editor (the processor owns them).
+  outputSurface.addChildComponent(presetBrowser);
+  presetBrowser.onCloseRequested = [this] { setPresetBrowserVisible(false); };
+  {
+    auto& director = processorRef.visualizer().director();
+    milkdawp::ui::PresetBrowser::Source source;
+    source.playlistGeneration = [&director] { return director.status().playlistGeneration; };
+    source.names = [&director] { return director.presetNames(); };
+    source.paths = [&director] { return director.presetPaths(); };
+    source.currentIndex = [&director] { return director.status().currentIndex; };
+    source.folder = [&director] { return director.presetFolder(); };
+    source.metadata = [&director]() -> std::shared_ptr<const milkdawp::core::PresetMetadata> {
+      auto store = director.presetMetadata();
+      return store != nullptr ? store->snapshot() : nullptr;
+    };
+    source.metadataGeneration = [&director]() -> std::uint64_t {
+      auto store = director.presetMetadata();
+      return store != nullptr ? store->generation() : 0;
+    };
+    source.setInfo = [&director](const std::string& path, const milkdawp::core::PresetInfo& info) {
+      if (auto store = director.presetMetadata()) {
+        store->set(path, info);
+      }
+    };
+    source.allTags = [&director] {
+      auto store = director.presetMetadata();
+      return store != nullptr ? store->allTags() : std::vector<std::string>{};
+    };
+    source.blacklistedPaths = [&director] { return director.blacklistedPaths(); };
+    source.setBlacklisted = [&director](const std::string& path, bool blacklisted) {
+      if (blacklisted) {
+        director.blacklistPreset(path);
+      } else {
+        director.unblacklistPreset(path);
+      }
+    };
+    source.onPick = [&director](int index) { director.requestPreset(index); };
+    source.onChooseFolder = [this] { choosePresetFolder(); };
+    source.onRescan = [&director] { director.rescan(); };
+    presetBrowser.setSource(std::move(source));
+  }
+
   auto& apvts = processorRef.apvts;
   transitionSettingsModeAttachment_ =
       std::make_unique<ComboBoxAttachment>(apvts, "transitionMode", transitionSettings.modeCombo);
@@ -166,6 +210,7 @@ void MilkDAWpAudioProcessorEditor::resized() {
   }
   layoutTransitionSettings();
   layoutOutputSettings();
+  layoutPresetBrowser();
   processorRef.setEditorSize(getWidth(), getHeight());
 }
 
@@ -281,9 +326,37 @@ void MilkDAWpAudioProcessorEditor::refreshOutputSettingsInstances() {
   outputSettings.setInstanceState(state);
 }
 
+void MilkDAWpAudioProcessorEditor::layoutPresetBrowser() {
+  // Above the drawer, left-aligned under the preset title that opened it,
+  // as tall as the window allows.
+  const int drawerHeight = controlsWindow_ != nullptr ? 0 : milkdawp::ui::ControlDrawer::controlsHeight;
+  auto area = outputSurface.getLocalBounds().withTrimmedBottom(drawerHeight).reduced(6);
+  const auto width = std::min(milkdawp::ui::PresetBrowser::preferredWidth, area.getWidth());
+  const auto height = std::min(milkdawp::ui::PresetBrowser::preferredHeight, area.getHeight());
+  presetBrowser.setBounds(area.removeFromBottom(height).removeFromLeft(width));
+}
+
+void MilkDAWpAudioProcessorEditor::setPresetBrowserVisible(bool visible) {
+  if (visible) {
+    // One popover at a time: at small sizes they would overlap.
+    setTransitionSettingsVisible(false);
+    setOutputSettingsVisible(false);
+    layoutPresetBrowser();
+  }
+  presetBrowser.setVisible(visible);
+  if (visible) {
+    presetBrowser.toFront(false);
+    controlDrawer.reveal();
+    presetBrowser.opened(); // focuses the search box; Esc closes
+  } else {
+    grabKeyboardFocus(); // the search box had it; shortcuts need it back
+  }
+}
+
 void MilkDAWpAudioProcessorEditor::setOutputSettingsVisible(bool visible) {
   if (visible) {
     setTransitionSettingsVisible(false);
+    setPresetBrowserVisible(false);
     const auto layout = processorRef.windowLayout();
     outputSettings.refresh(layout.outputDefaultFullscreen, layout.outputTargetDisplay);
     refreshOutputSettingsInstances();
@@ -302,6 +375,9 @@ void MilkDAWpAudioProcessorEditor::setOutputSettingsVisible(bool visible) {
 void MilkDAWpAudioProcessorEditor::setTransitionSettingsVisible(bool visible) {
   if (visible && outputSettings.isVisible()) {
     setOutputSettingsVisible(false);
+  }
+  if (visible && presetBrowser.isVisible()) {
+    setPresetBrowserVisible(false);
   }
   transitionSettings.setVisible(visible);
   if (visible) {
@@ -326,8 +402,10 @@ bool MilkDAWpAudioProcessorEditor::keyPressed(const juce::KeyPress& key) {
   using milkdawp::ui::ShortcutAction;
   switch (milkdawp::ui::mapKeyPress(key, /*isAppShell=*/false)) {
   case ShortcutAction::ExitFullscreenOrRevealDrawer:
-    if (outputSettings.isVisible()) {
-      setOutputSettingsVisible(false); // Esc closes the popover first
+    if (presetBrowser.isVisible()) {
+      setPresetBrowserVisible(false); // Esc closes the popover first
+    } else if (outputSettings.isVisible()) {
+      setOutputSettingsVisible(false);
     } else if (transitionSettings.isVisible()) {
       setTransitionSettingsVisible(false);
     } else if (diagnosticsPanel.isVisible()) {
@@ -364,8 +442,7 @@ bool MilkDAWpAudioProcessorEditor::keyPressed(const juce::KeyPress& key) {
     processorRef.toggleOutputFullscreen();
     return true;
   case ShortcutAction::BrowsePresets:
-    controlDrawer.reveal();
-    showPresetPicker();
+    setPresetBrowserVisible(!presetBrowser.isVisible());
     return true;
   case ShortcutAction::OpenSettingsMenu:
     controlDrawer.reveal();
@@ -441,47 +518,6 @@ void MilkDAWpAudioProcessorEditor::showSettingsMenu() {
   menu.addItem(std::move(diagnostics));
   menu.setLookAndFeel(&controlDrawer.getLookAndFeel());
   menu.showMenuAsync(milkdawp::ui::DrawerLookAndFeel::menuOptions(controlDrawer.settingsMenuAnchor()));
-}
-
-void MilkDAWpAudioProcessorEditor::showPresetPicker() {
-  auto& director = processorRef.visualizer().director();
-  const auto folder = director.presetFolder();
-
-  juce::PopupMenu menu;
-  menu.setLookAndFeel(&controlDrawer.getLookAndFeel());
-  menu.addSectionHeader(folder.empty() ? juce::String("No preset folder") : juce::String(folder));
-  const auto menuIcon = [](milkdawp::ui::Icon icon) {
-    return milkdawp::ui::createIconDrawable(icon, milkdawp::ui::drawerTheme::menuText);
-  };
-  juce::PopupMenu::Item choose("Choose preset folder...");
-  choose.setImage(menuIcon(milkdawp::ui::Icon::Folder));
-  choose.setAction([this] { choosePresetFolder(); });
-  menu.addItem(std::move(choose));
-  juce::PopupMenu::Item rescan("Rescan preset folder");
-  rescan.setImage(menuIcon(milkdawp::ui::Icon::Rescan));
-  rescan.setEnabled(!folder.empty());
-  rescan.setAction([this] { processorRef.visualizer().director().rescan(); });
-  menu.addItem(std::move(rescan));
-
-  // 5.2: rate / tag / exclude the preset that is playing.
-  if (const auto index = director.status().currentIndex; index >= 0) {
-    if (auto store = director.presetMetadata()) {
-      const auto path = director.presetPath(index);
-      const milkdawp::ui::PresetInfoAccess access{
-          [store, path] { return store->get(path); },
-          [store, path](const milkdawp::core::PresetInfo& info) { store->set(path, info); },
-          [store] { return store->allTags(); }};
-      milkdawp::ui::addPresetInfoSection(
-          menu, juce::String(milkdawp::ui::splitPresetName(director.presetName(index)).leaf), access, this);
-    }
-  }
-
-  if (const auto names = director.presetNames(); !names.empty()) {
-    menu.addSeparator();
-    milkdawp::ui::addPresetTree(menu, milkdawp::ui::buildPresetTree(names), director.status().currentIndex,
-                                [this](int index) { processorRef.visualizer().director().requestPreset(index); });
-  }
-  menu.showMenuAsync(milkdawp::ui::DrawerLookAndFeel::menuOptions(controlDrawer.presetTitleComponent()));
 }
 
 void MilkDAWpAudioProcessorEditor::choosePresetFolder() {

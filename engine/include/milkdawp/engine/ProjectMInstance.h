@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "milkdawp/engine/ProjectMLibrary.h"
 
@@ -29,6 +30,9 @@ public:
     int height = 720;
     float beatSensitivity = 1.0f;
     double softCutSeconds = 3.0;
+    /// Folders projectM searches for the textures presets reference (6.1).
+    /// Empty leaves projectM's default.
+    std::vector<std::string> textureSearchPaths;
   };
 
   /// Null (with `error` set) if projectM refuses to create an instance,

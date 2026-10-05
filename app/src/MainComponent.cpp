@@ -97,11 +97,61 @@ MainComponent::MainComponent(engine::Visualizer& visualizer, AudioSourceRouter& 
     menu.setLookAndFeel(&drawer_.getLookAndFeel());
     menu.showMenuAsync(ui::DrawerLookAndFeel::menuOptions(drawer_.settingsMenuAnchor()));
   };
-  drawer_.onPresetTitleClicked = [this] { showPresetPicker(); };
+  drawer_.onPresetTitleClicked = [this] { setPresetBrowserVisible(!presetBrowser_.isVisible()); };
 
   // Above the drawer; hidden until chosen.
   surface_.addChildComponent(transitionSettings_);
   transitionSettings_.onCloseRequested = [this] { setTransitionSettingsVisible(false); };
+
+  // 6.1b: the preset browser, a popover like the others.
+  surface_.addChildComponent(presetBrowser_);
+  presetBrowser_.onCloseRequested = [this] { setPresetBrowserVisible(false); };
+  {
+    auto& director = visualizer_.director();
+    ui::PresetBrowser::Source source;
+    source.playlistGeneration = [&director] { return director.status().playlistGeneration; };
+    source.names = [&director] { return director.presetNames(); };
+    source.paths = [&director] { return director.presetPaths(); };
+    source.currentIndex = [&director] { return director.status().currentIndex; };
+    source.folder = [&director] { return director.presetFolder(); };
+    source.metadata = [&director]() -> std::shared_ptr<const core::PresetMetadata> {
+      auto store = director.presetMetadata();
+      return store != nullptr ? store->snapshot() : nullptr;
+    };
+    source.metadataGeneration = [&director]() -> std::uint64_t {
+      auto store = director.presetMetadata();
+      return store != nullptr ? store->generation() : 0;
+    };
+    source.setInfo = [&director](const std::string& path, const core::PresetInfo& info) {
+      if (auto store = director.presetMetadata(); store != nullptr && !store->set(path, info)) {
+        juce::Logger::writeToLog("Couldn't save preset ratings to " + store->file().getFullPathName());
+      }
+    };
+    source.allTags = [&director] {
+      auto store = director.presetMetadata();
+      return store != nullptr ? store->allTags() : std::vector<std::string>{};
+    };
+    source.blacklistedPaths = [&director] { return director.blacklistedPaths(); };
+    source.setBlacklisted = [&director](const std::string& path, bool blacklisted) {
+      if (blacklisted) {
+        director.blacklistPreset(path);
+      } else {
+        director.unblacklistPreset(path);
+      }
+    };
+    source.recentPaths = [this] {
+      std::vector<std::string> paths;
+      for (const auto& path : state_.recentlyPlayedPresets) {
+        paths.push_back(path.toStdString());
+      }
+      return paths;
+    };
+    source.onPick = [&director](int index) { director.requestPreset(index); };
+    source.onChooseFolder = [this] { choosePresetFolder(); };
+    source.onRescan = [this] { rescanPresets(); };
+    presetBrowser_.setSource(std::move(source));
+  }
+  migrateFavourites();
 
   // Settings -> Output, same slot and compositing rules. The standalone app has no
   // other instances to link to, so it only gets the window settings.
@@ -255,107 +305,48 @@ void MainComponent::filesDropped(const juce::StringArray& files, int, int) {
   }
 }
 
-void MainComponent::showPresetPicker() {
-  auto& director = visualizer_.director();
-  const auto folder = director.presetFolder();
-
-  juce::PopupMenu menu;
-  menu.setLookAndFeel(&drawer_.getLookAndFeel());
-  menu.addSectionHeader(folder.empty() ? juce::String("No preset folder") : juce::String(folder));
-  const auto menuIcon = [](ui::Icon icon) { return ui::createIconDrawable(icon, ui::drawerTheme::menuText); };
-  juce::PopupMenu::Item choose("Choose preset folder...");
-  choose.setImage(menuIcon(ui::Icon::Folder));
-  choose.setAction([this] { choosePresetFolder(); });
-  menu.addItem(std::move(choose));
-  juce::PopupMenu::Item rescan("Rescan preset folder");
-  rescan.setImage(menuIcon(ui::Icon::Rescan));
-  rescan.setEnabled(!folder.empty());
-  rescan.setAction([this] { rescanPresets(); });
-  menu.addItem(std::move(rescan));
-  addCurrentPresetInfo(menu);
-
-  if (const auto names = director.presetNames(); !names.empty()) {
-    menu.addSeparator();
-    ui::addPresetTree(menu, ui::buildPresetTree(names), director.status().currentIndex,
-                      [this](int index) { visualizer_.director().requestPreset(index); });
+void MainComponent::setPresetBrowserVisible(bool visible) {
+  if (visible) {
+    // One popover at a time: at small window sizes they would overlap.
+    setTransitionSettingsVisible(false);
+    setOutputSettingsVisible(false);
+    layoutPresetBrowser();
   }
-  menu.showMenuAsync(ui::DrawerLookAndFeel::menuOptions(drawer_.presetTitleComponent()));
+  presetBrowser_.setVisible(visible);
+  if (visible) {
+    presetBrowser_.toFront(false);
+    drawer_.reveal();
+    presetBrowser_.opened(); // focuses the search box; Esc closes
+  } else {
+    grabKeyboardFocus(); // the search box had it; shortcuts need it back
+  }
 }
 
-ui::PresetInfoAccess MainComponent::presetInfoAccess(const std::string& path) const {
+void MainComponent::layoutPresetBrowser() {
+  // Above the drawer, left-aligned under the preset title.
+  const int drawerHeight = controlsWindow_ != nullptr ? 0 : ui::ControlDrawer::controlsHeight;
+  auto area = surface_.getLocalBounds().withTrimmedBottom(drawerHeight).reduced(6);
+  const auto width = std::min(ui::PresetBrowser::preferredWidth, area.getWidth());
+  const auto height = std::min(ui::PresetBrowser::preferredHeight, area.getHeight());
+  presetBrowser_.setBounds(area.removeFromBottom(height).removeFromLeft(width));
+}
+
+void MainComponent::migrateFavourites() {
   auto store = visualizer_.director().presetMetadata();
-  if (store == nullptr || path.empty()) {
-    return {};
-  }
-  return {[store, path] { return store->get(path); },
-          [store, path](const core::PresetInfo& info) {
-            if (!store->set(path, info)) {
-              juce::Logger::writeToLog("Couldn't save preset ratings to " + store->file().getFullPathName());
-            }
-          },
-          [store] { return store->allTags(); }};
-}
-
-void MainComponent::addCurrentPresetInfo(juce::PopupMenu& menu) {
-  auto& director = visualizer_.director();
-  const auto index = director.status().currentIndex;
-  if (index < 0) {
+  if (state_.favouritePresets.isEmpty() || store == nullptr) {
     return;
   }
-  const auto name = ui::splitPresetName(director.presetName(index)).leaf;
-  ui::addPresetInfoSection(menu, juce::String(name), presetInfoAccess(director.presetPath(index)), this);
-}
-
-void MainComponent::showPresetBrowser() {
-  PresetBrowserPanel::Callbacks callbacks;
-  callbacks.names = [this] { return visualizer_.director().presetNames(); };
-  callbacks.paths = [this] { return visualizer_.director().presetPaths(); };
-  callbacks.currentIndex = [this] { return visualizer_.director().status().currentIndex; };
-  callbacks.blacklistedPaths = [this] { return visualizer_.director().blacklistedPaths(); };
-  callbacks.favouritePaths = [this] {
-    std::vector<std::string> paths;
-    for (const auto& path : state_.favouritePresets) {
-      paths.push_back(path.toStdString());
+  for (const auto& path : state_.favouritePresets) {
+    auto info = store->get(path.toStdString());
+    if (!info.favourite) {
+      info.favourite = true;
+      store->set(path.toStdString(), info);
     }
-    return paths;
-  };
-  callbacks.recentPaths = [this] {
-    std::vector<std::string> paths;
-    for (const auto& path : state_.recentlyPlayedPresets) {
-      paths.push_back(path.toStdString());
-    }
-    return paths;
-  };
-  callbacks.onPick = [this](int index) { visualizer_.director().requestPreset(index); };
-  callbacks.onSetFavourite = [this](const std::string& path, bool favourite) {
-    const juce::String jucePath(path);
-    if (favourite) {
-      if (!state_.favouritePresets.contains(jucePath)) {
-        state_.favouritePresets.add(jucePath);
-      }
-    } else {
-      state_.favouritePresets.removeString(jucePath);
-    }
-    notifyStateChanged();
-  };
-  callbacks.onSetBlacklisted = [this](const std::string& path, bool blacklisted) {
-    if (blacklisted) {
-      visualizer_.director().blacklistPreset(path);
-    } else {
-      visualizer_.director().unblacklistPreset(path);
-    }
-  };
-  callbacks.presetInfo = [this](const std::string& path) { return presetInfoAccess(path); };
-
-  juce::DialogWindow::LaunchOptions options;
-  options.content.setOwned(new PresetBrowserPanel(std::move(callbacks)));
-  options.dialogTitle = "Preset Library";
-  options.dialogBackgroundColour = getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId);
-  options.escapeKeyTriggersCloseButton = true;
-  options.useNativeTitleBar = true;
-  options.resizable = true;
-  options.componentToCentreAround = this;
-  options.launchAsync();
+  }
+  juce::Logger::writeToLog("Moved " + juce::String(state_.favouritePresets.size()) +
+                           " favourite presets into the shared preset metadata");
+  state_.favouritePresets.clear();
+  notifyStateChanged();
 }
 
 void MainComponent::showAudioSettings() {
@@ -373,6 +364,7 @@ void MainComponent::showAudioSettings() {
 void MainComponent::setOutputSettingsVisible(bool visible) {
   if (visible) {
     setTransitionSettingsVisible(false);
+    setPresetBrowserVisible(false);
     outputSettings_.refresh(state_.outputDefaultFullscreen,
                             {state_.outputTargetDisplay.getX(), state_.outputTargetDisplay.getY(),
                              state_.outputTargetDisplay.getWidth(), state_.outputTargetDisplay.getHeight()});
@@ -399,6 +391,9 @@ void MainComponent::toggleOutputWindowFromDrawer() {
 void MainComponent::setTransitionSettingsVisible(bool visible) {
   if (visible && outputSettings_.isVisible()) {
     setOutputSettingsVisible(false);
+  }
+  if (visible && presetBrowser_.isVisible()) {
+    setPresetBrowserVisible(false);
   }
   transitionSettings_.setVisible(visible);
   if (visible) {
@@ -524,7 +519,7 @@ juce::PopupMenu MainComponent::createMenu(int menuIndex) {
     }
     menu.addItem(makeItem("Choose preset folder...", [this] { choosePresetFolder(); }));
     menu.addItem(makeItem("Rescan preset folder", [this] { rescanPresets(); }, false, {}, !folder.empty()));
-    menu.addItem(makeItem("Browse presets...", [this] { showPresetBrowser(); }, false, {}, !folder.empty()));
+    menu.addItem(makeItem("Browse presets...", [this] { setPresetBrowserVisible(true); }, false, "B", !folder.empty()));
     menu.addSeparator();
     menu.addItem(makeItem("Audio input...", [this] { showAudioSettings(); }));
     if (!all) {
@@ -551,7 +546,7 @@ juce::PopupMenu MainComponent::createMenu(int menuIndex) {
   if (!all && menuIndex == PlaybackMenu) {
     menu.addItem(makeItem("Previous preset", [this] { previousPreset(); }, false, "Left"));
     menu.addItem(makeItem("Next preset", [this] { nextPreset(); }, false, "Right"));
-    menu.addItem(makeItem("Choose preset...", [this] { showPresetPicker(); }));
+    menu.addItem(makeItem("Choose preset...", [this] { setPresetBrowserVisible(true); }, false, "B"));
     menu.addSeparator();
     menu.addItem(makeItem("Lock preset", [this] { binding_.toggle("lockCurrentPreset"); },
                           binding_.get("lockCurrentPreset") > 0.5f, "Space / L"));
@@ -652,6 +647,7 @@ void MainComponent::resized() {
   }
   layoutTransitionSettings();
   layoutOutputSettings();
+  layoutPresetBrowser();
 }
 
 void MainComponent::layoutOutputSettings() {
@@ -682,8 +678,10 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
     }
     return true;
   case ShortcutAction::ExitFullscreenOrRevealDrawer:
-    if (outputSettings_.isVisible()) {
-      setOutputSettingsVisible(false); // Esc closes the popover first
+    if (presetBrowser_.isVisible()) {
+      setPresetBrowserVisible(false); // Esc closes the popover first
+    } else if (outputSettings_.isVisible()) {
+      setOutputSettingsVisible(false);
     } else if (transitionSettings_.isVisible()) {
       setTransitionSettingsVisible(false);
     } else if (diagnosticsPanel_.isVisible()) {
@@ -713,8 +711,7 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
     drawer_.togglePin();
     return true;
   case ShortcutAction::BrowsePresets:
-    drawer_.reveal();
-    showPresetPicker();
+    setPresetBrowserVisible(!presetBrowser_.isVisible());
     return true;
   case ShortcutAction::OpenSettingsMenu:
     drawer_.reveal();

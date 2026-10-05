@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <juce_opengl/juce_opengl.h>
@@ -66,7 +67,7 @@ struct HeadlessRig {
   std::unique_ptr<ProjectMInstance> instance;
   std::string skipReason;
 
-  HeadlessRig() {
+  explicit HeadlessRig(std::vector<std::string> textureSearchPaths = {}) {
     auto loaded = ProjectMLibrary::load();
     if (!loaded.library) {
       skipReason = loaded.unavailableReason;
@@ -85,6 +86,7 @@ struct HeadlessRig {
     ProjectMInstance::Settings settings;
     settings.width = kWidth;
     settings.height = kHeight;
+    settings.textureSearchPaths = std::move(textureSearchPaths);
     std::string error;
     instance = ProjectMInstance::create(*library, settings, error);
     if (!instance) {
@@ -312,4 +314,54 @@ TEST_CASE("Headless render: a preset projectM rejects fires the failure callback
       [](const char*, const char*, void* userData) { *static_cast<bool*>(userData) = true; }, &failed);
   rig.instance->loadPresetFile("does/not/exist/anywhere.milk", false);
   CHECK(failed);
+}
+
+// 6.1: the bundled texture pack reaches projectM. The composite shader just
+// shows the pack's worms.jpg, so the frame is the texture when projectM
+// finds it and projectM's stand-in when it doesn't.
+TEST_CASE("Headless render: presets find the bundled textures (6.1)", "[engine][headless][content]") {
+#ifndef MILKDAWP_TEST_CONTENT_DIR
+  SKIP("built without the bundled content (MILKDAWP_BUNDLE_CONTENT=OFF)");
+#else
+  const auto textures = juce::File(MILKDAWP_TEST_CONTENT_DIR).getChildFile("Textures");
+  REQUIRE(textures.getChildFile("worms.jpg").existsAsFile());
+
+  static constexpr const char* kTexturePreset = "[preset00]\n"
+                                                "MILKDROP_PRESET_VERSION=201\n"
+                                                "PSVERSION=2\n"
+                                                "PSVERSION_WARP=2\n"
+                                                "PSVERSION_COMP=2\n"
+                                                "fDecay=1.0\n"
+                                                "comp_1=`sampler sampler_worms;\n"
+                                                "comp_2=`shader_body\n"
+                                                "comp_3=`{\n"
+                                                "comp_4=`    ret = tex2D(sampler_worms, uv).xyz;\n"
+                                                "comp_5=`}\n";
+
+  auto render = [](std::vector<std::string> paths) {
+    HeadlessRig rig(std::move(paths));
+    if (!rig.ready()) {
+      return std::pair{std::vector<std::uint8_t>{}, rig.skipReason};
+    }
+    rig.instance->loadPresetData(kTexturePreset, false);
+    std::vector<std::uint8_t> frame;
+    for (int n = 0; n < 5; ++n) {
+      frame = rig.renderFrame(n);
+    }
+    return std::pair{frame, std::string{}};
+  };
+
+  const auto [with, reason] = render({textures.getFullPathName().toStdString()});
+  if (with.empty()) {
+    reportUnavailable(reason);
+    return;
+  }
+  [[maybe_unused]] const auto [without, unusedReason] = render({});
+  REQUIRE_FALSE(without.empty());
+
+  // worms.jpg is a mid-grey pattern; a missing texture is a flat stand-in.
+  INFO("with textures " << meanBrightness(with) << ", without " << meanBrightness(without));
+  CHECK(meanBrightness(with) > 30.0);
+  CHECK(meanDifference(with, without) > 10.0);
+#endif
 }

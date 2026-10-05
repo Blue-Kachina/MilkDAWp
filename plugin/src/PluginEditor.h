@@ -15,6 +15,7 @@
 #include "milkdawp/ui/DetachedControlsWindow.h"
 #include "milkdawp/ui/DiagnosticsPanel.h"
 #include "milkdawp/ui/OutputSettings.h"
+#include "milkdawp/ui/PresetBrowser.h"
 #include "milkdawp/ui/TransitionSettings.h"
 
 namespace milkdawp::plugin {
@@ -50,9 +51,9 @@ private:
   void timerCallback() override;
   void pulseTrigger(const juce::String& parameterId);
   void showSettingsMenu();
-  /// Clicking the drawer's preset title: folder actions plus every preset,
-  /// grouped by subfolder; picking one jumps straight to it.
-  void showPresetPicker();
+  /// Clicking the drawer's preset title, or `B`: the preset browser (6.1b).
+  void setPresetBrowserVisible(bool visible);
+  void layoutPresetBrowser();
   void choosePresetFolder();
   void setTransitionSettingsVisible(bool visible);
   void layoutTransitionSettings();
@@ -82,6 +83,7 @@ private:
   milkdawp::ui::ControlDrawer controlDrawer;
   milkdawp::ui::TransitionSettingsPanel transitionSettings;
   milkdawp::ui::OutputSettingsPanel outputSettings;
+  milkdawp::ui::PresetBrowser presetBrowser;
   // Shared across every open editor: one per editor would show each tooltip
   // once per plugin instance.
   juce::SharedResourcePointer<juce::TooltipWindow> tooltipWindow_;

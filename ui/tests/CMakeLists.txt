@@ -11,6 +11,7 @@ add_executable(milkdawp_ui_tests
   PresetInfoMenuTests.cpp
   DiagnosticsPanelTests.cpp
   AccessibilityTests.cpp
+  PresetBrowserTests.cpp
 )
 milkdawp_test_no_crash_dialogs(milkdawp_ui_tests)
 

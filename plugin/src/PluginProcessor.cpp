@@ -13,6 +13,7 @@
 #include "milkdawp/core/DisplayLayout.h"
 #include "milkdawp/core/ParameterModel.h"
 #include "milkdawp/core/StateSchema.h"
+#include "milkdawp/engine/BundledContent.h"
 #include "milkdawp/engine/ControlMapping.h"
 #include "milkdawp/ui/OutputSettings.h"
 
@@ -102,6 +103,9 @@ MilkDAWpAudioProcessor::MilkDAWpAudioProcessor()
   // The JUCE Standalone wrapper has no play head: there, the detected beat
   // drives everything and "transport stopped" never pauses the Timed clock.
   config.followHostTransport = wrapperType != wrapperType_Standalone;
+  if (const auto content = engine::BundledContent::find()) {
+    config.render.textureSearchPaths = content->textureSearchPaths(); // 6.1
+  }
   visualizer_ = std::make_unique<engine::Visualizer>(config);
   // 5.2: the library's ratings and tags, shared by every instance and the app.
   visualizer_->director().setPresetMetadata(engine::PresetMetadataStore::shared());
@@ -257,6 +261,17 @@ engine::EngineControls MilkDAWpAudioProcessor::readControls() const noexcept {
 void MilkDAWpAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
   visualizer_->prepare(sampleRate, samplesPerBlock);
   hostTransport_ = std::make_unique<core::HostTransport>(sampleRate);
+
+  // 6.1: a new instance (or a session saved without a folder) starts in the
+  // bundled pack. Here rather than in the constructor because hosts restore
+  // a session's state before preparing: a saved folder is already set by
+  // then, and the bundled pack is never scanned only to be replaced.
+  if (visualizer_->director().presetFolder().empty()) {
+    if (const auto content = engine::BundledContent::find()) {
+      visualizer_->director().setPresetFolder(content->presetFolder().getFullPathName().toStdString(),
+                                              content->defaultPreset().getFullPathName().toStdString());
+    }
+  }
 }
 
 void MilkDAWpAudioProcessor::releaseResources() {}

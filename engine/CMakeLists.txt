@@ -1,4 +1,6 @@
 add_library(milkdawp_engine STATIC
+  include/milkdawp/engine/BundledContent.h
+  src/BundledContent.cpp
   include/milkdawp/engine/EngineInfo.h
   src/EngineInfo.cpp
   include/milkdawp/engine/ProjectMLibrary.h
@@ -93,4 +95,12 @@ if(MILKDAWP_DEV_ALT_IDENTITY)
   target_compile_definitions(milkdawp_engine PRIVATE MILKDAWP_USER_DATA_FOLDER="MilkDAWp2 Dev")
 else()
   target_compile_definitions(milkdawp_engine PRIVATE MILKDAWP_USER_DATA_FOLDER="MilkDAWp")
+endif()
+
+# BundledContent (6.1): dev builds may find the presets in the build tree
+# (cmake/BundledContent.cmake). Release presets turn this off, so no build
+# path is compiled into a shipped binary.
+if(MILKDAWP_BUNDLE_CONTENT AND MILKDAWP_CONTENT_FROM_BUILD_TREE)
+  set_source_files_properties(src/BundledContent.cpp PROPERTIES COMPILE_DEFINITIONS
+    "MILKDAWP_BUILD_TREE_CONTENT_DIR=\"${MILKDAWP_CONTENT_DIR}\"")
 endif()

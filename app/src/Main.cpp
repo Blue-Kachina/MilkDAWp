@@ -12,6 +12,7 @@
 #include "MainWindow.h"
 #include "RecentLog.h"
 #include "SystemAudioCapture.h"
+#include "milkdawp/engine/BundledContent.h"
 #include "milkdawp/engine/Visualizer.h"
 
 namespace milkdawp::app {
@@ -63,13 +64,27 @@ public:
                                    : juce::String("The last session didn't shut down cleanly"));
     }
 
-    visualizer_ = std::make_unique<engine::Visualizer>(engine::Visualizer::Config{});
+    // 6.1: the bundled presets and textures, when installed (or in the
+    // build tree of a dev build).
+    const auto bundled = engine::BundledContent::find();
+    engine::Visualizer::Config config;
+    if (bundled) {
+      config.render.textureSearchPaths = bundled->textureSearchPaths();
+    }
+    visualizer_ = std::make_unique<engine::Visualizer>(config);
     // 5.2: the library's ratings and tags, shared with the plugin.
     visualizer_->director().setPresetMetadata(engine::PresetMetadataStore::shared());
     visualizer_->director().setTagFilter(state_.tagFilter.toStdString());
     if (state_.presetFolder.isNotEmpty() && juce::File(state_.presetFolder).isDirectory()) {
       visualizer_->director().setPresetFolder(state_.presetFolder.toStdString(),
                                               state_.currentPresetPath.toStdString());
+    } else if (bundled) {
+      // First run, or the chosen folder is gone: start in the bundled pack.
+      // Saved like a chosen folder, so the next launch resumes its preset.
+      state_.presetFolder = bundled->presetFolder().getFullPathName();
+      visualizer_->director().setPresetFolder(state_.presetFolder.toStdString(),
+                                              bundled->defaultPreset().getFullPathName().toStdString());
+      juce::Logger::writeToLog("Preset folder: " + state_.presetFolder + " (bundled)");
     }
 
     input_ = std::make_unique<AudioInput>(*visualizer_);

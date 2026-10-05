@@ -23,6 +23,10 @@ add_library(milkdawp_ui STATIC
   src/DrawerLookAndFeel.cpp
   include/milkdawp/ui/PresetMenu.h
   src/PresetMenu.cpp
+  include/milkdawp/ui/PresetSearch.h
+  src/PresetSearch.cpp
+  include/milkdawp/ui/PresetBrowser.h
+  src/PresetBrowser.cpp
   include/milkdawp/ui/PresetInfoMenu.h
   src/PresetInfoMenu.cpp
   include/milkdawp/ui/KeyboardNavigation.h

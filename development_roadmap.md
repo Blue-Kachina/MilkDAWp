@@ -2415,24 +2415,200 @@ and the v1 repo archived with a pointer.
 is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first `-beta` release (6.8) →
 6.10 (SignPath needs a published release) → 6.6/6.7 alongside → 6.9.
 
-- [ ] 6.1 (S) Bundle Cream of the Crop + the projectM texture pack (D12): measure installer
+- [~] 6.1 (S) Bundle Cream of the Crop + the projectM texture pack (D12): measure installer
       size (full pack vs subset plus an in-app download), ship the pack's LICENSE.md and
       curator credit, default preset chosen (pleasant and cheap), first-run library root
       points at it. Check that the first-run scan, Weighted shuffle and preset metadata stay
       fast at ~10k presets.
-- [ ] 6.1b (M) Searchable preset browser (moved up from the post-1.0 backlog by D12):
+      Update (2026-10-04): done except the hand test in a DAW and About's credit (6.7).
+      - **Size: ship the whole pack.** At the pinned commits, 9,795 presets + 67 textures
+        are 115 MB on disk (139 MB allocated, ~9,800 small files), 34 MB as zip, 13 MB as
+        tar.gz and ~3 MB with xz/LZMA (presets are small text with heavy duplication across
+        edits). No subset and no in-app download needed.
+      - **Fetch:** `cmake/BundledContent.cmake` (`MILKDAWP_BUNDLE_CONTENT`, default ON)
+        downloads both repos as GitHub archives of a pinned commit, checks a SHA-256 and lays
+        them out as `<build>/content/{Presets/Cream of the Crop, Textures}`. Plain
+        `file(DOWNLOAD)`/`file(ARCHIVE_EXTRACT)`, not FetchContent: FetchContent extracts
+        under a long temporary name, which pushes the deepest presets past Windows' MAX_PATH.
+      - **Windows paths:** the pack's longest relative path is 174 characters. Installed under
+        `C:\ProgramData\MilkDAWp\Presets\Cream of the Crop\` (50) nothing is over 260; in
+        Explorer's default extraction of a zip (`Downloads\<zip name>\<top folder>\...`) 905
+        files would be. So the Windows release ships the content as its own
+        `-windows-presets.zip` to extract into `C:\ProgramData\MilkDAWp`; macOS and Linux
+        carry `Content/` inside the app. Build trees must stay within ~85 characters of the
+        drive root. (Superseded by 6.2-6.4: every installer now puts the content in the
+        shared location itself.)
+      - **Finding it:** `engine::BundledContent` searches `$MILKDAWP_CONTENT_DIR`, then
+        `Content` beside the binary (or `../Resources/Content` in a bundle), then the shared
+        location (`%ProgramData%\MilkDAWp`; `/Library/Application Support/MilkDAWp` and the
+        per-user one; `$XDG_DATA_HOME/milkdawp`, `/usr/local/share/milkdawp`,
+        `/usr/share/milkdawp`), then, in dev builds only, the build tree
+        (`MILKDAWP_CONTENT_FROM_BUILD_TREE`, off in the release presets; checked that no build
+        path is in the release binaries).
+      - **First run:** the app starts in the bundled pack when no folder is saved (or the
+        saved one is gone) and saves it like a chosen folder. The plugin does the same in
+        `prepareToPlay` when no session state set a folder: hosts restore state before
+        preparing, so a saved session's folder wins and the pack is never scanned only to be
+        replaced.
+      - **Default preset:** `Geometric/Wire Circles/Geiss - Many Colors 1.milk`. Eight cheap
+        candidates (no warp/comp shader, at most one custom wave and shape, ~2 ms to load)
+        were rendered with no audio; five drew nothing, since most of the pack is audio-driven
+        and a first launch often has no input yet. Many Colors 1, Many Colors 2 and 3D - Luz
+        looked good in silence. One constant (`BundledContent::kDefaultPresetRelativePath`).
+      - **Textures:** the engine never set projectM's texture search paths, so presets that
+        sample the pack's textures (521 use `sampler_worms` alone) drew projectM's black
+        stand-in. `projectm_set_texture_search_paths` is now bound and called once per
+        instance from `RenderEngineConfig::textureSearchPaths`, set by the app, the plugin
+        and mdw-view. A headless render test shows `worms.jpg` (mean brightness 307 vs 0
+        without the path). User libraries that keep textures beside their presets aren't
+        searched yet: presets are loaded from memory, so projectM doesn't know their folder.
+      - **Scale (Windows, Release / Debug):** scan of 9,795 presets 0.49 / 0.86 s; director
+        library ready (scan, playlist, start on the default preset) 0.53 / 1.2 s; selection
+        pass with ratings 3 / 21 ms; metadata round trip (1,959 entries) 1 / 19 ms; one
+        Weighted pick 127 µs / 3 ms. The Weighted pick was 9.6 ms in Debug: it asked
+        `isInNoRepeatWindow()` (a walk of the history) for each of ~10k entries; it now builds
+        the window as a mask once per pick. `BundledContentTests` checks these with
+        generous bounds wherever the pack was fetched (CI too).
+      - **Licences:** the pack's `LICENSE.md`/`README.md` and the texture pack's README ship
+        unchanged; `THIRD_PARTY_NOTICES.md` and each release README credit the curator and
+        say how to ask for a removal. The texture pack states no licence at all (its README
+        only describes the contents); shipped anyway per D12, noted in the notices.
+      - Tests: `BundledContentTests` (search order, content root, default preset and
+        textures, the fetched pack, scale) and the headless texture test. Full `ctest`:
+        354/354 on Windows.
+      - **Not verified by hand:** a first launch of the app and a new plugin instance in a DAW
+        actually opening on Many Colors 1, and how it looks with music.
+- [~] 6.1b (M) Searchable preset browser (moved up from the post-1.0 backlog by D12):
       filter-as-you-type over ~10k presets, favourites and ratings (5.2), keyboard
       navigable (5.8). Replaces the click-the-preset-name popup menu for large libraries;
       Phase 7.6 builds on it.
-- [ ] 6.2 (M) Windows installer (Inno Setup or WiX): VST3 to `Common Files\VST3`, app to
+      Update (2026-10-04): done in both shells; not yet checked by hand in a DAW.
+      - `ui::PresetBrowser` (new, shared): a popover over the picture, like Transitions and
+        Output, opened by the preset title, `B`, or the app's File > Browse presets /
+        Playback > Choose preset. It replaces the popup menu of nested folders in both shells
+        and the app's separate library window (`PresetBrowserPanel`, 4.5, removed). Header:
+        folder path, result count ("4 of 9,795 presets"), Folder... and Rescan. A search box,
+        All / Favourites / Rated (best first) / Recent (app only: the plugin keeps no
+        history) tabs, and a `juce::ListBox` that paints only visible rows. Rows are two lines
+        (name; folder, "blacklisted" / "never auto-selected", #tags), 40 px tall for touch
+        (7.6), with a heart and five stars that are clickable. Right-click adds Play,
+        favourite, blacklist and the 5.2 rating / never auto-select / tags items. One popover
+        at a time in both shells.
+      - **Search** (`ui::PresetSearchIndex`): every word of the query must appear in the
+        name, the folder or the preset's tags, in any order ("geiss wave"). Names are
+        lower-cased once per playlist change. 10k presets: 2.4 ms per keystroke and a 39 ms
+        rebuild in Debug.
+      - **Keyboard** (5.8): opening it selects and scrolls to the playing preset and focuses
+        the search box (typing replaces the last search). Up/Down/Page Up/Page Down move
+        without playing, Return plays the selection (after typing, the best match is
+        selected), Esc closes. With the list focused (Tab): Home/End, F toggles the heart,
+        0-5 set the rating, other typing returns to the search box. The list gets
+        `KeyboardFocusRing`'s outline; rows have accessible names ("Geiss - Many Colors 1,
+        favourite, 4 stars, playing").
+      - **Favourites are shared now.** They were app-only (`AppState.favouritePresets`, by
+        path), so the plugin had none. `core::PresetInfo` gains `favourite`, stored as an
+        `f` in the metadata file's flags column next to `n` (older readers ignore unknown
+        letters; older files have no favourites). They follow the 5.2 rules: keyed by file
+        name, shared by the app and every plugin instance, picked up from other processes.
+        The app moves its saved favourites into the metadata once at startup and clears the
+        old list.
+      - Pull-based: while visible it polls 4 times a second, comparing the director's
+        `playlistGeneration` and the store's `generation()` instead of copying 10k names
+        each tick. A rating or heart is shown at once and confirmed by the store's next
+        generation.
+      - Tests: `PresetBrowserTests` (query words; any-order and tag matching; 10k search
+        timing; filter, count and selection; open on the playing preset; arrows don't play,
+        Return does, Esc closes; F/0-5 write the shared metadata; Favourites and Rated tabs;
+        changes made elsewhere appear on the next poll; Recent only with a history; row hit
+        areas) and a `PresetMetadataTests` case for the flag. Full `ctest`: 366/366. pluginval
+        (strictness 5, editor tests on) passes with the browser in the editor.
+      - Checked in the app (Windows, dev identity, the 9,795-preset pack; the dev settings
+        were backed up and restored): `B` opens it on the playing preset; "geiss many" narrows
+        to 4 of 9,795 as typed; Tab, `4`, `F` rate and heart a preset and the row updates. The
+        background is now 96% opaque, after the diagnostics panel's text showed through at 88%.
+      - Not done: mdw-view (a dev tool, mostly run on the 3 fixture presets) keeps the popup
+        menu. No folder tree: the flat list shows each preset's folder, and typing a folder
+        name filters to it. **Not checked by hand:** the plugin in REAPER (open with the
+        title and `B`; check that the search box gets keys there rather than the host).
+- [~] 6.2 (M) Windows installer (Inno Setup or WiX): VST3 to `Common Files\VST3`, app to
       Program Files, optional desktop shortcut, uninstaller. Unsigned until 6.10 succeeds,
       then signed through SignPath in the release workflow (D11). Installs the
       Microsoft Visual C++ 2015-2022 Redistributable (x64) when it's missing: the plugin,
       app and projectM all link the dynamic MSVC runtime (3.10, decided 2026-09-26).
-- [ ] 6.3 (M) macOS: `.pkg` with VST3 + AU + app, universal binary, ad-hoc signed
+      Update (2026-10-05): written and compiled locally; installing is only tested on
+      GitHub's runner (the smoke test below), not yet run there.
+      - **Inno Setup** (6.7.3, pinned in `toolchain.json`): `packaging/windows/MilkDAWp.iss`,
+        built by `package.sh` into `MilkDAWp-<v>-windows-x64-setup.exe` (33 MB, of which
+        ~25 MB is Microsoft's `vc_redist.x64.exe`; the 9,795 presets compress to ~3 MB).
+        Per-machine (admin): VST3 to `{commoncf64}\VST3`, app and licences to
+        `{autopf}\MilkDAWp`, presets and textures to `{commonappdata}\MilkDAWp`
+        (`C:\ProgramData`, which `engine::BundledContent` searches, so this also removes
+        6.1's manual "extract the presets zip" step). Components: app, VST3, presets (a
+        "compact" type skips the presets). Tasks: desktop shortcut (off), `.milk`
+        association (on; §4.6's Windows half). Start menu entry, uninstaller (leaves
+        `%APPDATA%\MilkDAWp`), Windows 10 21H2+ (D9), fixed AppId for upgrades.
+      - **VC++ runtime:** bundled and run (`/install /quiet /norestart`) only when the
+        registry says the x64 runtime is missing or older than the toolset that built us
+        (`14.<VCToolsVersion minor>`, passed in by `package.sh`).
+      - The app icon (`ICON_BIG`) is new: `resources/icon.png`, v1's wordmark on a dark tile
+        (`resources/make-icon.ps1`; the skull "D" alone couldn't be cut cleanly from the
+        135 px source). JUCE makes the `.ico`, which the installer also uses.
+      - **Smoke test** (`scripts/release/smoke-test-windows.ps1`, release workflow only):
+        silent install with the association, every file and registry key checked (and
+        nothing but the plugin and projectM in the VST3's binary folder), pluginval at
+        strictness 5 on the *installed* VST3 with projectM required, the installed app
+        started, silent uninstall, nothing left.
+      - The zips and `-windows-presets.zip` from 6.5/6.1 are gone; the symbols zip stays.
+- [~] 6.3 (M) macOS: `.pkg` with VST3 + AU + app, universal binary, ad-hoc signed
       (`codesign -s -`), not notarized (D11: no paid Apple Developer account). The docs and
       the release notes give the first-run steps for Gatekeeper.
-- [ ] 6.4 (M) Linux: AppImage for the app, tarball for the VST3, `.deb` as stretch.
+      Update (2026-10-05): written; **never run** (no Mac here). The first workflow_dispatch
+      dry run is its first test.
+      - **AU** (D2): `FORMATS` gains AU on Apple (type aufx, subtype `Mlkw`, manufacturer
+        `OMda`, the v1 identity), with projectM deployed into the component and the runtime
+        layout check, like the VST3.
+      - `packaging/macos/build-pkg.sh` + `distribution.xml`: one component package each for
+        the app (`/Applications`), VST3 (`/Library/Audio/Plug-Ins/VST3`), AU
+        (`.../Components`) and presets (`/Library/Application Support/MilkDAWp`), relocation
+        off, combined by `productbuild` with a choice per component, macOS 12+, both
+        architectures. `package.sh` merges the x86_64 projectM into all three bundles and
+        re-signs them ad hoc first. The package itself is unsigned: Gatekeeper asks once
+        (Control-click > Open, in the README and the release notes); files a package installs
+        carry no quarantine flag.
+      - **Smoke test** (`scripts/release/smoke-test-macos.sh`): `installer -pkg`, every binary
+        universal, every signature valid, `auval -v aufx Mlkw OMda` on the installed AU, the
+        app started, everything removed.
+- [~] 6.4 (M) Linux: AppImage for the app, tarball for the VST3, `.deb` as stretch.
+      Update (2026-10-05): done, including the `.deb`; verified locally in Docker, not yet on
+      GitHub.
+      - **Builds on Ubuntu 22.04 now** (D9's floor). The devcontainer's 24.04 build needed
+        glibc 2.38 and GCC 13's libstdc++ (`GLIBCXX_3.4.32`), so it wouldn't run on 22.04.
+        The release job runs in a plain `ubuntu:22.04` container;
+        `scripts/release/linux-setup.sh` installs GCC 12, CMake and Ninja from pip (22.04's
+        are too old), JUCE's dependencies and vcpkg. The same script reproduces it locally
+        in Docker. GCC 12 needed `-Wno-error=use-after-free` (a false positive inside
+        libstdc++'s `std::string` at -O3, fixed in GCC 13; `cmake/Warnings.cmake`, GCC < 13
+        only).
+      - The binaries link only OpenGL/EGL, ALSA, fontconfig, freetype and the C/C++ runtime
+        (readelf), and JUCE loads X11 at runtime, so nothing is bundled.
+      - **AppImage** (`packaging/linux/build-appimage.sh`, appimagetool 1.9.1 and the static
+        type-2 runtime pinned by SHA-256, so no libfuse2 needed): `usr/bin/` holds the app and
+        projectM, `usr/share/milkdawp/` the presets (`BundledContent` gained
+        `<binary dir>/../share/milkdawp`), plus a desktop entry, icon and `.milk` MIME type.
+        20 MB.
+      - **VST3 tarball**: the bundle, the presets and `install-vst3.sh` (to `~/.vst3` and
+        `~/.local/share/milkdawp`). 26 MB.
+      - **.deb** (`packaging/linux/build-deb.sh`): `/usr/lib/milkdawp` (app and projectM),
+        `/usr/bin/milkdawp`, `/usr/lib/vst3/MilkDAWp.vst3`, `/usr/share/milkdawp`, desktop
+        entry, icon, MIME type, copyright. Version `2.0.0~beta.1`, so it sorts before 2.0.0;
+        the file name keeps the label. Depends from the binaries' NEEDED plus JUCE's X11
+        libraries. 16 MB.
+      - **Smoke test** (`scripts/release/smoke-test-linux.sh`), run locally in a fresh 22.04
+        container, all passing: no binary needs glibc newer than 2.35; the AppImage holds the
+        app, projectM and 9,795 presets, and the app starts from it (Xvfb, Mesa software
+        GL); pluginval at strictness 5 on the tarball's VST3 with projectM required; the
+        `.deb` installs with apt, the installed app starts, and it removes cleanly. Also
+        checked by hand: the same AppImage starts on Ubuntu 24.04.
 - [~] 6.5 (S) Release workflow: tag → build matrix (Release config, real identity) → sign
       where available → package → GitHub Release with generated notes, SHA-256 checksums and
       artifact attestations (`actions/attest-build-provenance`). `-beta` tags publish as
@@ -2480,8 +2656,8 @@ is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first `-beta`
       - **Not verified:** the macOS job (no Mac here: the x64 vcpkg install, `lipo` and
         `codesign` steps first run on GitHub), the `publish` job, and attestations. Next
         step: a workflow_dispatch dry run, then the first `-beta` tag.
-      - **Known gap:** Linux builds in the Ubuntu 24.04 image (glibc 2.39), above D9's
-        22.04 / glibc 2.35 floor. 6.4's AppImage needs an older build base.
+      - ~~Known gap: Linux builds in the Ubuntu 24.04 image (glibc 2.39), above D9's
+        22.04 / glibc 2.35 floor.~~ Fixed in 6.4: the release builds in `ubuntu:22.04`.
 - [ ] 6.6 (M) Documentation: user guide (plugin + app), capture how-tos per platform, OBS
       workflow, MIDI/automation guide, troubleshooting, FAQ on licences.
 - [ ] 6.7 (S) In-app "About" with versions and licences; update check (opt-in, GitHub
