@@ -214,7 +214,10 @@ validator runs.
 | Texture sharing output (Spout / Syphon / NDI) | | | ✔ |
 | Scenes and snapshot morphing | | | ✔ |
 | Setlists and cues | | | ✔ |
-| OSC / web remote | | | ✔ |
+| OSC (Phase 8) / web remote (Phase 9) | | | ✔ |
+| Visual controls: automatable colour, speed, zoom, effects chain (Phase 8) | | | ✔ |
+| Camera / video / image inputs (Phase 8) | | | ✔ |
+| `.milkdawp` preset format and our own renderer (Phase 8, gated) | | | ✔ |
 | Out-of-process renderer ("Link mode") | | | ✔ |
 | Layers: multiple inputs → multiple projectM instances composited on one canvas | | | ✔ |
 
@@ -548,6 +551,7 @@ call from Matthew before the phase that depends on them.
 | D14 | Development environment | Decided | Single container image (devcontainer + CI + agent sessions) covering core, CLI, headless render, and lint; CI as the Windows/macOS build farm; idempotent native bootstrap with a doctor mode for those who want local builds (§4.10). No Nix. |
 | D15 | projectM version | Recommended | Minimum projectM **4.2**, built from a pinned upstream `master` commit through a vcpkg overlay port until 4.2.0 is tagged. 4.1.7 draws its final image to framebuffer 0 whatever FBO is bound, which breaks §4.5. It also uses GLEW without initializing it, and times presets only by the wall clock. 4.2 adds `render_frame_fbo`, a GL-loader create call (no GLEW) and `set_frame_time`. Amends D4. See ADR-0008. |
 | D16 | Android | Recommended | Android standalone app is a planned **post-1.0** target (Phase 7): Android 10+ (API 29), OpenGL ES 3.0, arm64-v8a. A Gradle project builds our CMake tree through the NDK (JUCE's CMake API has no Android support). Surfaces use CPU readback (JUCE 9 cannot share an Android GL context). Audio is microphone first, `AudioPlaybackCapture` second. Presets are imported into app storage. Phase 4 follows ADR-0010's shell boundary rules so none of this needs rework. See ADR-0010. |
+| D17 | Playable visuals and `.milkdawp` | Open | Post-1.0 (Phase 8). Recommended order: automatable controls and effects that work on any renderer, then a `.milkdawp` format (a superset of `.milk` that adds controls, effects and inputs) rendered by projectM with a small variable-setter patch, then our own renderer only if a decision gate (8.D) says so. 16 fixed Visual globals plus Macro 1–8 and a Lock Macros toggle (default Off), because hosts need a fixed parameter list. Decided 2026-10-05: `.milkdawp` is a superset of `.milk` (a valid `.milk` plus `mdw_` lines); migration keeps every `.milk` original (adds `.milkdawp` beside it); conversion aims for close, not perfect; control mappings are static (no in-app editor); video uses platform decoders (Media Foundation, AVFoundation, MediaCodec, system GStreamer on Linux), never a bundled FFmpeg; the renderer is named EyesCream; the web remote is Phase 9. Direction confirmed by Matthew 2026-10-05; the exploration doc's §9 questions get answered before 8.1; ADR at 8.1. See `custom_format_exploration.md`. |
 
 ---
 
@@ -2839,13 +2843,134 @@ Hand test: on a mid-range phone, install, grant the microphone, play music from 
 confirm the visuals react; switch to another app and back (visual intact); rotate; import a
 preset folder; then try playback capture with a music app.
 
+### Phase 8 — Playable visuals: controls, media, `.milkdawp` format (post-1.0)
+
+**Goal:** the DAW (and MIDI or OSC; a phone in Phase 9) can shape *how* a visual looks while it plays,
+not only which preset plays and when: colours, speed, zoom, rotation, warp, wave size, and an
+effects chain (pixelate, glow, blur, mirror, extra feedback). Camera, video and images join
+the canvas. Presets gain a `.milkdawp` form that keeps the original `.milk` as its defaults
+and declares what can be automated. Our own renderer is a gated option at the end, not the
+starting point. Brainstorm, feasibility findings, format sketch and open questions live in
+[`custom_format_exploration.md`](custom_format_exploration.md); keep its §7 in step with this
+list. Inspiration: [kevinraymond/fosfora](https://github.com/kevinraymond/fosfora) (declared
+preset inputs, integrated "rate" params, binding matrix, web remote with QR pairing, OSC,
+media layers).
+
+**Key finding (2026-10-05):** projectM 4.2's API cannot read or set a preset's variables. Its
+expression engine (projectm-eval, MIT, already a dependency) can, so a small patch in our
+overlay port (`projectm_set_preset_variable`, offered upstream) plus generated per-frame
+lines appended at load give real per-preset overrides on every existing preset, without
+rewriting MilkDrop. Hence the order: A (works on any renderer) → B (`.milkdawp` on patched
+projectM) → gate → C (our own renderer, named **EyesCream**).
+
+Settled (2026-10-05): `.milkdawp` is a **superset of `.milk`** (exploration doc §5.0); 16
+fixed Visual globals plus Macro 1–8 and a **Lock Macros** toggle, default Off (§6.2–6.3);
+video through **platform decoders**, no FFmpeg (§4.5); control mappings are static (made by the converter or by hand, no
+in-app editor, so the 1.0 "we don't author presets" rule stands); `.milk` originals are never
+removed; conversion aims for close, not perfect; the web remote is Phase 9.
+
+**Exit:** in REAPER, an automation lane on Hue, Speed and one preset Macro visibly changes a
+Cream of the Crop preset while it plays, with the DAW recording OSC-driven moves as automation;
+a camera feed shows as a layer and inside one `.milkdawp` preset; every converted preset with
+controls at neutral renders identically to its `.milk` source in the headless check.
+
+Stage A, controls that work on any renderer:
+
+- [ ] 8.1 (M) ADR (D17) + `ParameterModel`: the 16 Visual globals (Hue, Saturation,
+      Brightness, Speed, Zoom, Rotation, Warp, Trails, Wave Size, Pixelate, Glow, Blur,
+      Mirror, Kaleidoscope, RGB Split, Media Mix; exploration doc §6.2), Macro 1–8 whose
+      meaning each preset sets, and Lock Macros (on: Macros keep their values across a preset
+      change; off, the default: they move to the new preset's defaults). Hosts need a fixed parameter
+      list, so slots are fixed and Macro names live in the drawer. Parameter groups,
+      additive state keys, `docs/parameters.md` regenerated, a "Visual" drawer section in
+      both shells.
+- [ ] 8.2 (M) `EffectsChain` in the engine: colour, pixelate, blur, glow, RGB split, mirror,
+      kaleidoscope, extra feedback, per layer and on the canvas; GPU tests against
+      hand-computed values; zero cost when every amount is neutral.
+- [ ] 8.3 (S) Speed: integrate `dt × speed` into `projectm_set_frame_time` (never multiply
+      time, so turning the knob never jumps). Document what it can't slow.
+- [ ] 8.4 (M) OSC in/out via `juce_osc`; outbound beat/bar/drop signals.
+- [-] 8.5 Web remote: moved to Phase 9 (2026-10-05).
+- [ ] 8.6 (L) Media sources: camera (JUCE `CameraDevice`; V4L2 on Linux), images, video
+      (platform decoders: Media Foundation, AVFoundation, MediaCodec, and the system's
+      GStreamer loaded at runtime on Linux; no bundled FFmpeg, so no codec-patent exposure
+      and no second LGPL dependency; host-transport-synced in the plugin) as
+      compositor layers; displacement blend modes. Spike: camera burned into projectM's
+      feedback (`burn_texture`). Split before starting.
+
+Stage B, `.milkdawp` v1 on patched projectM:
+
+- [ ] 8.7 (M) **Spike:** `projectm_set_preset_variable` patch in `vcpkg-overlays/projectm`;
+      prove per-frame, per-vertex and soft-cut behaviour; ADR; upstream PR.
+- [ ] 8.8 (S) **Compatibility check:** do stock projectM and MilkDrop open a renamed
+      `.milkdawp` (extra `mdw_*` keys) as the plain preset? The superset format is decided and
+      our loader strips those keys itself, so the result only goes into the user docs.
+- [ ] 8.9 (M) `core/MilkdawpPreset`: parse, validate, serialize, version migration; compile
+      controls (replace / offset / scale / rate / expression) into appended per-frame code;
+      tests that neutral controls reproduce the original preset exactly.
+- [ ] 8.10 (M) Engine and library: load `.milkdawp`, push control values per frame, route
+      globals through overrides where supported and the effects chain otherwise;
+      `PresetLibrary` and the browser handle both file types.
+- [ ] 8.11 (L) `tools/mdw-convert`: bulk `.milk` → `.milkdawp` with proposed controls,
+      headless before/after identity check, report; a first curated pack. Writes beside the
+      originals: **`.milk` files are kept for posterity and never deleted, moved or rewritten**
+      (exploration doc §5.1).
+- [ ] 8.12 (M) Second patch: external textures (`sampler_camera`, `sampler_video`) and new
+      preset variables (beat phase, bar phase, BPM, onset); a few hand-made presets using them.
+
+- [ ] 8.D (S) **Decision gate:** own renderer go / no-go, as an ADR, from what Stage B showed
+      (projectM limits, upstream response, Android performance, cost of carrying patches).
+
+Stage C, EyesCream, our own MilkDrop-compatible renderer (only on "go"; each item L, split
+first):
+skeleton with a projectM-vs-ours golden-image harness (8.13), waves/shapes/blur/textures
+(8.14), offline HLSL → GLSL in the converter with a closeness score per preset (8.15), async
+compile and our own transitions (8.16), then beyond-MilkDrop passes such as particles (8.17).
+Conversion aims for close, not perfect; projectM keeps any preset ours is visibly far off on.
+Details in the exploration doc, §4.7.
+
+Hand test: automate Hue, Speed and Macro 1 on a converted preset in REAPER and play it back;
+send OSC from another machine while recording and confirm the lane appears; add a camera
+layer with Luma key and a displacement blend; switch presets with Lock Macros on (the Macro
+lanes carry on) and off (un-automated Macros jump to the new preset's defaults).
+
+### Phase 9 — Web remote: control from a phone (post-1.0)
+
+**Goal:** a phone or tablet on the same network controls MilkDAWp from a browser, with no app
+to install. In the plugin the DAW records the phone's moves as automation. Split out of
+Phase 8 on 2026-10-05. Design notes so far: exploration doc §4.6, after fosfora's web remote
+(HTTP + WebSocket on one port, JSON, state snapshot on connect, ~10 Hz status, QR pairing,
+access keys, several users at once). **Exit:** scan a QR code shown in the drawer, and the
+phone's page moves the Visual globals, Macros and next/previous within a second; a recording
+pass in REAPER captures those moves as automation; a second phone works at the same time;
+revoking a key disconnects that phone.
+
+Works with today's parameters, and gains most once Phase 8.1 adds the Visual globals and
+Macros. Can start any time after 1.0.
+
+- [ ] 9.1 (S) Decide the server library (JUCE has none; candidates IXWebSocket, civetweb,
+      cpp-httplib) and whether the plugin gets the remote at all or the app first. ADR.
+- [ ] 9.2 (M) Server in the engine's shells: one per process (registry like
+      `LayerRegistry`), listing instances by label; LAN only; off by default in the plugin,
+      since Windows asks for firewall permission in the host's name.
+- [ ] 9.3 (M) Pairing and security: QR code with a random access key, revocable keys, a list
+      of connected devices in settings.
+- [ ] 9.4 (M) Protocol: JSON over WebSocket; snapshot on connect, ~10 Hz status (preset,
+      beat phase, levels); moves go through real parameter gestures on the message thread,
+      with host automation playback winning, as it would over a mouse.
+- [ ] 9.5 (M) The page: bundled in `BinaryData`, touch-sized, works offline from the plugin,
+      several users at once.
+
+Hand test: pair two phones, move controls from both during a REAPER recording pass, play
+back, revoke one key.
+
 ### Post-1.0 backlog (unscheduled)
 
 - Texture sharing output: Spout (Windows), Syphon (macOS), NDI (all) so OBS/Resolume can
   take the frame without screen capture.
 - Scenes: snapshot all parameters, morph between snapshots over time.
 - Setlists and cues with DAW markers / MIDI program changes.
-- OSC server and a small web remote for phone control.
+- ~~OSC server and a small web remote for phone control~~: scheduled as Phase 8 (8.4, OSC) and Phase 9 (web remote).
 - Out-of-process renderer / "Link mode" between plugin and app (§4.6).
 - CLAP and LV2 formats.
 - Linux native loopback capture module.
@@ -2938,6 +3063,8 @@ smoke tests and validators rather than a percentage.
 | Preset pack licensing (D12: MilkDrop presets carry no formal licence) | an author asks for removal | ship the pack's LICENSE.md and attribution; honour removal requests and follow upstream removals; the in-app downloader (6.1) remains the fallback if bundling ever has to stop |
 | ~10k bundled presets (D12) | slow first-run scan, unusable popup menu | searchable browser (6.1b); measure scan and shuffle at full pack size in 6.1 |
 | Android build path (JUCE's CMake API has no Android support; our projectM overlay has never built for an Android triplet) | Phase 7 costs much more than estimated, or needs a second build system | 7.1 spike first, time-boxed, before anything else is scheduled; Phase 4 follows ADR-0010's boundary rules so the shell isn't the problem too |
+| Phase 8 depends on a projectM patch (variable setter) that upstream may not take | we carry it in the overlay port on every projectM bump | keep the patch tiny; pinned-hash bump procedure already exists (ADR-0008); own renderer is the long-term exit (8.D) |
+| Phase 8's own renderer is the largest item ever proposed here (HLSL translation, MilkDrop quirks) | years of work, or a renderer worse than projectM | gated behind Stage B (8.D); shaders converted offline; "close" is the bar, not pixel-perfect; projectM keeps any preset ours is visibly far off on |
 | Readback surfaces (Linux, Android, refusing drivers) cost a full-frame GPU→CPU→GPU copy per surface | lower frame rate on weak GPUs, especially phones | only while a readback surface exists; adaptive quality (5.3) shrinks the frame; JUCE sharing patch (7.8) removes it on Android |
 
 ---
@@ -2990,6 +3117,8 @@ item (`[1.6]`) in the subject.
 - projectM 4 C API: https://github.com/projectM-visualizer/projectm (`src/api/include/projectM-4/`);
   4.2 additions are on `master`, marked `@since 4.2.0` (ADR-0008)
 - MilkDrop3 (MilkDrop 2 fork, `.milk2` double presets): https://github.com/milkdrop2077/MilkDrop3
+- projectm-eval (MIT ns-eel2 reimplementation, standalone): https://github.com/projectM-visualizer/projectm-eval
+- fosfora (Rust/wgpu VJ engine; Phase 8 inspiration): https://github.com/kevinraymond/fosfora
 - JUCE 9 releases: https://github.com/juce-framework/JUCE/releases (9.0.0 on 2026-07-21,
   9.0.2 on 2026-09-07)
 - JUCE breaking changes: https://github.com/juce-framework/JUCE/blob/master/BREAKING_CHANGES.md
