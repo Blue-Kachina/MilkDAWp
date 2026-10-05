@@ -2412,15 +2412,15 @@ steps), with checksums and build attestations; docs live; this repository rename
 and the v1 repo archived with a pointer.
 
 **Order of work** (numbers are labels, not sequence): 6.5 first, unsigned, so every later item
-is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first `-beta` release (6.8) →
+is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first published release (6.8's beta programme was skipped, 2026-10-05) →
 6.10 (SignPath needs a published release) → 6.6/6.7 alongside → 6.9.
 
-- [~] 6.1 (S) Bundle Cream of the Crop + the projectM texture pack (D12): measure installer
+- [x] 6.1 (S) Bundle Cream of the Crop + the projectM texture pack (D12): measure installer
       size (full pack vs subset plus an in-app download), ship the pack's LICENSE.md and
       curator credit, default preset chosen (pleasant and cheap), first-run library root
       points at it. Check that the first-run scan, Weighted shuffle and preset metadata stay
       fast at ~10k presets.
-      Update (2026-10-04): done except the hand test in a DAW and About's credit (6.7).
+      Update (2026-10-04): done; the hand test passed 2026-10-05 and the curator credit is in About (6.7).
       - **Size: ship the whole pack.** At the pinned commits, 9,795 presets + 67 textures
         are 115 MB on disk (139 MB allocated, ~9,800 small files), 34 MB as zip, 13 MB as
         tar.gz and ~3 MB with xz/LZMA (presets are small text with heavy duplication across
@@ -2476,13 +2476,14 @@ is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first `-beta`
       - Tests: `BundledContentTests` (search order, content root, default preset and
         textures, the fetched pack, scale) and the headless texture test. Full `ctest`:
         354/354 on Windows.
-      - **Not verified by hand:** a first launch of the app and a new plugin instance in a DAW
-        actually opening on Many Colors 1, and how it looks with music.
-- [~] 6.1b (M) Searchable preset browser (moved up from the post-1.0 backlog by D12):
+      - Checked by Matthew in REAPER (2026-10-05, the installed release build): a new instance
+        opens on Many Colors 1 with the ~9,800 bundled presets. (The app's first launch
+        follows the same path but wasn't separately checked.)
+- [x] 6.1b (M) Searchable preset browser (moved up from the post-1.0 backlog by D12):
       filter-as-you-type over ~10k presets, favourites and ratings (5.2), keyboard
       navigable (5.8). Replaces the click-the-preset-name popup menu for large libraries;
       Phase 7.6 builds on it.
-      Update (2026-10-04): done in both shells; not yet checked by hand in a DAW.
+      Update (2026-10-04): done in both shells; checked in REAPER 2026-10-05.
       - `ui::PresetBrowser` (new, shared): a popover over the picture, like Transitions and
         Output, opened by the preset title, `B`, or the app's File > Browse presets /
         Playback > Choose preset. It replaces the popup menu of nested folders in both shells
@@ -2528,8 +2529,9 @@ is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first `-beta`
         background is now 96% opaque, after the diagnostics panel's text showed through at 88%.
       - Not done: mdw-view (a dev tool, mostly run on the 3 fixture presets) keeps the popup
         menu. No folder tree: the flat list shows each preset's folder, and typing a folder
-        name filters to it. **Not checked by hand:** the plugin in REAPER (open with the
-        title and `B`; check that the search box gets keys there rather than the host).
+        name filters to it.
+      - Checked by Matthew in REAPER (2026-10-05, dev build): the browser opens, and the
+        search box gets keys and filters as it should.
 - [x] 6.2 (M) Windows installer (Inno Setup or WiX): VST3 to `Common Files\VST3`, app to
       Program Files, optional desktop shortcut, uninstaller. Unsigned until 6.10 succeeds,
       then signed through SignPath in the release workflow (D11). Installs the
@@ -2700,8 +2702,12 @@ is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first `-beta`
         online) and `AboutPanelTests`. Full `ctest`: 378/378.
       - **Not checked by eye:** the panel's look. My attempt to open it by injecting keys went
         to another window instead (Windows' foreground lock), so that's for a hand test.
-- [~] 6.8 (S) Beta programme: two weeks of `-beta` builds, issue template, triage.
-      Update (2026-10-05): the tooling is ready; the two weeks are Matthew's.
+- [x] 6.8 (S) ~~Beta programme: two weeks of `-beta` builds~~, issue template, triage. **Skipped (decided 2026-10-05).**
+      Decision (Matthew, 2026-10-05): no beta programme. MilkDAWp isn't aimed at a large
+      audience, there are no testers with every platform's hardware, and Matthew will use
+      the release himself instead. 1.0 can be tagged directly (or a single `-beta` tag used
+      as a low-commitment first release). What follows was built anyway and stays useful
+      for anyone who finds the project:
       `.github/ISSUE_TEMPLATE/`: a bug form (version, plugin/AU/app, host, OS and GPU, steps,
       a diagnostics paste, crash-log instructions), an idea form, a **preset-removal** form
       (D12's promise to authors), links to the guide and troubleshooting.

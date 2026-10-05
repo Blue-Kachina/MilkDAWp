@@ -1,7 +1,13 @@
 # The beta programme (6.8)
 
-Two weeks of `-beta` builds before 1.0: real people, real DAWs, real
-hardware, on everything the release workflow can't check by itself.
+**Skipped for 1.0** (decided 2026-10-05): MilkDAWp isn't aimed at a large
+audience, and 1.0 is tagged directly. This page stays as the plan for a beta,
+should a later release want one; the issue forms and labels it describes are
+in use either way.
+
+A beta would be two weeks of `-beta` builds before a release: real people,
+real DAWs, real hardware, on everything the release workflow can't check by
+itself.
 
 ## Before the first beta
 

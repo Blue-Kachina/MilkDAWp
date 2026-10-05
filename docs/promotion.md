@@ -25,7 +25,7 @@ play), nothing crashes, and saving and reopening keeps v2's settings.
 
 ## 3. Release 1.0
 
-When the beta is done ([beta.md](beta.md)): tag `v1.0.0` (no suffix) and let
+When you're happy with it (the beta programme was skipped, 2026-10-05): tag `v1.0.0` (no suffix) and let
 the release workflow publish it ([releasing.md](releasing.md)). The version is
 1.0.0 (decided 2026-10-05): the earlier MilkDAWp never reached 1.0, so 1.0.0
 is still an upgrade for hosts that compare plugin versions.
