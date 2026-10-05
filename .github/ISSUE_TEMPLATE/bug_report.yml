@@ -1,0 +1,61 @@
+name: Bug report
+description: Something doesn't work, looks wrong, or crashed.
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing MilkDAWp! The **diagnostics panel** (press `D`, then **Copy diagnostics**) answers most of the questions below in one paste.
+  - type: input
+    id: version
+    attributes:
+      label: MilkDAWp version
+      description: Help > About (app) or Settings > About (plugin), e.g. 1.0.0-beta.1
+    validations:
+      required: true
+  - type: dropdown
+    id: shell
+    attributes:
+      label: Where
+      options:
+        - Plugin (VST3)
+        - Plugin (Audio Unit)
+        - Standalone app
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: DAW and version (plugin only)
+      placeholder: REAPER 7.2, Ableton Live 12.1, Logic Pro 11...
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and graphics card
+      placeholder: Windows 11 24H2, NVIDIA RTX 4070 / macOS 15.1, M2 / Ubuntu 24.04, Intel UHD
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add MilkDAWp to the master bus
+        2. Set the mode to Energy
+        3. ...
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Press `D`, click **Copy diagnostics**, and paste here.
+      render: text
+  - type: markdown
+    attributes:
+      value: |
+        **Crashes:** in the app, File > Collect logs... makes a zip; attach it to this issue. In a DAW, attach the DAW's crash log if it has one.

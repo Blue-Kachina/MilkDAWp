@@ -532,7 +532,7 @@ call from Matthew before the phase that depends on them.
 
 | # | Decision | Status | Recommendation and rationale |
 |---|---|---|---|
-| D1 | Plugin identity | Decided | v2 **is** the next MilkDAWp. Keep v1's manufacturer code `OMda`, plugin code `Mlkw`, bundle ID `com.otitismedia.MilkDAWp`, and product name `MilkDAWp`; the first release ships as MilkDAWp 1.0 and existing sessions keep loading with state migrated (§4.8). The v1 repository is archived with a pointer once 1.0 ships (6.9). Consequences: during development, never install v1 and v2 into the same plugin folder at once (same IDs, hosts will pick one arbitrarily); dev and beta builds carry a visible pre-release version string and the state schema is versioned from the first commit so beta sessions migrate forward. |
+| D1 | Plugin identity | Decided | v2 **is** the next MilkDAWp. Keep v1's manufacturer code `OMda`, plugin code `Mlkw`, bundle ID `com.otitismedia.MilkDAWp`, and product name `MilkDAWp`; the first release ships as MilkDAWp 1.0 (version 1.0.0, confirmed 2026-10-05; v1 never passed 0.7.x) and existing sessions keep loading (with v2 defaults since migration was dropped, §4.8). The v1 repository is archived with a pointer once 1.0 ships (6.9). Consequences: during development, never install v1 and v2 into the same plugin folder at once (same IDs, hosts will pick one arbitrarily); dev and beta builds carry a visible pre-release version string and the state schema is versioned from the first commit so beta sessions migrate forward. |
 | D2 | Plugin formats | Recommended | VST3 + AU + Standalone wrapper for 1.0. CLAP via `clap-juce-extensions` and LV2 post-1.0. No AAX. |
 | D3 | Renderer location | Recommended | In-process engine thread for 1.0, IPC-ready boundary (§4.6). |
 | D4 | Dependency management | Decided | **JUCE 9.x** via CMake `FetchContent` pinned to a release tag and commit hash (the vcpkg port lags at 8.0.7). Everything else, projectM 4.x included, via vcpkg manifest mode with pinned baseline and custom dynamic triplets (LGPL). See §4.11. |
@@ -2530,13 +2530,16 @@ is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first `-beta`
         menu. No folder tree: the flat list shows each preset's folder, and typing a folder
         name filters to it. **Not checked by hand:** the plugin in REAPER (open with the
         title and `B`; check that the search box gets keys there rather than the host).
-- [~] 6.2 (M) Windows installer (Inno Setup or WiX): VST3 to `Common Files\VST3`, app to
+- [x] 6.2 (M) Windows installer (Inno Setup or WiX): VST3 to `Common Files\VST3`, app to
       Program Files, optional desktop shortcut, uninstaller. Unsigned until 6.10 succeeds,
       then signed through SignPath in the release workflow (D11). Installs the
       Microsoft Visual C++ 2015-2022 Redistributable (x64) when it's missing: the plugin,
       app and projectM all link the dynamic MSVC runtime (3.10, decided 2026-09-26).
-      Update (2026-10-05): written and compiled locally; installing is only tested on
-      GitHub's runner (the smoke test below), not yet run there.
+      Update (2026-10-05): done. A workflow_dispatch dry run of the release workflow went
+      green on all three platforms, smoke tests included. The first attempt failed before
+      building: Chocolatey's feed has no Inno Setup 6.7.3, so the job now installs the
+      official installer, pinned by URL and SHA-256 in `toolchain.json`.
+      Signing still waits on 6.10.
       - **Inno Setup** (6.7.3, pinned in `toolchain.json`): `packaging/windows/MilkDAWp.iss`,
         built by `package.sh` into `MilkDAWp-<v>-windows-x64-setup.exe` (33 MB, of which
         ~25 MB is Microsoft's `vc_redist.x64.exe`; the 9,795 presets compress to ~3 MB).
@@ -2559,11 +2562,13 @@ is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first `-beta`
         strictness 5 on the *installed* VST3 with projectM required, the installed app
         started, silent uninstall, nothing left.
       - The zips and `-windows-presets.zip` from 6.5/6.1 are gone; the symbols zip stays.
-- [~] 6.3 (M) macOS: `.pkg` with VST3 + AU + app, universal binary, ad-hoc signed
+- [x] 6.3 (M) macOS: `.pkg` with VST3 + AU + app, universal binary, ad-hoc signed
       (`codesign -s -`), not notarized (D11: no paid Apple Developer account). The docs and
       the release notes give the first-run steps for Gatekeeper.
-      Update (2026-10-05): written; **never run** (no Mac here). The first workflow_dispatch
-      dry run is its first test.
+      Update (2026-10-05): done. Written without a Mac; its first run was the green release
+      dry run, whose smoke test installed the package on the runner and passed the checks
+      below, `auval` included. **Not verified by hand:** a person on a real Mac (the
+      Gatekeeper prompt for an unsigned `.pkg`, Logic loading the AU, an Intel Mac).
       - **AU** (D2): `FORMATS` gains AU on Apple (type aufx, subtype `Mlkw`, manufacturer
         `OMda`, the v1 identity), with projectM deployed into the component and the runtime
         layout check, like the VST3.
@@ -2578,9 +2583,9 @@ is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first `-beta`
       - **Smoke test** (`scripts/release/smoke-test-macos.sh`): `installer -pkg`, every binary
         universal, every signature valid, `auval -v aufx Mlkw OMda` on the installed AU, the
         app started, everything removed.
-- [~] 6.4 (M) Linux: AppImage for the app, tarball for the VST3, `.deb` as stretch.
-      Update (2026-10-05): done, including the `.deb`; verified locally in Docker, not yet on
-      GitHub.
+- [x] 6.4 (M) Linux: AppImage for the app, tarball for the VST3, `.deb` as stretch.
+      Update (2026-10-05): done, including the `.deb`; verified locally in Docker and by the
+      green release dry run on GitHub.
       - **Builds on Ubuntu 22.04 now** (D9's floor). The devcontainer's 24.04 build needed
         glibc 2.38 and GCC 13's libstdc++ (`GLIBCXX_3.4.32`), so it wouldn't run on 22.04.
         The release job runs in a plain `ubuntu:22.04` container;
@@ -2658,12 +2663,78 @@ is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first `-beta`
         step: a workflow_dispatch dry run, then the first `-beta` tag.
       - ~~Known gap: Linux builds in the Ubuntu 24.04 image (glibc 2.39), above D9's
         22.04 / glibc 2.35 floor.~~ Fixed in 6.4: the release builds in `ubuntu:22.04`.
-- [ ] 6.6 (M) Documentation: user guide (plugin + app), capture how-tos per platform, OBS
+- [x] 6.6 (M) Documentation: user guide (plugin + app), capture how-tos per platform, OBS
       workflow, MIDI/automation guide, troubleshooting, FAQ on licences.
-- [ ] 6.7 (S) In-app "About" with versions and licences; update check (opt-in, GitHub
+      Update (2026-10-05): `docs/user-guide/` (README index, installing, controls, presets,
+      transitions, plugin, app, capture-and-obs, troubleshooting, faq), written from the code
+      and the roadmap notes (shortcut table from `ui/Shortcuts.cpp`, panel tooltips, the
+      Output window's title for OBS). MIDI learn is in app.md, automation in plugin.md. A
+      root `README.md` (the repository had none). Linked from About, the app's Help menu and
+      the plugin's settings menu ("User guide"), and from the issue forms. "Docs live" means
+      on GitHub, read from the default branch (links use `blob/HEAD/...`); no separate site.
+      **Not done:** screenshots of the current UI (the ones in `docs/design/` show an older
+      drawer).
+- [x] 6.7 (S) In-app "About" with versions and licences; update check (opt-in, GitHub
       releases API).
-- [ ] 6.8 (S) Beta programme: two weeks of `-beta` builds, issue template, triage.
-- [ ] 6.9 (S) 1.0 release and repository promotion, in this order:
+      Update (2026-10-05):
+      - `ui::AboutPanel` (shared): a popover like Diagnostics, opened from Settings > About in
+        the plugin and Help > About in the app (new Help menu: User guide, Releases, About).
+        Shows MilkDAWp's version label, the shell ("VST3 in REAPER", "app"), projectM, JUCE
+        and the OS (Copy versions puts them on the clipboard), links to the source, the user
+        guide and the releases, and the credits: AGPL, projectM's LGPL and replaceability,
+        JUCE, Lucide, the presets with Jason Fletcher (ISOSCELES) credited as curator (D12,
+        owed since 6.1), MilkDrop's author.
+      - `engine::UpdateChecker`: **off until the user turns it on** in About. Then at most one
+        check a day at app start-up, plus Check now. GitHub's list-releases API; drafts never
+        count; pre-releases only for someone already on a pre-release; semver ordering with
+        pre-release parts (`compareVersions`). Fetch through JUCE on Windows/macOS. On Linux
+        JUCE is built without libcurl (no new dependency), so it runs the `curl` command.
+        Results go in `update-check.json` beside the preset metadata, shared with the plugin.
+      - **Only the app goes online.** A network thread in a plugin the host can unload at any
+        moment isn't worth an update notice, and plugins that phone home are frowned on. The
+        plugin's About shows what the app last found, or says the app does the checking.
+        A found update also shows in the app's Help menu ("About MilkDAWp (update available)").
+      - Tests: `UpdateCheckTests` (ordering, stable vs beta users, junk responses, settings
+        round trip and the daily rule, off-until-enabled, a newer release reported and
+        remembered for the plugin, a failure explained; all with a fake fetcher, nothing goes
+        online) and `AboutPanelTests`. Full `ctest`: 378/378.
+      - **Not checked by eye:** the panel's look. My attempt to open it by injecting keys went
+        to another window instead (Windows' foreground lock), so that's for a hand test.
+- [~] 6.8 (S) Beta programme: two weeks of `-beta` builds, issue template, triage.
+      Update (2026-10-05): the tooling is ready; the two weeks are Matthew's.
+      `.github/ISSUE_TEMPLATE/`: a bug form (version, plugin/AU/app, host, OS and GPU, steps,
+      a diagnostics paste, crash-log instructions), an idea form, a **preset-removal** form
+      (D12's promise to authors), links to the guide and troubleshooting.
+      `scripts/release/create-labels.sh` creates the labels they use (triage, bug,
+      enhancement, preset-removal, beta, blocker, host-specific, platform:*, needs-info).
+      `docs/beta.md`: what to tell testers (it replaces v1; Copy diagnostics; update checks
+      hear about the next beta), what to test, triage rules, the exit rule (two weeks
+      without an open `blocker`). Removals are now possible: `MILKDAWP_PRESET_REMOVALS` in
+      `cmake/BundledContent.cmake` deletes listed presets after extraction.
+- [~] 6.9 (S) 1.0 release and repository promotion, in this order:
+      Update (2026-10-05): prepared; every step is Matthew's (they change GitHub). The
+      checklist with exact commands is `docs/promotion.md`.
+      - Step 1: `scripts/release/backup-v1.sh` (mirror clone, bundle, wiki, issues and PRs
+        with comments, labels, metadata, every release and its assets, checksums).
+      - Step 2: v1 migration was dropped (§4.8), so this checks that a v1 session opens with
+        v2 defaults. New `PluginProcessorTests` case: a blob built exactly as v1 0.7.x's
+        `getStateInformation` wrote it (`PARAMS` tree, v1 parameter ids, non-default values,
+        `copyXmlToBinary`) loads without trouble, every parameter stays at v2's default, and
+        a save afterwards reloads. Real v1 projects remain a hand test.
+      - v1 has no issues (Matthew, 2026-10-05), so the issue-transfer step is gone. (Had there
+        been any, they'd have had to move *before* archiving: archived repositories are
+        read-only.)
+      - **Version: 1.0.0** (decided 2026-10-05, per D1): `project(VERSION)` and `vcpkg.json`
+        moved from 2.0.0, the betas are `v1.0.0-beta.N`. v1 never passed 0.7.x, so 1.0.0
+        is still an upgrade for hosts that compare plugin versions. **User-facing text never
+        mentions v1** (Matthew, 2026-10-05: it was never promoted, only shared with
+        friends, so mentioning it would only confuse). 1.0 is presented as MilkDAWp's
+        first release; the guide, README, FAQ and beta notes say nothing about earlier
+        versions or migrating from them.
+      - Step 6: `scripts/release/rename-sweep.sh` (dry run by default; `--apply` after both
+        renames) rewrites `Blue-Kachina/MilkDAWp2` to `Blue-Kachina/MilkDAWp` (URLs, the
+        update check's repository, docs, workflows).
+        Decided: keep the GHCR image name `milkdawp2-devcontainer` and the dev identity.
       1. Back up v1: `git clone --mirror` plus a `git bundle create … --all`; export issues
          (`gh issue list --state all --json …`), the wiki and release assets, which a mirror
          doesn't include; keep a built v1 `.vst3` so old sessions can still be opened in v1.
@@ -2681,10 +2752,21 @@ is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first `-beta`
          text in `app/`, `engine/`, `core/` and the docs. The dev identity's
          `MilkDAWp2 Dev` names (ADR-0007) stay as they are.
       6. Transfer open v1 issues that still apply; announce.
-- [ ] 6.10 (S) Windows signing (D11): after the first published `-beta` release, apply to the
+- [~] 6.10 (S) Windows signing (D11): after the first published `-beta` release, apply to the
       SignPath Foundation open-source programme (asking first about JUCE's dual licence);
       on acceptance, add the SignPath step to the release workflow. If refused, record it in
       D11 and keep shipping unsigned with checksums and attestations.
+      Update (2026-10-05): the workflow side is ready; applying is Matthew's, after the first
+      published beta. The release workflow uploads the installer as an artifact, submits it
+      with `signpath/github-action-submit-signing-request@v1`, waits, checks
+      `Get-AuthenticodeSignature` is Valid and ships the signed file (the smoke test then
+      installs the signed one). All three steps are skipped until the repository variable
+      `SIGNPATH_ORGANIZATION_ID` exists, so nothing changes before acceptance.
+      `packaging/windows/signpath-artifact-configuration.xml` is the artifact configuration
+      to paste into SignPath. `docs/signing.md` covers the terms, the JUCE question, what to
+      put in the application, the secret and variables to add, and the text to change once
+      releases are signed. **Untested:** the signing steps can't run without a SignPath
+      project.
 
 ### Phase 7 — Android standalone app (post-1.0)
 

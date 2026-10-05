@@ -93,6 +93,22 @@ milkdawp_fetch_archive(presets
   ${MILKDAWP_PRESETS_SHA256}
   "${MILKDAWP_CONTENT_DIR}/Presets/Cream of the Crop")
 
+# Presets their authors asked us not to ship (D12, docs/beta.md): paths
+# relative to the pack, e.g. "Dancer/Aurora/Someone - Some preset.milk".
+# Applied after extraction on every configure; drop an entry once upstream has
+# removed the preset and the pin has moved past it.
+set(MILKDAWP_PRESET_REMOVALS
+)
+foreach(_mdw_removed IN LISTS MILKDAWP_PRESET_REMOVALS)
+  set(_mdw_removed_path "${MILKDAWP_CONTENT_DIR}/Presets/Cream of the Crop/${_mdw_removed}")
+  if(EXISTS "${_mdw_removed_path}")
+    file(REMOVE "${_mdw_removed_path}")
+    message(STATUS "MilkDAWp: removed preset at its author's request: ${_mdw_removed}")
+  endif()
+endforeach()
+unset(_mdw_removed)
+unset(_mdw_removed_path)
+
 # The texture repo keeps its images in textures/; flatten that into Textures/.
 milkdawp_fetch_archive(textures
   "https://github.com/projectM-visualizer/presets-milkdrop-texture-pack/archive/${MILKDAWP_TEXTURES_COMMIT}.tar.gz"

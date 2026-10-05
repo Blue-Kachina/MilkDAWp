@@ -16,6 +16,7 @@ add_executable(milkdawp_engine_tests
   DirectorTests.cpp
   RecentErrorsTests.cpp
   BundledContentTests.cpp
+  UpdateCheckTests.cpp
 )
 milkdawp_test_no_crash_dialogs(milkdawp_engine_tests)
 target_compile_definitions(milkdawp_engine_tests PRIVATE

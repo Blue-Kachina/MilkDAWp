@@ -8,6 +8,7 @@
 
 #include "milkdawp/core/ParameterModel.h"
 #include "milkdawp/core/Version.h"
+#include "milkdawp/engine/UpdateCheck.h"
 #include "milkdawp/ui/Icons.h"
 #include "milkdawp/ui/PresetInfoMenu.h"
 #include "milkdawp/ui/PresetMenu.h"
@@ -64,6 +65,10 @@ MilkDAWpAudioProcessorEditor::MilkDAWpAudioProcessorEditor(MilkDAWpAudioProcesso
   // top; hidden until chosen from the settings menu.
   outputSurface.addChildComponent(transitionSettings);
   transitionSettings.onCloseRequested = [this] { setTransitionSettingsVisible(false); };
+
+  // 6.7: About, centred over the picture; hidden until asked for.
+  outputSurface.addChildComponent(aboutPanel);
+  aboutPanel.onCloseRequested = [this] { setAboutVisible(false); };
 
   // 6.1b: the preset browser, a popover like the others. The director and
   // the metadata store outlive the editor (the processor owns them).
@@ -211,6 +216,7 @@ void MilkDAWpAudioProcessorEditor::resized() {
   layoutTransitionSettings();
   layoutOutputSettings();
   layoutPresetBrowser();
+  layoutAbout();
   processorRef.setEditorSize(getWidth(), getHeight());
 }
 
@@ -336,6 +342,43 @@ void MilkDAWpAudioProcessorEditor::layoutPresetBrowser() {
   presetBrowser.setBounds(area.removeFromBottom(height).removeFromLeft(width));
 }
 
+void MilkDAWpAudioProcessorEditor::layoutAbout() {
+  const int drawerHeight = controlsWindow_ != nullptr ? 0 : milkdawp::ui::ControlDrawer::controlsHeight;
+  const auto area = outputSurface.getLocalBounds().withTrimmedBottom(drawerHeight).reduced(6);
+  aboutPanel.setBounds(area.withSizeKeepingCentre(std::min(milkdawp::ui::AboutPanel::preferredWidth, area.getWidth()),
+                                                  std::min(milkdawp::ui::AboutPanel::preferredHeight, area.getHeight())));
+}
+
+void MilkDAWpAudioProcessorEditor::setAboutVisible(bool visible) {
+  if (visible) {
+    milkdawp::ui::AboutInfo info;
+    info.version = core::versionString();
+    info.shell = juce::String(juce::AudioProcessor::getWrapperTypeDescription(processorRef.wrapperType)) + " in " +
+                 juce::PluginHostType().getHostDescription();
+    info.projectMVersion = juce::String(processorRef.visualizer().renderEngine().projectMVersion());
+    info.juceVersion = juce::SystemStats::getJUCEVersion();
+    info.operatingSystem = juce::SystemStats::getOperatingSystemName();
+    aboutPanel.setInfo(info);
+    // The plugin never goes online (UpdateCheck.h); it shows what the app found.
+    aboutPanel.setUpdateControls(false, false);
+    const auto found = engine::UpdateSettings::load(engine::UpdateSettings::defaultFile());
+    if (!found.latestVersion.empty() && engine::compareVersions(found.latestVersion, core::versionString()) > 0) {
+      aboutPanel.setUpdateStatus("MilkDAWp " + juce::String(found.latestVersion) + " is available: open the release page",
+                                 found.latestUrl, true);
+    } else {
+      aboutPanel.setUpdateStatus("Update checks are in the MilkDAWp app (Help > About).", {}, false);
+    }
+    layoutAbout();
+  }
+  aboutPanel.setVisible(visible);
+  if (visible) {
+    aboutPanel.toFront(false);
+    milkdawp::ui::focusFirstControl(aboutPanel); // Esc closes
+  } else {
+    grabKeyboardFocus();
+  }
+}
+
 void MilkDAWpAudioProcessorEditor::setPresetBrowserVisible(bool visible) {
   if (visible) {
     // One popover at a time: at small sizes they would overlap.
@@ -402,8 +445,10 @@ bool MilkDAWpAudioProcessorEditor::keyPressed(const juce::KeyPress& key) {
   using milkdawp::ui::ShortcutAction;
   switch (milkdawp::ui::mapKeyPress(key, /*isAppShell=*/false)) {
   case ShortcutAction::ExitFullscreenOrRevealDrawer:
-    if (presetBrowser.isVisible()) {
-      setPresetBrowserVisible(false); // Esc closes the popover first
+    if (aboutPanel.isVisible()) {
+      setAboutVisible(false); // Esc closes the popover first
+    } else if (presetBrowser.isVisible()) {
+      setPresetBrowserVisible(false);
     } else if (outputSettings.isVisible()) {
       setOutputSettingsVisible(false);
     } else if (transitionSettings.isVisible()) {
@@ -516,6 +561,11 @@ void MilkDAWpAudioProcessorEditor::showSettingsMenu() {
   diagnostics.shortcutKeyDescription = "D";
   diagnostics.setAction([this] { setDiagnosticsVisible(!diagnosticsPanel.isVisible()); });
   menu.addItem(std::move(diagnostics));
+  menu.addSeparator();
+  menu.addItem("User guide", [] {
+    juce::URL("https://github.com/Blue-Kachina/MilkDAWp2/blob/HEAD/docs/user-guide/README.md").launchInDefaultBrowser();
+  });
+  menu.addItem("About MilkDAWp...", [this] { setAboutVisible(true); });
   menu.setLookAndFeel(&controlDrawer.getLookAndFeel());
   menu.showMenuAsync(milkdawp::ui::DrawerLookAndFeel::menuOptions(controlDrawer.settingsMenuAnchor()));
 }

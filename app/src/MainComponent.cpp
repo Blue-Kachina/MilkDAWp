@@ -9,6 +9,7 @@
 #include "AudioSettingsPanel.h"
 #include "milkdawp/core/DisplayLayout.h"
 #include "milkdawp/core/ParameterModel.h"
+#include "milkdawp/core/Version.h"
 #include "milkdawp/ui/Icons.h"
 #include "milkdawp/ui/PresetInfoMenu.h"
 #include "milkdawp/ui/PresetMenu.h"
@@ -21,7 +22,7 @@ namespace {
 constexpr int kDefaultWidth = 1280;
 constexpr int kDefaultHeight = 720;
 
-enum MenuIndex { FileMenu = 0, PlaybackMenu = 1, ViewMenu = 2 };
+enum MenuIndex { FileMenu = 0, PlaybackMenu = 1, ViewMenu = 2, HelpMenu = 3 };
 
 bool isPresetFile(const juce::File& file) { return file.hasFileExtension("milk"); }
 
@@ -152,6 +153,23 @@ MainComponent::MainComponent(engine::Visualizer& visualizer, AudioSourceRouter& 
     presetBrowser_.setSource(std::move(source));
   }
   migrateFavourites();
+
+  // 6.7: About, and the opt-in update check (off until turned on there).
+  surface_.addChildComponent(aboutPanel_);
+  aboutPanel_.onCloseRequested = [this] { setAboutVisible(false); };
+  aboutPanel_.onAutoCheckChanged = [this](bool enabled) {
+    updateChecker_.setEnabled(enabled);
+    refreshAboutUpdateStatus();
+  };
+  aboutPanel_.onCheckNow = [this] {
+    updateChecker_.checkNow();
+    refreshAboutUpdateStatus();
+  };
+  updateChecker_.onFinished = [this] {
+    const auto status = updateChecker_.status();
+    juce::Logger::writeToLog("Update check: " + engine::describeUpdateStatus(status));
+    refreshAboutUpdateStatus();
+  };
 
   // Settings -> Output, same slot and compositing rules. The standalone app has no
   // other instances to link to, so it only gets the window settings.
@@ -331,6 +349,42 @@ void MainComponent::layoutPresetBrowser() {
   presetBrowser_.setBounds(area.removeFromBottom(height).removeFromLeft(width));
 }
 
+void MainComponent::layoutAbout() {
+  const int drawerHeight = controlsWindow_ != nullptr ? 0 : ui::ControlDrawer::controlsHeight;
+  const auto area = surface_.getLocalBounds().withTrimmedBottom(drawerHeight).reduced(6);
+  aboutPanel_.setBounds(area.withSizeKeepingCentre(std::min(ui::AboutPanel::preferredWidth, area.getWidth()),
+                                                   std::min(ui::AboutPanel::preferredHeight, area.getHeight())));
+}
+
+void MainComponent::refreshAboutUpdateStatus() {
+  const auto status = updateChecker_.status();
+  const bool available = status.state == engine::UpdateChecker::State::Available;
+  aboutPanel_.setUpdateControls(true, updateChecker_.enabled());
+  aboutPanel_.setUpdateStatus(engine::describeUpdateStatus(status), available ? juce::String(status.url) : juce::String(),
+                              available);
+}
+
+void MainComponent::setAboutVisible(bool visible) {
+  if (visible) {
+    ui::AboutInfo info;
+    info.version = core::versionString();
+    info.shell = "app";
+    info.projectMVersion = juce::String(visualizer_.renderEngine().projectMVersion());
+    info.juceVersion = juce::SystemStats::getJUCEVersion();
+    info.operatingSystem = juce::SystemStats::getOperatingSystemName();
+    aboutPanel_.setInfo(info);
+    refreshAboutUpdateStatus();
+    layoutAbout();
+  }
+  aboutPanel_.setVisible(visible);
+  if (visible) {
+    aboutPanel_.toFront(false);
+    ui::focusFirstControl(aboutPanel_); // Esc closes
+  } else {
+    grabKeyboardFocus();
+  }
+}
+
 void MainComponent::migrateFavourites() {
   auto store = visualizer_.director().presetMetadata();
   if (state_.favouritePresets.isEmpty() || store == nullptr) {
@@ -505,7 +559,7 @@ void MainComponent::setLoggingEnabled(bool enabled) {
 
 // ---- menus ----
 
-juce::StringArray MainComponent::menuNames() { return {"File", "Playback", "View"}; }
+juce::StringArray MainComponent::menuNames() { return {"File", "Playback", "View", "Help"}; }
 
 juce::PopupMenu MainComponent::createMenu(int menuIndex) {
   const bool all = menuIndex < 0; // the drawer's settings popup: everything
@@ -599,6 +653,20 @@ juce::PopupMenu MainComponent::createMenu(int menuIndex) {
     menu.addItem(makeItem("Show diagnostics", [this] { setDiagnosticsVisible(!isDiagnosticsVisible()); },
                           isDiagnosticsVisible(), "D"));
   }
+
+  // 6.6/6.7.
+  if (all || menuIndex == HelpMenu) {
+    if (all) {
+      menu.addSeparator();
+    }
+    menu.addItem(makeItem("User guide", [] {
+      juce::URL("https://github.com/Blue-Kachina/MilkDAWp2/blob/HEAD/docs/user-guide/README.md").launchInDefaultBrowser();
+    }));
+    menu.addItem(makeItem("Releases", [] { juce::URL(engine::kReleasesPage).launchInDefaultBrowser(); }));
+    const bool available = updateChecker_.status().state == engine::UpdateChecker::State::Available;
+    menu.addItem(makeItem(available ? "About MilkDAWp (update available)..." : "About MilkDAWp...",
+                          [this] { setAboutVisible(true); }));
+  }
   return menu;
 }
 
@@ -648,6 +716,7 @@ void MainComponent::resized() {
   layoutTransitionSettings();
   layoutOutputSettings();
   layoutPresetBrowser();
+  layoutAbout();
 }
 
 void MainComponent::layoutOutputSettings() {
@@ -678,8 +747,10 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
     }
     return true;
   case ShortcutAction::ExitFullscreenOrRevealDrawer:
-    if (presetBrowser_.isVisible()) {
-      setPresetBrowserVisible(false); // Esc closes the popover first
+    if (aboutPanel_.isVisible()) {
+      setAboutVisible(false); // Esc closes the popover first
+    } else if (presetBrowser_.isVisible()) {
+      setPresetBrowserVisible(false);
     } else if (outputSettings_.isVisible()) {
       setOutputSettingsVisible(false);
     } else if (transitionSettings_.isVisible()) {

@@ -28,7 +28,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 root="$work/root"
 
-# Debian versions sort "~" before anything: 2.0.0~beta.1 < 2.0.0.
+# Debian versions sort "~" before anything: 1.0.0~beta.1 < 1.0.0.
 debversion="$(printf '%s' "$version" | sed 's/-/~/')"
 
 mkdir -p "$root/DEBIAN" "$root/usr/lib/milkdawp" "$root/usr/bin" "$root/usr/lib/vst3" "$root/usr/share/milkdawp" \

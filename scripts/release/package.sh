@@ -36,12 +36,12 @@ set -euo pipefail
 
 platform="${1:?platform (windows|macos|linux)}"
 build_dir="${2:?build directory}"
-version="${3:?version label, e.g. 2.0.0-beta.1}"
+version="${3:?version label, e.g. 1.0.0-beta.1}"
 out_dir="${4:?output directory}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 product="MilkDAWp"
-numeric="${version%%-*}" # 2.0.0-beta.1 -> 2.0.0
+numeric="${version%%-*}" # 1.0.0-beta.1 -> 1.0.0
 
 case "$platform" in
   windows) suffix="windows-x64" ;;
@@ -287,7 +287,7 @@ case "$platform" in
     outputs+=("$tarball")
 
     # The file name keeps the label (GitHub may rename "~" in asset names);
-    # the Debian version inside is 2.0.0~beta.1, which sorts before 2.0.0.
+    # the Debian version inside is 1.0.0~beta.1, which sorts before 1.0.0.
     deb="$out_dir/milkdawp_${version}_amd64.deb"
     rm -f "$deb"
     bash "$repo_root/packaging/linux/build-deb.sh" "$stage" "$content" "$version" "$deb" >&2

@@ -15,7 +15,9 @@
 #include "SignalMonitor.h"
 #include "milkdawp/engine/OutputSurface.h"
 #include "milkdawp/engine/OutputWindow.h"
+#include "milkdawp/engine/UpdateCheck.h"
 #include "milkdawp/engine/Visualizer.h"
+#include "milkdawp/ui/AboutPanel.h"
 #include "milkdawp/ui/ControlDrawer.h"
 #include "milkdawp/ui/DiagnosticsPanel.h"
 #include "milkdawp/ui/DetachedControlsWindow.h"
@@ -69,6 +71,11 @@ public:
   void toggleOutputWindow(bool fullscreen);
   void setControlsFloating(bool floating);
   void setDiagnosticsVisible(bool visible);
+  /// 6.7: Help > About, with the opt-in update check.
+  void setAboutVisible(bool visible);
+  /// Main.cpp calls this at start-up: a check if the user turned them on and
+  /// one is due. Not from the constructor, so tests never go online.
+  void checkForUpdatesIfDue() { updateChecker_.checkIfDue(); }
   void setLoggingEnabled(bool enabled);
   [[nodiscard]] ParameterBinding& parameters() noexcept { return binding_; }
   [[nodiscard]] ui::ControlDrawer& drawer() noexcept { return drawer_; }
@@ -119,6 +126,8 @@ private:
   void layoutTransitionSettings();
   void layoutOutputSettings();
   void layoutPresetBrowser();
+  void layoutAbout();
+  void refreshAboutUpdateStatus();
   /// Favourites used to be app-only (4.5); since 6.1b they are in the shared
   /// preset metadata. Moves any saved ones there once.
   void migrateFavourites();
@@ -143,6 +152,8 @@ private:
   ui::TransitionSettingsPanel transitionSettings_;
   ui::OutputSettingsPanel outputSettings_;
   ui::PresetBrowser presetBrowser_; // 6.1b
+  ui::AboutPanel aboutPanel_;       // 6.7
+  engine::UpdateChecker updateChecker_; // 6.7, opt-in
   juce::SharedResourcePointer<juce::TooltipWindow> tooltipWindow_;
   // After every widget it binds: destroyed first.
   ParameterBinding binding_;

@@ -108,6 +108,7 @@ public:
     window_->onStateChanged = [this] { saveState(); };
     component->restoreSecondaryWindows();
     component->grabKeyboardFocus();
+    component->checkForUpdatesIfDue(); // 6.7: only if the user turned checks on
 
 #if JUCE_DEBUG
     // Checks the crash handler end to end: crashes once the window is up.

@@ -1,0 +1,20 @@
+name: Idea or request
+description: Something MilkDAWp could do, or do better.
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: What you're trying to do helps as much as how you'd like it to work.
+    validations:
+      required: true
+  - type: dropdown
+    id: shell
+    attributes:
+      label: For
+      multiple: true
+      options:
+        - The plugin
+        - The standalone app
+        - Both

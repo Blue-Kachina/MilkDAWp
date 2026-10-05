@@ -1,5 +1,7 @@
 add_library(milkdawp_engine STATIC
   include/milkdawp/engine/BundledContent.h
+  include/milkdawp/engine/UpdateCheck.h
+  src/UpdateCheck.cpp
   src/BundledContent.cpp
   include/milkdawp/engine/EngineInfo.h
   src/EngineInfo.cpp

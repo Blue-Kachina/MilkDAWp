@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- packaging/windows/signpath-artifact-configuration.xml (6.10): what SignPath
+     signs in the artifact the release workflow submits. GitHub delivers a
+     workflow artifact as a zip, so the installer sits inside one. Paste this
+     into the SignPath project's artifact configuration (docs/signing.md). -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="MilkDAWp-*-windows-x64-setup.exe" max-matches="1">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

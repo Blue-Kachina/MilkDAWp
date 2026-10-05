@@ -1,0 +1,20 @@
+name: Remove a preset I wrote
+description: For preset authors who don't want their work bundled with MilkDAWp.
+labels: ["preset-removal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        MilkDAWp ships the "Cream of the Crop" pack unchanged, and removes any preset its author asks it to (see the licence FAQ). We also pass the request on to the projectM project, which maintains the pack.
+  - type: textarea
+    id: presets
+    attributes:
+      label: Which presets?
+      description: File names, or the folder and author name as they appear in MilkDAWp's browser.
+    validations:
+      required: true
+  - type: textarea
+    id: author
+    attributes:
+      label: How you're connected to them
+      description: E.g. the name you published under. We take requests at face value.

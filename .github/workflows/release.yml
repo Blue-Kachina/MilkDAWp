@@ -4,7 +4,7 @@ name: Release
 # where it's free (D11) -> package -> GitHub Release with generated notes,
 # SHA-256 checksums and build provenance attestations.
 #
-#   git tag v2.0.0-beta.1 && git push origin v2.0.0-beta.1
+#   git tag v1.0.0-beta.1 && git push origin v1.0.0-beta.1
 #
 # A tag with a suffix ("-beta.1", "-rc.1") publishes a pre-release. The tag's
 # numbers must equal project(VERSION) in CMakeLists.txt, so bump that first.
@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version label for a dry run, e.g. 2.0.0-beta.1 (blank: <project version>-dev.<run number>). Nothing is published."
+        description: "Version label for a dry run, e.g. 1.0.0-beta.1 (blank: <project version>-dev.<run number>). Nothing is published."
         required: false
         type: string
 
@@ -61,7 +61,7 @@ jobs:
             label="${GITHUB_REF_NAME#v}"
             publish=true
           else
-            label="${INPUT_VERSION#v}"   # accept "v2.0.0-beta.1" like a tag
+            label="${INPUT_VERSION#v}"   # accept "v1.0.0-beta.1" like a tag
             label="${label:-$project-dev.$GITHUB_RUN_NUMBER}"
             publish=false
           fi
@@ -200,6 +200,45 @@ jobs:
         env:
           MILKDAWP_VCPKG_TRIPLET_DIR: build-${{ matrix.preset }}/vcpkg_installed/${{ matrix.triplet }}
         run: bash scripts/release/package.sh ${{ matrix.platform }} build-${{ matrix.preset }} "${{ needs.version.outputs.label }}" dist
+
+      # 6.10: Authenticode-sign the installer through the SignPath Foundation
+      # (docs/signing.md). Skipped until the repository variable
+      # SIGNPATH_ORGANIZATION_ID exists, i.e. until SignPath has accepted the
+      # project; until then releases ship unsigned with checksums and
+      # attestations (D11). SignPath signs what it gets as a workflow
+      # artifact, per packaging/windows/signpath-artifact-configuration.xml.
+      - name: Upload the unsigned installer for signing (Windows)
+        id: unsigned-installer
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: dist/*-setup.exe
+          if-no-files-found: error
+
+      - name: Sign the installer with SignPath (Windows)
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: dist-signed
+
+      - name: Use the signed installer (Windows)
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        shell: pwsh
+        run: |
+          $signed = Get-ChildItem dist-signed -Recurse -Filter *-setup.exe | Select-Object -First 1
+          if (-not $signed) { throw "SignPath returned no installer" }
+          $status = (Get-AuthenticodeSignature $signed.FullName).Status
+          if ($status -ne "Valid") { throw "The signed installer's signature is $status" }
+          Copy-Item $signed.FullName (Join-Path dist $signed.Name) -Force
+          "Signed: $($signed.Name)" >> $env:GITHUB_STEP_SUMMARY
 
       # Install what was just packaged on this throwaway runner, check it,
       # validate the installed plugin, start the app, uninstall. Never run

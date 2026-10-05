@@ -33,6 +33,8 @@ add_library(milkdawp_ui STATIC
   src/KeyboardNavigation.cpp
   include/milkdawp/ui/DiagnosticsPanel.h
   src/DiagnosticsPanel.cpp
+  include/milkdawp/ui/AboutPanel.h
+  src/AboutPanel.cpp
 )
 
 target_include_directories(milkdawp_ui PUBLIC

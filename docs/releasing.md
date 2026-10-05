@@ -13,8 +13,8 @@ and `packaging/`.
 4. Tag and push:
 
    ```sh
-   git tag v2.0.0-beta.1
-   git push origin v2.0.0-beta.1
+   git tag v1.0.0-beta.1
+   git push origin v1.0.0-beta.1
    ```
 
 The tag's numbers must equal `project(VERSION)`, or the workflow stops in its
@@ -87,7 +87,7 @@ Locally:
   `cmake --build --preset release-win`:
 
   ```sh
-  scripts/release/package.sh windows build-release-win 2.0.0-beta.1 dist
+  scripts/release/package.sh windows build-release-win 1.0.0-beta.1 dist
   ```
 
   Don't run the resulting installer on a machine with v1 you want to keep.
@@ -99,8 +99,8 @@ Locally:
     eval "$(bash scripts/release/linux-setup.sh | sed "s/^/export /")" &&
     cmake --preset release-linux -B /tmp/rel -DVCPKG_INSTALLED_DIR=/tmp/rel/vcpkg_installed &&
     cmake --build /tmp/rel --target milkdawp_plugin_VST3 milkdawp_app &&
-    bash scripts/release/package.sh linux /tmp/rel 2.0.0-beta.1 /src/dist &&
-    bash scripts/release/smoke-test-linux.sh /src/dist 2.0.0-beta.1'
+    bash scripts/release/package.sh linux /tmp/rel 1.0.0-beta.1 /src/dist &&
+    bash scripts/release/smoke-test-linux.sh /src/dist 1.0.0-beta.1'
   ```
 
 - **macOS:** only on GitHub (no Mac here). The x86_64 projectM comes from
@@ -116,7 +116,7 @@ then `gh auth login`). The checksum check needs nothing extra.
 
 ```sh
 sha256sum -c SHA256SUMS.txt --ignore-missing
-gh attestation verify MilkDAWp-2.0.0-beta.1-windows-x64-setup.exe --repo Blue-Kachina/MilkDAWp2
+gh attestation verify MilkDAWp-1.0.0-beta.1-windows-x64-setup.exe --repo Blue-Kachina/MilkDAWp2
 ```
 
 ## The app icon

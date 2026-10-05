@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: User guide
+    url: https://github.com/Blue-Kachina/MilkDAWp2/blob/HEAD/docs/user-guide/README.md
+    about: Installing, the controls, presets, transitions, OBS, troubleshooting and licences.
+  - name: Troubleshooting
+    url: https://github.com/Blue-Kachina/MilkDAWp2/blob/HEAD/docs/user-guide/troubleshooting.md
+    about: Black picture, plugin not found, choppy playback, no sound.

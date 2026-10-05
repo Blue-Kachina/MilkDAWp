@@ -10,7 +10,7 @@
   VST3 with projectM required, start the installed app, silent uninstall,
   check that nothing is left. Exits non-zero on the first failure.
 .EXAMPLE
-  pwsh scripts/release/smoke-test-windows.ps1 -Dist dist -Version 2.0.0-beta.1
+  pwsh scripts/release/smoke-test-windows.ps1 -Dist dist -Version 1.0.0-beta.1
 #>
 param(
   [Parameter(Mandatory = $true)][string]$Dist,

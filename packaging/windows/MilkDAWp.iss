@@ -2,9 +2,9 @@
 ;
 ; Built by scripts/release/package.sh from the staged release, never by hand:
 ;
-;   ISCC /DVersion=2.0.0-beta.1 /DNumericVersion=2.0.0 /DStage=<staged release>
+;   ISCC /DVersion=1.0.0-beta.1 /DNumericVersion=1.0.0 /DStage=<staged release>
 ;        /DContent=<build>/content /DRedist=<vc_redist.x64.exe> /DVCMinor=44
-;        /DOutputDir=<dist> /DOutputBase=MilkDAWp-2.0.0-beta.1-windows-x64-setup MilkDAWp.iss
+;        /DOutputDir=<dist> /DOutputBase=MilkDAWp-1.0.0-beta.1-windows-x64-setup MilkDAWp.iss
 ;
 ; Installs, for all users (needs admin: Common Files and ProgramData are shared):
 ;   the VST3      -> C:\Program Files\Common Files\VST3\MilkDAWp.vst3
@@ -21,7 +21,7 @@
 ; signs this installer and the binaries in it.
 
 #ifndef Version
-  #error Pass /DVersion=<label>, e.g. 2.0.0-beta.1
+  #error Pass /DVersion=<label>, e.g. 1.0.0-beta.1
 #endif
 #ifndef NumericVersion
   #error Pass /DNumericVersion=<major.minor.patch>

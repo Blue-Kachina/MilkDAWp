@@ -9,7 +9,7 @@
 
 TEST_CASE("version() matches the project version", "[core][version]") {
   const auto v = milkdawp::core::version();
-  CHECK(v.major == 2);
+  CHECK(v.major == 1);
   CHECK(v.minor >= 0);
   CHECK(v.patch >= 0);
 }

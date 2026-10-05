@@ -159,3 +159,43 @@ TEST_CASE("MilkDAWpAudioProcessor survives a garbage state blob", "[plugin][Milk
   CHECK(processor.editorWidth() == 480);
   CHECK_FALSE(processor.windowLayout().outputWindowOpen);
 }
+
+// 6.9 step 2. v1 migration was dropped (§4.8, 2026-09-26): a v1 session must
+// open with v2's defaults, not crash and not take on stray values. The blob is
+// what v1 0.7.x's getStateInformation wrote: its APVTS tree ("PARAMS") as XML
+// via copyXmlToBinary, with v1's own parameter ids and non-default values.
+TEST_CASE("MilkDAWpAudioProcessor opens a v1 session with v2 defaults", "[plugin][MilkDAWpAudioProcessor]") {
+  juce::ValueTree v1("PARAMS");
+  v1.setProperty("presetPath", "C:/Presets/favorite.milk", nullptr);
+  v1.setProperty("playlistFolderPath", "C:/Presets", nullptr);
+  v1.setProperty("editorWidth", 1024, nullptr);
+  v1.setProperty("editorHeight", 700, nullptr);
+  for (const auto& spec : milkdawp::core::allParameters()) {
+    if (spec.v1Alias.empty()) {
+      continue;
+    }
+    juce::ValueTree param("PARAM");
+    param.setProperty("id", juce::String(spec.v1Alias), nullptr);
+    param.setProperty("value", spec.maxValue, nullptr); // the top of the range: not the default for floats
+    v1.appendChild(param, nullptr);
+  }
+  juce::MemoryBlock blob;
+  const auto xml = v1.createXml();
+  REQUIRE(xml != nullptr);
+  juce::AudioProcessor::copyXmlToBinary(*xml, blob);
+
+  MilkDAWpAudioProcessor processor;
+  REQUIRE_NOTHROW(processor.setStateInformation(blob.getData(), static_cast<int>(blob.getSize())));
+  for (const auto& spec : milkdawp::core::allParameters()) {
+    INFO("parameter id: " << spec.id);
+    CHECK(processor.apvts.getRawParameterValue(juce::String(spec.id))->load() ==
+          Catch::Approx(spec.defaultValue).margin(0.001));
+  }
+  CHECK(processor.editorWidth() == 480);
+
+  // Saving afterwards writes a normal v2 state that loads back.
+  juce::MemoryBlock saved;
+  processor.getStateInformation(saved);
+  MilkDAWpAudioProcessor reloaded;
+  REQUIRE_NOTHROW(reloaded.setStateInformation(saved.getData(), static_cast<int>(saved.getSize())));
+}

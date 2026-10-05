@@ -46,7 +46,7 @@ endif()
 # MilkDAWp 2 -- ground-up rebuild of MilkDAWp (see development_roadmap.md).
 # This is Phase 0.1: top-level project setup, dependency plumbing, and build
 # presets. milkdawp_core/engine/ui/plugin/app do not exist yet (Phase 0.2).
-project(MilkDAWp VERSION 2.0.0 LANGUAGES C CXX)
+project(MilkDAWp VERSION 1.0.0 LANGUAGES C CXX)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
   message(FATAL_ERROR
@@ -73,10 +73,22 @@ option(MILKDAWP_DEV_ALT_IDENTITY
 
 # The version people see (About, diagnostics, log bundles). project() only
 # takes numbers, so a pre-release's suffix comes from here: the release
-# workflow (6.5) passes the tag minus its "v", e.g. "2.0.0-beta.1". Hosts and
+# workflow (6.5) passes the tag minus its "v", e.g. "1.0.0-beta.1". Hosts and
 # installers still get the plain PROJECT_VERSION.
-set(MILKDAWP_VERSION_LABEL "${PROJECT_VERSION}" CACHE STRING
-  "Displayed version: PROJECT_VERSION plus an optional pre-release suffix (e.g. 2.0.0-beta.1)")
+#
+# Empty (the default) means PROJECT_VERSION. The default is not stored in the
+# cache, so bumping project(VERSION) doesn't strand existing build folders;
+# a plain x.y.z that an older configure did store is reset here instead.
+set(_mdw_label_doc "Displayed version: empty for PROJECT_VERSION, or PROJECT_VERSION plus a pre-release suffix (e.g. 1.0.0-beta.1)")
+set(MILKDAWP_VERSION_LABEL "" CACHE STRING "${_mdw_label_doc}")
+if(MILKDAWP_VERSION_LABEL MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$" AND NOT MILKDAWP_VERSION_LABEL STREQUAL PROJECT_VERSION)
+  message(STATUS "MilkDAWp: MILKDAWP_VERSION_LABEL ${MILKDAWP_VERSION_LABEL} is an old default; now ${PROJECT_VERSION}")
+  set(MILKDAWP_VERSION_LABEL "" CACHE STRING "${_mdw_label_doc}" FORCE)
+endif()
+unset(_mdw_label_doc)
+if(MILKDAWP_VERSION_LABEL STREQUAL "")
+  set(MILKDAWP_VERSION_LABEL "${PROJECT_VERSION}") # a normal variable, read by core/ and app/
+endif()
 if(NOT MILKDAWP_VERSION_LABEL MATCHES "^${PROJECT_VERSION_MAJOR}\\.${PROJECT_VERSION_MINOR}\\.${PROJECT_VERSION_PATCH}(-[0-9A-Za-z.-]+)?$")
   message(FATAL_ERROR
     "MILKDAWP_VERSION_LABEL '${MILKDAWP_VERSION_LABEL}' must be PROJECT_VERSION (${PROJECT_VERSION}) "

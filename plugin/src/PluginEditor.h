@@ -11,6 +11,7 @@
 
 #include "PluginProcessor.h"
 #include "milkdawp/engine/OutputSurface.h"
+#include "milkdawp/ui/AboutPanel.h"
 #include "milkdawp/ui/ControlDrawer.h"
 #include "milkdawp/ui/DetachedControlsWindow.h"
 #include "milkdawp/ui/DiagnosticsPanel.h"
@@ -63,6 +64,9 @@ private:
   void layoutOutputSettings();
   void setDiagnosticsVisible(bool visible);
   void layoutDiagnostics();
+  /// 6.7: Settings > About. Read-only update status (the app checks).
+  void setAboutVisible(bool visible);
+  void layoutAbout();
   [[nodiscard]] core::DiagnosticsInfo diagnosticsInfo();
   /// Hands the panel the Layers state (other instances, this one's target and name).
   void refreshOutputSettingsInstances();
@@ -84,6 +88,7 @@ private:
   milkdawp::ui::TransitionSettingsPanel transitionSettings;
   milkdawp::ui::OutputSettingsPanel outputSettings;
   milkdawp::ui::PresetBrowser presetBrowser;
+  milkdawp::ui::AboutPanel aboutPanel;
   // Shared across every open editor: one per editor would show each tooltip
   // once per plugin instance.
   juce::SharedResourcePointer<juce::TooltipWindow> tooltipWindow_;
