@@ -94,7 +94,7 @@ target_sources(milkdawp_app PRIVATE src/Main.cpp)
 target_compile_features(milkdawp_app PRIVATE cxx_std_20)
 target_compile_definitions(milkdawp_app PRIVATE
   JUCE_APPLICATION_NAME_STRING="${_mdw_app_name}"
-  JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}"
+  JUCE_APPLICATION_VERSION_STRING="${MILKDAWP_VERSION_LABEL}"
   MILKDAWP_APP_DATA_FOLDER="${_mdw_app_name}"
 )
 

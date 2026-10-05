@@ -71,6 +71,18 @@ option(MILKDAWP_WITH_PROJECTM "Link libprojectM into the engine (D7)" ON)
 option(MILKDAWP_DEV_ALT_IDENTITY
   "Dev-only: build under a distinct plugin code/name so it can coexist with a real v1/v2 install in the same host (ADR-0007). Never set for a release build." OFF)
 
+# The version people see (About, diagnostics, log bundles). project() only
+# takes numbers, so a pre-release's suffix comes from here: the release
+# workflow (6.5) passes the tag minus its "v", e.g. "2.0.0-beta.1". Hosts and
+# installers still get the plain PROJECT_VERSION.
+set(MILKDAWP_VERSION_LABEL "${PROJECT_VERSION}" CACHE STRING
+  "Displayed version: PROJECT_VERSION plus an optional pre-release suffix (e.g. 2.0.0-beta.1)")
+if(NOT MILKDAWP_VERSION_LABEL MATCHES "^${PROJECT_VERSION_MAJOR}\\.${PROJECT_VERSION_MINOR}\\.${PROJECT_VERSION_PATCH}(-[0-9A-Za-z.-]+)?$")
+  message(FATAL_ERROR
+    "MILKDAWP_VERSION_LABEL '${MILKDAWP_VERSION_LABEL}' must be PROJECT_VERSION (${PROJECT_VERSION}) "
+    "optionally followed by -<suffix>. Bump project(VERSION) in CMakeLists.txt to release a new version.")
+endif()
+
 # ---------------------------------------------------------------------------
 # Platform defaults
 # ---------------------------------------------------------------------------

@@ -2433,11 +2433,55 @@ is exercised by the real pipeline → 6.1 + 6.1b → 6.2–6.4 → first `-beta`
       (`codesign -s -`), not notarized (D11: no paid Apple Developer account). The docs and
       the release notes give the first-run steps for Gatekeeper.
 - [ ] 6.4 (M) Linux: AppImage for the app, tarball for the VST3, `.deb` as stretch.
-- [ ] 6.5 (S) Release workflow: tag → build matrix (Release config, real identity) → sign
+- [~] 6.5 (S) Release workflow: tag → build matrix (Release config, real identity) → sign
       where available → package → GitHub Release with generated notes, SHA-256 checksums and
       artifact attestations (`actions/attest-build-provenance`). `-beta` tags publish as
       pre-releases. Starts unsigned and before the installers exist (zipped bundles), so
       the pipeline is proven early.
+      Update (2026-10-04): written, not yet run on GitHub. How to cut a release:
+      `docs/releasing.md`.
+      - `.github/workflows/release.yml`: a `v*` tag runs `version` (the tag's numbers
+        must equal `project(VERSION)`, so a wrong tag fails in seconds), then
+        `build-native` (Windows, macOS) and `build-linux` (devcontainer image) with the
+        `release-*` presets and `MILKDAWP_DEV_ALT_IDENTITY=OFF` passed explicitly, then
+        `publish` (`SHA256SUMS.txt`, attestations, `gh release create --generate-notes`,
+        `--prerelease` for a suffixed tag). Running it by hand (workflow_dispatch) builds
+        and packages without publishing, and keeps the archives as a workflow artifact.
+        No compiler cache: release objects build from clean. The vcpkg cache is still
+        restored.
+      - **Version label:** `MILKDAWP_VERSION_LABEL` (new cache variable, defaults to
+        `PROJECT_VERSION`, checked to be `PROJECT_VERSION[-suffix]`). `core::versionString()`
+        and the app's version now come from CMake instead of a hard-coded "2.0.0", so a
+        beta shows "2.0.0-beta.1" in the app, the plugin diagnostics and log bundles.
+        Hosts and the VST3 moduleinfo still see the plain number.
+      - **Release gate:** pluginval at strictness 5 (§8) on the Release VST3 that ships,
+        with `MILKDAWP_REQUIRE_PROJECTM`, on Windows and Linux. CI already ran the tests on
+        the commit; the release presets build none.
+      - `scripts/release/package.sh` stages the VST3 and the app (projectM included,
+        `.pdb/.ilk/.exp/.lib` dropped), `LICENSE`, `LICENSES/` plus projectM's vcpkg
+        copyright file, `THIRD_PARTY_NOTICES.md` and a per-platform `README.txt` (install
+        paths, the VC++ redistributable link, SmartScreen and Gatekeeper first-run steps).
+        Windows also gets `-symbols.zip` (the app's and the VST3's `.pdb`, for the
+        crash reporter's minidumps): `release-win` now compiles `/Zi` and links `/DEBUG`
+        with `/OPT:REF /OPT:ICF`.
+      - **macOS universal:** vcpkg builds projectM for arm64 only (the `arm64-osx-dynamic`
+        triplet) while `release-mac` builds universal. The link works because projectM is
+        loaded at runtime, but Intel Macs would run inert. The job installs the manifest for
+        `x64-osx-dynamic` as well, and `package.sh` merges the two dylibs with `lipo` in
+        each bundle, checks both slices are there, then re-signs ad-hoc (`codesign
+        --force --deep -s -`) (D11).
+      - `THIRD_PARTY_NOTICES.md` (now shipped) no longer says zlib/libpng come from vcpkg:
+        JUCE's bundled copies are used since §4.11's 2026-09-26 fix.
+      - Verified locally: `release-win` built with the real identity; packaged; the
+        extracted zip passed pluginval at strictness 5 with projectM loading from inside
+        the bundle; both binaries carry the label. Core tests pass (153 cases). Linux the
+        same way in the devcontainer image: `release-linux` built and packaged, and the
+        extracted tarball passed pluginval at strictness 5.
+      - **Not verified:** the macOS job (no Mac here: the x64 vcpkg install, `lipo` and
+        `codesign` steps first run on GitHub), the `publish` job, and attestations. Next
+        step: a workflow_dispatch dry run, then the first `-beta` tag.
+      - **Known gap:** Linux builds in the Ubuntu 24.04 image (glibc 2.39), above D9's
+        22.04 / glibc 2.35 floor. 6.4's AppImage needs an older build base.
 - [ ] 6.6 (M) Documentation: user guide (plugin + app), capture how-tos per platform, OBS
       workflow, MIDI/automation guide, troubleshooting, FAQ on licences.
 - [ ] 6.7 (S) In-app "About" with versions and licences; update check (opt-in, GitHub

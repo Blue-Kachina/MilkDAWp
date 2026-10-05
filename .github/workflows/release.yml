@@ -1,0 +1,298 @@
+name: Release
+
+# Phase 6.5: tag -> Release build per platform (real identity, D1) -> sign
+# where it's free (D11) -> package -> GitHub Release with generated notes,
+# SHA-256 checksums and build provenance attestations.
+#
+#   git tag v2.0.0-beta.1 && git push origin v2.0.0-beta.1
+#
+# A tag with a suffix ("-beta.1", "-rc.1") publishes a pre-release. The tag's
+# numbers must equal project(VERSION) in CMakeLists.txt, so bump that first.
+#
+# Run it by hand (workflow_dispatch) to build and package without
+# publishing: the archives are left as workflow artifacts. That is how to
+# try a change to this file before tagging.
+#
+# Installers (6.2-6.4) replace the zipped bundles later; Windows signing via
+# SignPath (6.10) slots in before packaging once it's accepted.
+
+on:
+  push:
+    tags: ["v[0-9]*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for a dry run (default: <project version>-dev.<run number>). Nothing is published."
+        required: false
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Same pin as ci.yml (D4); keep the two in lockstep.
+  VCPKG_COMMIT: 319504a5326aa870edde46438c5455fa76305a56
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.v.outputs.label }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: v
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          project="$(sed -n 's/^project(MilkDAWp VERSION \([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' CMakeLists.txt)"
+          test -n "$project" || { echo "::error::No project(MilkDAWp VERSION x.y.z) in CMakeLists.txt"; exit 1; }
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            label="${GITHUB_REF_NAME#v}"
+            publish=true
+          else
+            label="${INPUT_VERSION:-$project-dev.$GITHUB_RUN_NUMBER}"
+            publish=false
+          fi
+          # Same rule as MILKDAWP_VERSION_LABEL's check in CMakeLists.txt,
+          # repeated here so a bad tag fails in seconds, not after a build.
+          if [[ ! "$label" =~ ^${project//./\\.}(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version '$label' doesn't match project(VERSION) $project. Bump CMakeLists.txt, or fix the tag."
+            exit 1
+          fi
+          prerelease=false
+          [[ "$label" == *-* ]] && prerelease=true
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "### MilkDAWp $label (pre-release: $prerelease, publish: $publish)" >> "$GITHUB_STEP_SUMMARY"
+
+  # Windows and macOS on native runners, set up like ci.yml's native job but
+  # without a compiler cache: release objects are always built from clean.
+  # The vcpkg binary cache CI saved is read, never written.
+  build-native:
+    needs: version
+    env:
+      VCPKG_BINARY_CACHE_DIR: ${{ github.workspace }}/vcpkg-bincache
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/vcpkg-bincache,readwrite"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            preset: release-win
+            triplet: x64-windows-dynamic
+          - os: macos-latest
+            platform: macos
+            preset: release-mac
+            triplet: arm64-osx-dynamic
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Install Ninja (Windows)
+        if: runner.os == 'Windows'
+        uses: seanmiddleditch/gha-setup-ninja@master
+
+      - name: Set up MSVC dev environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.VCPKG_BINARY_CACHE_DIR }}
+          key: vcpkg-bin-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'triplets/**', 'vcpkg-overlays/**') }}
+          restore-keys: |
+            vcpkg-bin-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-
+
+      - name: Create vcpkg binary cache directory
+        shell: bash
+        run: mkdir -p "$VCPKG_BINARY_CACHE_DIR"
+
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT }}
+
+      # MILKDAWP_DEV_ALT_IDENTITY=OFF is the default; it's passed anyway so
+      # a stray cache entry can never ship the dev identity (ADR-0007).
+      # Default shell (pwsh on Windows), as in ci.yml: Git Bash puts its own
+      # link.exe ahead of MSVC's on PATH.
+      - name: Configure
+        run: >-
+          cmake --preset ${{ matrix.preset }}
+          -DMILKDAWP_DEV_ALT_IDENTITY=OFF
+          "-DMILKDAWP_VERSION_LABEL=${{ needs.version.outputs.label }}"
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      # Release presets build no tests (CI ran them on this commit); this
+      # checks that the exact binary being shipped loads in a host and finds
+      # projectM. Strictness 5 is the release gate (§8).
+      - name: pluginval (VST3, Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/pluginval.ps1 -Plugin build-release-win/plugin/milkdawp_plugin_artefacts/Release/VST3/MilkDAWp.vst3 -Strictness 5 -SkipGui
+        env:
+          MILKDAWP_REQUIRE_PROJECTM: "1"
+
+      # vcpkg built projectM for arm64 only (the arm64-osx-dynamic triplet),
+      # while the release preset builds universal binaries. projectM is
+      # loaded at runtime, so the link succeeds either way, but Intel Macs
+      # need an x86_64 slice: build it here and package.sh lipos it in.
+      - name: Build x86_64 projectM (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        run: |
+          "$VCPKG_ROOT/vcpkg" install \
+            --triplet x64-osx-dynamic \
+            --overlay-triplets=triplets \
+            --x-install-root=build-projectm-x64
+          dylib="$(find build-projectm-x64/x64-osx-dynamic/lib -name 'libprojectM-4.*dylib' -type f | head -n 1)"
+          test -n "$dylib" || { echo "::error::No x86_64 libprojectM-4 dylib"; exit 1; }
+          lipo -archs "$dylib"
+          echo "MILKDAWP_PROJECTM_X64_DYLIB=$PWD/$dylib" >> "$GITHUB_ENV"
+
+      - name: Package
+        shell: bash
+        env:
+          MILKDAWP_VCPKG_TRIPLET_DIR: build-${{ matrix.preset }}/vcpkg_installed/${{ matrix.triplet }}
+        run: bash scripts/release/package.sh ${{ matrix.platform }} build-${{ matrix.preset }} "${{ needs.version.outputs.label }}" dist
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+  # Linux inside the devcontainer image, like ci.yml (projectM's vcpkg tree
+  # is pre-built there).
+  build-linux:
+    needs: version
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/blue-kachina/milkdawp2-devcontainer:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >-
+          cmake --preset release-linux
+          -DMILKDAWP_DEV_ALT_IDENTITY=OFF
+          "-DMILKDAWP_VERSION_LABEL=${{ needs.version.outputs.label }}"
+
+      - name: Build
+        run: cmake --build --preset release-linux
+
+      - name: pluginval (VST3)
+        env:
+          MILKDAWP_REQUIRE_PROJECTM: "1"
+        run: |
+          mkdir -p build-tools/pluginval-logs
+          xvfb-run -a pluginval --strictness-level 5 --timeout-ms 900000 --skip-gui-tests \
+            --output-dir build-tools/pluginval-logs \
+            --validate build-release-linux/plugin/milkdawp_plugin_artefacts/Release/VST3/MilkDAWp.vst3
+
+      - name: Package
+        shell: bash
+        env:
+          MILKDAWP_VCPKG_TRIPLET_DIR: build-release-linux/vcpkg_installed/x64-linux-dynamic
+        run: bash scripts/release/package.sh linux build-release-linux "${{ needs.version.outputs.label }}" dist
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [version, build-native, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create the release
+      id-token: write      # sign the attestations
+      attestations: write
+    steps:
+      - name: Download
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum MilkDAWp-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          cat SHA256SUMS.txt >> "$GITHUB_STEP_SUMMARY"
+
+      # Anyone can check a download with:
+      #   gh attestation verify <file> --repo Blue-Kachina/MilkDAWp2
+      - name: Attest build provenance
+        if: needs.version.outputs.publish == 'true'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/MilkDAWp-*
+
+      - name: Keep the dry run's archives
+        if: needs.version.outputs.publish != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dry-run-${{ needs.version.outputs.label }}
+          path: dist/*
+
+      - name: Publish GitHub Release
+        if: needs.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          LABEL: ${{ needs.version.outputs.label }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          cat > notes-header.md <<EOF
+          Zipped builds for Windows (x64), macOS (universal) and Linux (x64). Each archive's
+          README.txt says where to put the plugin and the app.
+
+          - **Windows:** not code-signed yet, so SmartScreen may warn. Needs the
+            [Visual C++ 2015-2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+            The \`-symbols.zip\` is only for reading crash reports.
+          - **macOS:** ad-hoc signed, not notarized. macOS blocks it on first launch; README.txt
+            gives the steps to allow it.
+
+          **Verify a download:** compare it with \`SHA256SUMS.txt\`, or run
+          \`gh attestation verify <file> --repo ${GH_REPO}\`.
+          EOF
+          flags=()
+          [[ "$PRERELEASE" == true ]] && flags+=(--prerelease)
+          gh release create "$TAG" dist/* \
+            --verify-tag \
+            --title "MilkDAWp $LABEL" \
+            --notes-file notes-header.md \
+            --generate-notes \
+            "${flags[@]}"

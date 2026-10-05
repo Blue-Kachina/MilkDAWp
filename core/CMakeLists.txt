@@ -51,6 +51,10 @@ target_compile_features(milkdawp_core PUBLIC cxx_std_20)
 target_link_libraries(milkdawp_core PRIVATE milkdawp_warnings)
 target_link_libraries(milkdawp_core PUBLIC milkdawp_sanitizers)
 
+# Only Version.cpp sees these, so changing the label recompiles one file.
+set_source_files_properties(src/Version.cpp PROPERTIES COMPILE_DEFINITIONS
+  "MILKDAWP_VERSION_MAJOR=${PROJECT_VERSION_MAJOR};MILKDAWP_VERSION_MINOR=${PROJECT_VERSION_MINOR};MILKDAWP_VERSION_PATCH=${PROJECT_VERSION_PATCH};MILKDAWP_VERSION_LABEL=\"${MILKDAWP_VERSION_LABEL}\"")
+
 if(BUILD_TESTING)
   add_subdirectory(tests)
 endif()
