@@ -45,6 +45,7 @@ TEST_CASE("isVideoPath goes by extension", "[engine][video]") {
   CHECK(isVideoPath("C:/clips/dance.mp4"));
   CHECK(isVideoPath("C:/clips/DANCE.MOV"));
   CHECK(isVideoPath("/home/me/clip.avi"));
+  CHECK(isVideoPath("/home/me/clip.ogv"));
   CHECK_FALSE(isVideoPath("C:/clips/logo.png"));
   CHECK_FALSE(isVideoPath("camera:USB"));
 }

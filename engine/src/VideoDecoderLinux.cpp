@@ -290,14 +290,17 @@ bool VideoDecoder::supported() noexcept { return gst().ok; }
 
 juce::File VideoDecoder::writeTestClip(const juce::File& directory) {
   const auto& g = gst();
-  const auto file = directory.getNonexistentChildFile("milkdawp-test-clip", ".avi");
+  const auto file = directory.getNonexistentChildFile("milkdawp-test-clip", ".ogv");
   if (!g.ok) {
     return file;
   }
+  // Theora, not MJPEG: JUCE carries its own libjpeg, and in an executable that
+  // exports every symbol (the RTSan build does) GStreamer's JPEG plugin binds
+  // to JUCE's copy instead of the system's and aborts on the version check.
   std::string error;
   GstElement* pipeline =
       parse(g,
-            "concat name=c ! videoconvert ! jpegenc ! avimux ! filesink name=out "
+            "concat name=c ! videoconvert ! theoraenc ! oggmux ! filesink name=out "
             "videotestsrc pattern=red num-buffers=10 ! video/x-raw,format=I420,width=160,height=96,framerate=10/1 ! c. "
             "videotestsrc pattern=blue num-buffers=10 ! video/x-raw,format=I420,width=160,height=96,framerate=10/1 ! c.",
             error);

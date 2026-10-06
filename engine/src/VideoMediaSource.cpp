@@ -24,7 +24,7 @@ double videoPosition(const MediaTimeline& timeline, double freeRunSeconds, doubl
 bool isVideoPath(const std::string& path) {
   const auto extension = juce::File(juce::String::fromUTF8(path.c_str())).getFileExtension().toLowerCase();
   return extension == ".mp4" || extension == ".m4v" || extension == ".mov" || extension == ".wmv" ||
-         extension == ".avi" || extension == ".mkv" || extension == ".webm";
+         extension == ".avi" || extension == ".mkv" || extension == ".webm" || extension == ".ogv";
 }
 
 // What the decoding thread and the rest share. Held by shared_ptr so the

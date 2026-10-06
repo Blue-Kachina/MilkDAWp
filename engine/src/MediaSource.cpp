@@ -164,7 +164,7 @@ std::shared_ptr<MediaSource> openMediaSource(const std::string& path, std::strin
 }
 
 juce::String mediaFileWildcard() {
-  return "*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.mp4;*.m4v;*.mov;*.wmv;*.avi;*.mkv;*.webm";
+  return "*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.mp4;*.m4v;*.mov;*.wmv;*.avi;*.mkv;*.webm;*.ogv";
 }
 
 juce::String mediaSourceDisplayName(const std::string& path) {

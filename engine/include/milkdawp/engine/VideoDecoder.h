@@ -33,7 +33,7 @@ public:
 
   /// For tests: writes a 2 s, 10 fps, 160 x 96 clip into `directory` (one
   /// second of red, then one of blue) in a format this platform encodes and
-  /// decodes itself (H.264 MP4 on Windows and macOS, MJPEG AVI through
+  /// decodes itself (H.264 MP4 on Windows and macOS, Theora Ogg through
   /// GStreamer on Linux), so no video file lives in the repository. Returns
   /// the file, or a non-existent one where no encoder is available.
   [[nodiscard]] static juce::File writeTestClip(const juce::File& directory);
