@@ -89,8 +89,14 @@ readings agree.
   camera is opened once per process and shared by every instance showing it.
   It is opened and closed on the message thread, and frames are converted on the
   camera's thread (scaled to 1280 px at most), so the render thread only uploads.
-  8.6c adds video files through `VideoDecoder` (Media Foundation on Windows;
-  AVFoundation and GStreamer are 8.6d), decoded on a thread per source. A video
+  8.6c/d add video files through `VideoDecoder`, decoded on a thread per
+  source: Media Foundation on Windows, AVFoundation (`AVAssetReader`, a new
+  reader per seek) on macOS, and on Linux the system's GStreamer, loaded with
+  `dlopen` at run time so it is neither linked nor shipped (the few struct
+  fields read follow GStreamer 1.x's stable ABI). Linux cameras use V4L2
+  directly (YUYV, or MJPEG through JUCE's JPEG reader), since JUCE's
+  `CameraDevice` doesn't cover Linux. Each platform's tests encode their own
+  clip (`VideoDecoder::writeTestClip`), so no video file is committed. A video
   loops. In the plugin its position is the host's sample position over the
   sample rate, also while stopped, so scrubbing moves it and a render is
   repeatable. A jump back, or more than a second ahead, seeks. The app runs it

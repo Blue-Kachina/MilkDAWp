@@ -14,4 +14,6 @@ std::unique_ptr<VideoDecoder> VideoDecoder::open(const juce::File& file, std::st
 
 bool VideoDecoder::supported() noexcept { return false; }
 
+juce::File VideoDecoder::writeTestClip(const juce::File&) { return {}; }
+
 } // namespace milkdawp::engine

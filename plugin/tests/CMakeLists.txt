@@ -3,6 +3,7 @@ include(${CMAKE_SOURCE_DIR}/cmake/FetchCatch2.cmake)
 add_executable(milkdawp_plugin_tests
   PluginProcessorTests.cpp
   LayersTests.cpp
+  JuceEnvironment.cpp
 )
 milkdawp_test_no_crash_dialogs(milkdawp_plugin_tests)
 

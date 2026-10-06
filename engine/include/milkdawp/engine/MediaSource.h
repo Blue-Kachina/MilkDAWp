@@ -140,6 +140,11 @@ private:
 /// row first, scaled down to `maxDimension` on its longer side when larger.
 [[nodiscard]] MediaFrame frameFromImage(const juce::Image& image, int maxDimension);
 
+/// A YUYV (YUY2, 4:2:2) camera frame as RGBA, bottom row first: BT.601
+/// limited range, which is what webcams send. `stride` is bytes per source
+/// row (at least width x 2); rows are top first. 8.6d, V4L2 cameras.
+[[nodiscard]] MediaFrame frameFromYuyv(const std::uint8_t* yuyv, int width, int height, int stride);
+
 /// Where a source sits in a frame: the part of the source to show so that it
 /// fills a `targetWidth` x `targetHeight` frame without stretching (cropping
 /// the overflow, centred). Returned as the scale to apply to texture

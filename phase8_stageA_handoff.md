@@ -8,9 +8,9 @@ has checked the hand tests below.
 
 ## State
 
-8.1, 8.2, 8.2b, 8.3, 8.4 and 8.6a/b/c/e/f are implemented and wired into both shells. 8.6b (camera)
-is built but untested on hardware. 8.6d (macOS AVFoundation, Linux GStreamer and V4L2) remains, and
-can't be built or tested on this Windows box. Everything builds (Debug), and all five test suites
+All of Stage A (8.1, 8.2, 8.2b, 8.3, 8.4, 8.6a-f) is implemented and wired into both shells. Cameras
+were hand-tested on Windows by Matthew. The Linux camera and macOS video are built but not tried on
+real hardware. Everything builds (Debug), and all five test suites
 pass: core 174 cases, engine 120, plugin 24, app 29, ui 82. GPU effects tests run on this machine's real GL context. pluginval passes at strictness 10. Not
 yet done: the hand tests.
 
@@ -76,9 +76,11 @@ used to check the effects on a real preset; screenshots looked right.
 1. **pluginval**: strictness 10 on the Debug VST3 with `MILKDAWP_REQUIRE_PROJECTM` set: **passed**
    (log `build-tools/pluginval-logs/pluginval-20261005-174849.log`). Rerun with
    `pwsh scripts/pluginval.ps1 -Plugin "build-win/plugin/milkdawp_plugin_artefacts/Debug/VST3/MilkDAWp2 Dev.vst3"`.
-2. `milkdawp_plugin_tests` prints an MSVC CRT "Detected memory leaks!" dump with one 16-byte block
-   at exit (exit code 0). It was seen on the first run this session; not confirmed whether it
-   predates Phase 8.
+2. ~~The one-block leak report in `milkdawp_plugin_tests`~~ **Fixed (2026-10-05).** The tests built
+   processors with no JUCE message manager, so every timer, async update and message listener
+   tripped a JUCE assertion, and on-demand singletons were never torn down.
+   `plugin/tests/JuceEnvironment.cpp` (a Catch2 listener) now starts and stops JUCE for the run,
+   as a host does: no leak, and no assertions under cdb.
 3. Hand tests nobody has done yet (no desktop keystrokes or clicks allowed from the agent):
    - open Settings > Visual in the app and the plugin;
    - automate Hue, Speed and Macro 1 in REAPER;
@@ -125,7 +127,20 @@ used to check the effects on a real preset; screenshots looked right.
        fixture.
      - Not yet seen in the real UI with a real video (hand test: Settings > Media source > Choose
        image or video, then scrub REAPER's playhead).
-   - 8.6d: macOS AVFoundation, Linux GStreamer at runtime and V4L2 camera.
+   - 8.6d: macOS AVFoundation, Linux GStreamer at runtime and V4L2 camera. **Done (2026-10-05).**
+     - Linux video: `engine/src/VideoDecoderLinux.cpp`, GStreamer via dlopen, with a
+       `decodebin ! videoconvert ! appsink` pipeline. Tested for real in the CI container
+       (base and good plugins installed).
+     - Linux camera: `engine/src/CameraLinux.cpp`, V4L2 mmap streaming, YUYV
+       (`frameFromYuyv`, tested) or MJPEG. Not tested against real hardware: no camera in
+       Docker.
+     - macOS video: `engine/src/VideoDecoderMac.mm` (AVAssetReader; `enable_language(OBJC
+       OBJCXX)` in the top-level CMakeLists). Verified only by macOS CI.
+     - Cameras are split behind `engine/src/Cameras.h`, with `CameraJuce.cpp` for Windows/macOS
+       and `CameraLinux.cpp`.
+     - `VideoDecoder::writeTestClip` makes each platform's test clip: an MF H.264 MP4 on
+       Windows, an AVAssetWriter H.264 MP4 on macOS, a GStreamer MJPEG AVI on Linux. Video tests
+       stand down under TSan.
    - 8.6e: displacement blend modes. **Done.**
      - `LayerBlend::Displace` (not in the `layerBlend` parameter; `kMediaBlendCount`/`kMediaBlendNames`).
      - `LayerChannel::setMediaBlend`; Settings > Media source > Blend in both shells.

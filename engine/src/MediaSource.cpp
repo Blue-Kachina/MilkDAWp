@@ -4,12 +4,10 @@
 #include "milkdawp/engine/MediaSource.h"
 
 #include <algorithm>
-#include <map>
 
-#include <juce_events/juce_events.h>
 #include <juce_graphics/juce_graphics.h>
-#include <juce_video/juce_video.h>
 
+#include "Cameras.h"
 #include "milkdawp/engine/VideoDecoder.h"
 
 namespace milkdawp::engine {
@@ -72,6 +70,33 @@ MediaFrame frameFromImage(const juce::Image& source, int maxDimension) {
   return frame;
 }
 
+MediaFrame frameFromYuyv(const std::uint8_t* yuyv, int width, int height, int stride) {
+  MediaFrame frame;
+  if (yuyv == nullptr || width <= 0 || height <= 0 || stride < width * 2) {
+    return frame;
+  }
+  frame.width = width;
+  frame.height = height;
+  frame.rgba.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
+  const auto clamp = [](int v) { return static_cast<std::uint8_t>(std::clamp(v, 0, 255)); };
+  for (int y = 0; y < height; ++y) {
+    const auto* in = yuyv + static_cast<std::ptrdiff_t>(y) * stride;
+    auto* out = frame.rgba.data() + static_cast<std::size_t>(height - 1 - y) * static_cast<std::size_t>(width) * 4;
+    for (int x = 0; x < width; x += 2, in += 4) { // two pixels share one U and V
+      const int d = in[1] - 128; // U
+      const int e = in[3] - 128; // V
+      for (int k = 0; k < 2 && x + k < width; ++k) {
+        const int c = in[k * 2] - 16; // Y0, Y1
+        *out++ = clamp((298 * c + 409 * e + 128) >> 8);
+        *out++ = clamp((298 * c - 100 * d - 208 * e + 128) >> 8);
+        *out++ = clamp((298 * c + 516 * d + 128) >> 8);
+        *out++ = 255;
+      }
+    }
+  }
+  return frame;
+}
+
 // ---- images -------------------------------------------------------------------
 
 ImageMediaSource::ImageMediaSource(MediaFrame frame, std::string description)
@@ -93,14 +118,9 @@ std::shared_ptr<ImageMediaSource> ImageMediaSource::load(const juce::File& file,
 
 // ---- cameras ------------------------------------------------------------------
 
-bool camerasSupported() noexcept {
-  // juce_video.h #undefs JUCE_USE_CAMERA where JUCE has no camera (Linux).
-#if defined(JUCE_USE_CAMERA) && JUCE_USE_CAMERA
-  return true;
-#else
-  return false;
-#endif
-}
+bool camerasSupported() noexcept { return cameras::supported(); }
+
+juce::StringArray availableCameras() { return cameras::available(); }
 
 std::string cameraMediaPath(const juce::String& deviceName) {
   return std::string(kCameraPrefix) + deviceName.toStdString();
@@ -112,106 +132,6 @@ juce::String cameraDeviceName(const std::string& path) {
   return isCameraMediaPath(path) ? juce::String::fromUTF8(path.c_str() + kCameraPrefix.size()) : juce::String();
 }
 
-#if defined(JUCE_USE_CAMERA) && JUCE_USE_CAMERA
-
-juce::StringArray availableCameras() { return juce::CameraDevice::getAvailableDevices(); }
-
-namespace {
-
-/// A camera's frames as a media source. JUCE delivers each frame on the
-/// camera's own thread; it is converted there and handed over under a lock,
-/// so the render thread only ever uploads finished frames. The device is
-/// opened, and closed, on the message thread. One per camera in the process
-/// (`sharedCamera`): two instances showing the same camera share it.
-class CameraMediaSource final : public MediaSource,
-                                private juce::CameraDevice::Listener,
-                                public std::enable_shared_from_this<CameraMediaSource> {
-public:
-  static constexpr int kMaxDimension = 1280;
-
-  explicit CameraMediaSource(juce::String deviceName) : deviceName_(std::move(deviceName)) {}
-
-  ~CameraMediaSource() override {
-    if (device_ != nullptr) {
-      device_->removeListener(this); // no frame arrives after this returns
-      // The last reference may go on any thread (the render thread, say);
-      // the device is closed where it was opened.
-      juce::MessageManager::callAsync([device = std::shared_ptr<juce::CameraDevice>(std::move(device_))] {});
-    }
-  }
-
-  /// Opens the device on the message thread (now, if this is it).
-  void start() {
-    auto open = [weak = weak_from_this()] {
-      if (auto self = weak.lock()) {
-        self->openNow();
-      }
-    };
-    if (juce::MessageManager::existsAndIsCurrentThread()) {
-      open();
-    } else {
-      juce::MessageManager::callAsync(std::move(open));
-    }
-  }
-
-  std::shared_ptr<const MediaFrame> latestFrame(std::uint64_t& serial) const override {
-    const std::lock_guard lock(mutex_);
-    serial = serial_;
-    return frame_;
-  }
-
-  std::string description() const override { return "Camera: " + deviceName_.toStdString(); }
-
-private:
-  void openNow() {
-    if (device_ != nullptr) {
-      return;
-    }
-    const int index = juce::CameraDevice::getAvailableDevices().indexOf(deviceName_);
-    if (index < 0) {
-      return; // unplugged since: stays empty
-    }
-    device_.reset(juce::CameraDevice::openDevice(index, 128, 64, 1920, 1080, false));
-    if (device_ != nullptr) {
-      device_->addListener(this);
-    }
-  }
-
-  void imageReceived(const juce::Image& image) override {
-    auto frame = std::make_shared<const MediaFrame>(frameFromImage(image, kMaxDimension));
-    const std::lock_guard lock(mutex_);
-    frame_ = std::move(frame);
-    ++serial_;
-  }
-
-  juce::String deviceName_;
-  std::unique_ptr<juce::CameraDevice> device_; // message thread
-  mutable std::mutex mutex_;
-  std::shared_ptr<const MediaFrame> frame_;
-  std::uint64_t serial_ = 0;
-};
-
-std::shared_ptr<MediaSource> sharedCamera(const juce::String& deviceName) {
-  static std::mutex mutex;
-  static std::map<juce::String, std::weak_ptr<CameraMediaSource>> cameras;
-  const std::lock_guard lock(mutex);
-  if (auto existing = cameras[deviceName].lock()) {
-    return existing;
-  }
-  auto camera = std::make_shared<CameraMediaSource>(deviceName);
-  cameras[deviceName] = camera;
-  camera->start();
-  return camera;
-}
-
-} // namespace
-
-#else
-
-juce::StringArray availableCameras() { return {}; }
-
-#endif
-
 // ---- paths --------------------------------------------------------------------
 
 std::shared_ptr<MediaSource> openMediaSource(const std::string& path, std::string& error) {
@@ -219,17 +139,7 @@ std::shared_ptr<MediaSource> openMediaSource(const std::string& path, std::strin
     return nullptr;
   }
   if (isCameraMediaPath(path)) {
-    const auto name = juce::String::fromUTF8(path.c_str() + kCameraPrefix.size());
-#if defined(JUCE_USE_CAMERA) && JUCE_USE_CAMERA
-    if (!availableCameras().contains(name)) {
-      error = "camera \"" + name.toStdString() + "\" isn't connected";
-      return nullptr;
-    }
-    return sharedCamera(name);
-#else
-    error = "cameras aren't supported on this platform yet (\"" + name.toStdString() + "\")";
-    return nullptr;
-#endif
+    return cameras::open(cameraDeviceName(path), error);
   }
   const juce::File file(juce::String::fromUTF8(path.c_str()));
   if (!file.existsAsFile()) {

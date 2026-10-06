@@ -217,4 +217,77 @@ std::unique_ptr<VideoDecoder> VideoDecoder::open(const juce::File& file, std::st
 
 bool VideoDecoder::supported() noexcept { return true; }
 
+juce::File VideoDecoder::writeTestClip(const juce::File& directory) {
+  constexpr UINT32 kWidth = 160;
+  constexpr UINT32 kHeight = 96;
+  constexpr UINT32 kFps = 10;
+  constexpr LONGLONG kFrameDuration = 10'000'000 / kFps; // 100 ns units
+  const auto file = directory.getNonexistentChildFile("milkdawp-test-clip", ".mp4");
+  const bool comInitialised = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
+  bool ok = startMediaFoundation();
+  {
+    ComPtr<IMFSinkWriter> writer;
+    ComPtr<IMFMediaType> out;
+    ComPtr<IMFMediaType> in;
+    DWORD stream = 0;
+    ok = ok && SUCCEEDED(MFCreateSinkWriterFromURL(file.getFullPathName().toWideCharPointer(), nullptr, nullptr,
+                                                   writer.put()));
+    ok = ok && SUCCEEDED(MFCreateMediaType(out.put()));
+    if (ok) {
+      out->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+      out->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
+      out->SetUINT32(MF_MT_AVG_BITRATE, 400000);
+      out->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+      MFSetAttributeSize(out.p, MF_MT_FRAME_SIZE, kWidth, kHeight);
+      MFSetAttributeRatio(out.p, MF_MT_FRAME_RATE, kFps, 1);
+      MFSetAttributeRatio(out.p, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+    }
+    ok = ok && SUCCEEDED(writer->AddStream(out.p, &stream));
+    ok = ok && SUCCEEDED(MFCreateMediaType(in.put()));
+    if (ok) {
+      in->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+      in->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+      in->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+      MFSetAttributeSize(in.p, MF_MT_FRAME_SIZE, kWidth, kHeight);
+      MFSetAttributeRatio(in.p, MF_MT_FRAME_RATE, kFps, 1);
+      MFSetAttributeRatio(in.p, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+    }
+    ok = ok && SUCCEEDED(writer->SetInputMediaType(stream, in.p, nullptr));
+    ok = ok && SUCCEEDED(writer->BeginWriting());
+    for (UINT32 i = 0; ok && i < 2 * kFps; ++i) {
+      ComPtr<IMFMediaBuffer> buffer;
+      ComPtr<IMFSample> sample;
+      const DWORD bytes = kWidth * kHeight * 4;
+      ok = SUCCEEDED(MFCreateMemoryBuffer(bytes, buffer.put())) && SUCCEEDED(MFCreateSample(sample.put()));
+      BYTE* data = nullptr;
+      ok = ok && SUCCEEDED(buffer->Lock(&data, nullptr, nullptr));
+      if (!ok) {
+        break;
+      }
+      const bool red = i < kFps;
+      for (DWORD p = 0; p < bytes; p += 4) {
+        data[p] = red ? 0 : 220;     // B
+        data[p + 1] = 0;             // G
+        data[p + 2] = red ? 220 : 0; // R
+        data[p + 3] = 255;
+      }
+      buffer->Unlock();
+      buffer->SetCurrentLength(bytes);
+      sample->AddBuffer(buffer.p);
+      sample->SetSampleTime(static_cast<LONGLONG>(i) * kFrameDuration);
+      sample->SetSampleDuration(kFrameDuration);
+      ok = SUCCEEDED(writer->WriteSample(stream, sample.p));
+    }
+    // No H.264 encoder (a Windows "N" edition): no clip.
+    ok = ok && SUCCEEDED(writer->Finalize());
+  }
+  if (!ok) {
+    file.deleteFile();
+  }
+  if (comInitialised) {
+    CoUninitialize();
+  }
+  return file;
+}
+
 } // namespace milkdawp::engine

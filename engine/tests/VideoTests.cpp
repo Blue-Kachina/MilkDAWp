@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 The MilkDAWp contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Phase 8.6c: video media sources. The timeline maths runs everywhere; the
-// decoding tests run where the platform has a decoder, on a clip they encode
-// themselves (one second of red, then one of blue), so no video file lives in
-// the repository.
+// Phase 8.6c/d: video media sources. The timeline maths runs everywhere; the
+// decoding tests run wherever the platform decodes video, on a clip the
+// platform writes itself (one second of red, then one of blue), so no video
+// file lives in the repository. Without an encoder they say so and pass.
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -15,19 +15,19 @@
 #include "milkdawp/engine/MediaSource.h"
 #include "milkdawp/engine/VideoDecoder.h"
 
-#if JUCE_WINDOWS
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-
-#include <mfapi.h>
-#include <mfidl.h>
-#include <mfreadwrite.h>
-#endif
-
 using namespace milkdawp::engine;
 using Catch::Approx;
+
+// GStreamer (Linux) decodes on threads of its own inside system libraries
+// ThreadSanitizer can't see into, as with Mesa in the GL tests: under TSan the
+// decoding tests stand down. They run in every other job.
+#if defined(__SANITIZE_THREAD__)
+#define MILKDAWP_UNDER_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define MILKDAWP_UNDER_TSAN 1
+#endif
+#endif
 
 TEST_CASE("videoPosition follows the host, or runs freely, and loops", "[engine][video]") {
   MediaTimeline host{true, true, 12.5};
@@ -44,82 +44,12 @@ TEST_CASE("videoPosition follows the host, or runs freely, and loops", "[engine]
 TEST_CASE("isVideoPath goes by extension", "[engine][video]") {
   CHECK(isVideoPath("C:/clips/dance.mp4"));
   CHECK(isVideoPath("C:/clips/DANCE.MOV"));
+  CHECK(isVideoPath("/home/me/clip.avi"));
   CHECK_FALSE(isVideoPath("C:/clips/logo.png"));
   CHECK_FALSE(isVideoPath("camera:USB"));
 }
 
-#if JUCE_WINDOWS
-
 namespace {
-
-constexpr int kWidth = 160;
-constexpr int kHeight = 96;
-constexpr int kFps = 10;
-constexpr LONGLONG kFrameDuration = 10'000'000 / kFps; // 100 ns units
-
-// Encodes 2 s of H.264: frames 0-9 red, 10-19 blue. False if this system has no
-// H.264 encoder (a Windows "N" edition), in which case the test says so.
-bool writeClip(const juce::File& file) {
-  if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED)) && false) {
-    return false;
-  }
-  MFStartup(MF_VERSION, MFSTARTUP_LITE);
-  IMFSinkWriter* writer = nullptr;
-  if (FAILED(MFCreateSinkWriterFromURL(file.getFullPathName().toWideCharPointer(), nullptr, nullptr, &writer))) {
-    return false;
-  }
-  bool ok = true;
-  IMFMediaType* out = nullptr;
-  IMFMediaType* in = nullptr;
-  DWORD stream = 0;
-  MFCreateMediaType(&out);
-  out->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-  out->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
-  out->SetUINT32(MF_MT_AVG_BITRATE, 400000);
-  out->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-  MFSetAttributeSize(out, MF_MT_FRAME_SIZE, kWidth, kHeight);
-  MFSetAttributeRatio(out, MF_MT_FRAME_RATE, kFps, 1);
-  MFSetAttributeRatio(out, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-  ok = ok && SUCCEEDED(writer->AddStream(out, &stream));
-  MFCreateMediaType(&in);
-  in->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-  in->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-  in->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-  MFSetAttributeSize(in, MF_MT_FRAME_SIZE, kWidth, kHeight);
-  MFSetAttributeRatio(in, MF_MT_FRAME_RATE, kFps, 1);
-  MFSetAttributeRatio(in, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-  ok = ok && SUCCEEDED(writer->SetInputMediaType(stream, in, nullptr));
-  ok = ok && SUCCEEDED(writer->BeginWriting());
-  for (int i = 0; ok && i < 2 * kFps; ++i) {
-    IMFMediaBuffer* buffer = nullptr;
-    const DWORD bytes = kWidth * kHeight * 4;
-    MFCreateMemoryBuffer(bytes, &buffer);
-    BYTE* data = nullptr;
-    buffer->Lock(&data, nullptr, nullptr);
-    for (DWORD p = 0; p < bytes; p += 4) {
-      const bool red = i < kFps;
-      data[p] = red ? 0 : 220;     // B
-      data[p + 1] = 0;             // G
-      data[p + 2] = red ? 220 : 0; // R
-      data[p + 3] = 255;
-    }
-    buffer->Unlock();
-    buffer->SetCurrentLength(bytes);
-    IMFSample* sample = nullptr;
-    MFCreateSample(&sample);
-    sample->AddBuffer(buffer);
-    sample->SetSampleTime(i * kFrameDuration);
-    sample->SetSampleDuration(kFrameDuration);
-    ok = SUCCEEDED(writer->WriteSample(stream, sample));
-    sample->Release();
-    buffer->Release();
-  }
-  ok = ok && SUCCEEDED(writer->Finalize());
-  in->Release();
-  out->Release();
-  writer->Release();
-  return ok;
-}
 
 struct Rgb {
   int r;
@@ -137,17 +67,41 @@ bool isRed(const Rgb& c) { return c.r > 150 && c.b < 70; }
 bool isBlue(const Rgb& c) { return c.b > 150 && c.r < 70; }
 
 struct Clip {
-  juce::File file = juce::File::createTempFile(".mp4");
-  bool written = writeClip(file);
+  juce::File file = VideoDecoder::writeTestClip(juce::File::getSpecialLocation(juce::File::tempDirectory));
   ~Clip() { file.deleteFile(); }
+  [[nodiscard]] bool usable() const { return file.existsAsFile(); }
 };
+
+#ifdef MILKDAWP_UNDER_TSAN
+constexpr bool kUnderTsan = true;
+#else
+constexpr bool kUnderTsan = false;
+#endif
+
+// Why a decoding test can't run here, or empty if it can.
+std::string unavailable(const Clip& clip) {
+  if (kUnderTsan) {
+    return "ThreadSanitizer cannot analyse the system's video decoders";
+  }
+  if (!VideoDecoder::supported()) {
+    return "no video decoder on this system";
+  }
+  if (!clip.usable()) {
+    return "no encoder on this system to make the test clip";
+  }
+  return {};
+}
 
 } // namespace
 
-TEST_CASE("VideoDecoder (Media Foundation) decodes and seeks", "[engine][video]") {
+TEST_CASE("VideoDecoder decodes and seeks", "[engine][video]") {
+  if (kUnderTsan) {
+    SUCCEED("skipped under ThreadSanitizer");
+    return;
+  }
   Clip clip;
-  if (!clip.written) {
-    SUCCEED("no H.264 encoder on this system to make the test clip");
+  if (const auto reason = unavailable(clip); !reason.empty()) {
+    SUCCEED(reason);
     return;
   }
   std::string error;
@@ -159,13 +113,13 @@ TEST_CASE("VideoDecoder (Media Foundation) decodes and seeks", "[engine][video]"
   MediaFrame frame;
   double at = -1.0;
   REQUIRE(decoder->next(frame, at));
-  CHECK(frame.width == kWidth);
-  CHECK(frame.height == kHeight);
+  CHECK(frame.width == 160);
+  CHECK(frame.height == 96);
   CHECK(at == Approx(0.0).margin(0.05));
   CHECK(isRed(centre(frame)));
 
-  // A seek lands on the keyframe at or before the target (here possibly the
-  // clip's only one, at 0 s); decoding on from there reaches it.
+  // A seek lands on the keyframe at or before the target (with H.264, possibly
+  // the clip's only one, at 0 s); decoding on from there reaches it.
   REQUIRE(decoder->seek(1.5));
   REQUIRE(decoder->next(frame, at));
   CHECK(at <= 1.5 + 1.0e-3);
@@ -182,9 +136,13 @@ TEST_CASE("VideoDecoder (Media Foundation) decodes and seeks", "[engine][video]"
 }
 
 TEST_CASE("VideoMediaSource shows the frame the host's position asks for", "[engine][video]") {
+  if (kUnderTsan) {
+    SUCCEED("skipped under ThreadSanitizer");
+    return;
+  }
   Clip clip;
-  if (!clip.written) {
-    SUCCEED("no H.264 encoder on this system to make the test clip");
+  if (const auto reason = unavailable(clip); !reason.empty()) {
+    SUCCEED(reason);
     return;
   }
   VideoMediaSource source(clip.file);
@@ -212,21 +170,24 @@ TEST_CASE("VideoMediaSource shows the frame the host's position asks for", "[eng
 }
 
 TEST_CASE("openMediaSource opens a video, and reports one it can't play", "[engine][video]") {
+  if (kUnderTsan) {
+    SUCCEED("skipped under ThreadSanitizer");
+    return;
+  }
   Clip clip;
-  if (!clip.written) {
-    SUCCEED("no H.264 encoder on this system to make the test clip");
+  if (const auto reason = unavailable(clip); !reason.empty()) {
+    SUCCEED(reason);
     return;
   }
   std::string error;
   CHECK(openMediaSource(clip.file.getFullPathName().toStdString(), error) != nullptr);
   CHECK(error.empty());
 
-  const auto broken = juce::File::createTempFile(".mp4");
+  const auto broken = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                          .getNonexistentChildFile("milkdawp-broken", clip.file.getFileExtension());
   broken.replaceWithText("not a video");
   error.clear();
   CHECK(openMediaSource(broken.getFullPathName().toStdString(), error) == nullptr);
   CHECK_FALSE(error.empty());
   broken.deleteFile();
 }
-
-#endif

@@ -101,13 +101,22 @@ else()
   target_compile_definitions(milkdawp_engine PRIVATE MILKDAWP_HAS_PROJECTM=0)
 endif()
 
-# 8.6c: video through the platform's own decoders. Windows: Media Foundation.
-# macOS (AVFoundation) and Linux (GStreamer at runtime) come in 8.6d.
+# 8.6b-d: video through the platform's own decoders, and cameras: Media
+# Foundation and JUCE's CameraDevice on Windows; AVFoundation and CameraDevice
+# on macOS; GStreamer (loaded at run time, never linked) and V4L2 on Linux.
+target_sources(milkdawp_engine PRIVATE src/Cameras.h)
 if(WIN32)
-  target_sources(milkdawp_engine PRIVATE src/VideoDecoderWindows.cpp)
+  target_sources(milkdawp_engine PRIVATE src/VideoDecoderWindows.cpp src/CameraJuce.cpp)
   target_link_libraries(milkdawp_engine PRIVATE mfplat mfreadwrite mfuuid propsys ole32)
+elseif(APPLE)
+  target_sources(milkdawp_engine PRIVATE src/VideoDecoderMac.mm src/CameraJuce.cpp)
+  target_link_libraries(milkdawp_engine PRIVATE "-framework AVFoundation" "-framework CoreMedia"
+                                                "-framework CoreVideo" "-framework Foundation")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_sources(milkdawp_engine PRIVATE src/VideoDecoderLinux.cpp src/CameraLinux.cpp)
+  target_link_libraries(milkdawp_engine PRIVATE ${CMAKE_DL_LIBS})
 else()
-  target_sources(milkdawp_engine PRIVATE src/VideoDecoderUnsupported.cpp)
+  target_sources(milkdawp_engine PRIVATE src/VideoDecoderUnsupported.cpp src/CameraJuce.cpp)
 endif()
 
 if(BUILD_TESTING)

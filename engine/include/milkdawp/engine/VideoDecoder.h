@@ -27,8 +27,16 @@ public:
 
   /// Null, with `error` set, if the file can't be decoded here.
   [[nodiscard]] static std::unique_ptr<VideoDecoder> open(const juce::File& file, std::string& error);
-  /// Whether this build has a video decoder at all.
+  /// Whether video can be decoded here: on Linux, whether GStreamer is
+  /// installed (it is loaded at run time, never bundled).
   [[nodiscard]] static bool supported() noexcept;
+
+  /// For tests: writes a 2 s, 10 fps, 160 x 96 clip into `directory` (one
+  /// second of red, then one of blue) in a format this platform encodes and
+  /// decodes itself (H.264 MP4 on Windows and macOS, MJPEG AVI through
+  /// GStreamer on Linux), so no video file lives in the repository. Returns
+  /// the file, or a non-existent one where no encoder is available.
+  [[nodiscard]] static juce::File writeTestClip(const juce::File& directory);
 
   [[nodiscard]] virtual double durationSeconds() const = 0;
   /// The next frame in order and its presentation time in seconds. False at

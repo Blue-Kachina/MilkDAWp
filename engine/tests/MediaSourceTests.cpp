@@ -90,6 +90,28 @@ TEST_CASE("frameFromImage converts camera-style RGB frames, and scales big ones 
   CHECK(frameFromImage(juce::Image(), 1280).width == 0);
 }
 
+TEST_CASE("frameFromYuyv converts webcam YUYV (BT.601, limited range)", "[engine][media]") {
+  // 4 x 2: top row white then black (Y 235 / 16, no colour), bottom row pure
+  // red (Y 81, U 90, V 240). Rows padded to a 12-byte stride.
+  const std::uint8_t yuyv[] = {
+      235, 128, 235, 128, 16, 128, 16, 128, 0, 0, 0, 0,  // top: white, white, black, black
+      81,  90,  81,  240, 81, 90,  81, 240, 0, 0, 0, 0,  // bottom: red x 4
+  };
+  const auto frame = frameFromYuyv(yuyv, 4, 2, 12);
+  REQUIRE(frame.width == 4);
+  REQUIRE(frame.height == 2);
+  const auto pixel = [&](int x, int y) { return frame.rgba.data() + (y * 4 + x) * 4; };
+  // Stored bottom row first: row 0 is the red one.
+  CHECK(pixel(0, 0)[0] >= 250);
+  CHECK(pixel(0, 0)[1] <= 5);
+  CHECK(pixel(0, 0)[2] <= 5);
+  CHECK(pixel(0, 1)[0] == 255); // white, top left
+  CHECK(pixel(1, 1)[2] == 255);
+  CHECK(pixel(2, 1)[0] == 0);   // black
+  CHECK(pixel(3, 1)[3] == 255); // opaque
+  CHECK(frameFromYuyv(yuyv, 4, 2, 4).width == 0); // a stride shorter than a row is refused
+}
+
 TEST_CASE("Camera media paths", "[engine][media]") {
   const auto path = cameraMediaPath("USB Camera (1)");
   CHECK(isCameraMediaPath(path));

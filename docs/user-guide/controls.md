@@ -83,11 +83,12 @@ draws, at no extra cost.
 - **Media Mix**: how much of the media source shows over the visual. Choose an
   image or a camera in **Settings > Media source**; it fills the picture
   (cropped, not stretched), an image's transparent parts stay clear, and the
-  effects above apply to it too. Cameras work on Windows and macOS (macOS asks for
-  permission the first time; in a DAW it asks in the DAW's name). Videos loop; in
-  a DAW they follow the playhead, so the same bar always shows the same frame and
-  a rendered mix is repeatable. Video files play on Windows for now (H.264 MP4
-  always works; other formats if Windows can decode them).
+  effects above apply to it too. Cameras work on Windows, macOS and Linux (macOS
+  asks for permission the first time; in a DAW it asks in the DAW's name). Videos
+  loop; in a DAW they follow the playhead, so the same bar always shows the same
+  frame and a rendered mix is repeatable. MilkDAWp plays video with the
+  system's own decoders: on Windows and macOS, H.264 MP4 always works; on Linux,
+  video needs GStreamer installed, and H.264 its `gst-libav` plugins.
   **Settings > Media source > Blend** picks how the media meets the picture:
   Normal, Add, Screen, Multiply, Luma key, or **Displace**, where the media isn't
   shown at all but bends the picture: its red pushes sideways, its green up and
