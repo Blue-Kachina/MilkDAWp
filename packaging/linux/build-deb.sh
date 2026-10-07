@@ -75,7 +75,7 @@ Homepage: https://github.com/Blue-Kachina/MilkDAWp
 Description: Music visualizer: VST3 plugin and standalone app
  MilkDAWp shows MilkDrop presets (rendered by projectM) that change in time
  with the music, as a VST3 plugin in your DAW or as a standalone app
- listening to an audio input. Includes the ~9,800 "Cream of the Crop" presets.
+ listening to an audio input. Includes ~9,700 presets from "Cream of the Crop".
 EOF
 
 dpkg-deb --root-owner-group --build "$root" "$out" > /dev/null

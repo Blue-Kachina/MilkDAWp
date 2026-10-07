@@ -706,7 +706,9 @@ void MilkDAWpAudioProcessor::setStateInformation(const void* data, int sizeInByt
   // publishes the restored parameters; the preferred preset path below
   // already selects the right preset on the scan.
   if (!state.playlistFolderPath.empty()) {
-    visualizer_->director().setPresetFolder(state.playlistFolderPath, state.presetAbsolutePath);
+    // A 1.0 session may name the bundled pack where 1.0 had it (8.11).
+    visualizer_->director().setPresetFolder(engine::BundledContent::fromOldPack(state.playlistFolderPath),
+                                            engine::BundledContent::fromOldPack(state.presetAbsolutePath));
   }
 }
 

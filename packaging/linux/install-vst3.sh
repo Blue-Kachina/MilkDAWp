@@ -10,6 +10,8 @@ data="${XDG_DATA_HOME:-$HOME/.local/share}/milkdawp"
 
 mkdir -p "$HOME/.vst3" "$data"
 rm -rf "$HOME/.vst3/MilkDAWp.vst3"
+# 1.0 put the presets in "Cream of the Crop"; they're "Cream of the CrAWp" now.
+rm -rf "$data/Presets/Cream of the Crop"
 cp -R "$here/MilkDAWp.vst3" "$HOME/.vst3/"
 cp -R "$here/Content/." "$data/"
 echo "Installed $HOME/.vst3/MilkDAWp.vst3 and the presets in $data."

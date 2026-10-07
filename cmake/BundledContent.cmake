@@ -5,26 +5,33 @@
 # the MilkDrop texture pack its presets reference, the same content
 # projectM's own releases ship.
 #
-# Both are fetched at configure time as GitHub archives of a pinned commit,
-# checked against a SHA-256, and laid out in the build tree the way an
-# install lays them out (engine/include/milkdawp/engine/BundledContent.h):
+# Both are fetched at configure time as GitHub archives of a pinned commit and
+# checked against a SHA-256. The presets ship converted (8.11, ADR-0014): the
+# build turns the fetched pack into "Cream of the CrAWp", every preset as a
+# .milkdawp with its Macros (target milkdawp_preset_pack,
+# tools/mdw-convert/CMakeLists.txt). The original .milk files stay in _deps/
+# as the converter's source and don't ship. The build tree is laid out the way
+# an install is (engine/include/milkdawp/engine/BundledContent.h):
 #
 #   ${MILKDAWP_CONTENT_DIR}/
-#     Presets/Cream of the Crop/   the pack, with its LICENSE.md and README.md
+#     Presets/Cream of the CrAWp/  the converted pack, with the original's LICENSE.md and README.md
 #     Textures/                    the texture pack's textures/ folder
 #     Textures/README.md
+#   _deps/cream-of-the-crop/       the pack as fetched (${MILKDAWP_SOURCE_PRESETS_DIR})
 #
-# scripts/release/package.sh copies that folder into each release. Sizes at
+# scripts/release/package.sh copies the content folder into each release. Sizes at
 # this pin (2026-10-04): 115 MB on disk, 34 MB zipped, ~3 MB with LZMA/xz,
 # so the whole pack ships and no subset or in-app download is needed.
 #
 # To bump a pack: change its commit and hash (`curl -L <url> | sha256sum`),
-# then check the first-run scan time and that kDefaultPresetRelativePath
-# (BundledContent.cpp) still exists in the pack.
+# regenerate cmake/milkdawp-pack-exclusions.txt (ADR-0014), then check the
+# first-run scan time and that kDefaultPresetRelativePath (BundledContent.h)
+# still exists in the pack.
 #
-# Windows paths: the pack's longest relative path is 174 characters, so the
-# build tree must stay within ~85 characters of a drive root to keep every
-# preset under MAX_PATH (260) for JUCE's and std::filesystem's file APIs.
+# Windows paths: the pack's longest relative path is 174 characters (178 as
+# .milkdawp), so the build tree must stay within ~80 characters of a drive
+# root to keep every preset under MAX_PATH (260) for JUCE's and
+# std::filesystem's file APIs.
 
 option(MILKDAWP_BUNDLE_CONTENT "Fetch the bundled preset pack and textures (6.1, D12)" ON)
 option(MILKDAWP_CONTENT_FROM_BUILD_TREE
@@ -88,29 +95,36 @@ function(milkdawp_fetch_archive name url sha256 dest)
   file(WRITE "${stamp}" "${sha256}")
 endfunction()
 
+set(MILKDAWP_SOURCE_PRESETS_DIR "${CMAKE_BINARY_DIR}/_deps/cream-of-the-crop")
 milkdawp_fetch_archive(presets
   "https://github.com/projectM-visualizer/presets-cream-of-the-crop/archive/${MILKDAWP_PRESETS_COMMIT}.tar.gz"
   ${MILKDAWP_PRESETS_SHA256}
-  "${MILKDAWP_CONTENT_DIR}/Presets/Cream of the Crop")
+  "${MILKDAWP_SOURCE_PRESETS_DIR}")
+
+# Before 8.11 the pack itself sat in the content folder; packaging copies
+# everything there, so a build tree from then mustn't keep it.
+if(EXISTS "${MILKDAWP_CONTENT_DIR}/Presets/Cream of the Crop")
+  file(REMOVE_RECURSE "${MILKDAWP_CONTENT_DIR}/Presets/Cream of the Crop")
+endif()
 
 # Presets their authors asked us not to ship (D12, docs/beta.md): paths
 # relative to the pack, e.g. "Dancer/Aurora/Someone - Some preset.milk".
-# Applied after extraction on every configure; drop an entry once upstream has
-# removed the preset and the pin has moved past it.
+# Taken out of the fetched pack on every configure, so the converted pack
+# never has them; drop an entry once upstream has removed the preset and the
+# pin has moved past it.
 set(MILKDAWP_PRESET_REMOVALS
 )
 foreach(_mdw_removed IN LISTS MILKDAWP_PRESET_REMOVALS)
-  set(_mdw_removed_path "${MILKDAWP_CONTENT_DIR}/Presets/Cream of the Crop/${_mdw_removed}")
+  set(_mdw_removed_path "${MILKDAWP_SOURCE_PRESETS_DIR}/${_mdw_removed}")
   if(EXISTS "${_mdw_removed_path}")
-    # And the .milkdawp a build made of it (8.11).
-    string(REGEX REPLACE "\\.[^./]*$" ".milkdawp" _mdw_removed_converted "${_mdw_removed_path}")
-    file(REMOVE "${_mdw_removed_path}" "${_mdw_removed_converted}")
+    file(REMOVE "${_mdw_removed_path}")
     message(STATUS "MilkDAWp: removed preset at its author's request: ${_mdw_removed}")
   endif()
 endforeach()
 unset(_mdw_removed)
 unset(_mdw_removed_path)
-unset(_mdw_removed_converted)
+# Rewritten only when the list changes, so the converted pack is rebuilt then.
+file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/milkdawp-preset-removals.txt" CONTENT "${MILKDAWP_PRESET_REMOVALS}\n")
 
 # The texture repo keeps its images in textures/; flatten that into Textures/.
 milkdawp_fetch_archive(textures

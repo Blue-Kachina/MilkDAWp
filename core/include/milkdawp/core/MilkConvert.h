@@ -63,6 +63,9 @@ struct ConvertEntry {
 };
 
 struct ConvertOptions {
+  /// Where the .milkdawp files go: empty puts each beside its .milk; a folder
+  /// gets the same layout as the presets' (folders made as needed).
+  std::filesystem::path outputRoot;
   /// Replace an existing .milkdawp. Off by default: one may have been edited by hand.
   bool overwrite = false;
   /// Work everything out, write nothing.
@@ -80,9 +83,10 @@ struct ConvertOptions {
 };
 
 /// Converts every `.milk` under `root` (or `root` itself, if it is a file)
-/// into a `.milkdawp` beside it. Only ever creates or replaces `.milkdawp`
-/// files: a `.milk` is opened read-only and never written, moved or deleted
-/// (exploration doc §5.1). Entries are in path order.
+/// into a `.milkdawp` beside it, or under `outputRoot`. Only ever creates or
+/// replaces `.milkdawp` files (and the folders for them): a `.milk` is opened
+/// read-only and never written, moved or deleted (exploration doc §5.1).
+/// Entries are in path order.
 [[nodiscard]] std::vector<ConvertEntry> convertFolder(const std::filesystem::path& root,
                                                       const ConvertOptions& options);
 

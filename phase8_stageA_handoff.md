@@ -75,19 +75,20 @@ format and loader (ADR-0013), and the converter with the bundled pack (ADR-0014)
 | 8.10 shells | Lock Macros defaults in `PluginProcessor::timerCallback` / `MainComponent::applyMacroLock`; `VisualSettingsPanel::setPresetControls`; app opens `.milkdawp` | `VisualSettingsTests` |
 | 8.10 library | `Playlist::scanFolder` (hides a `.milk` beside its `.milkdawp`), `PresetMetadata::keyFor` | `PlaylistTests`, `PresetMetadataTests` |
 | 8.11 converter | `core/MilkConvert` (`analyzeMilk`, `convertMilk`, `convertFolder`, `withoutRandomness`), `core/Sha256`, `tools/mdw-convert` (`Verifier` for `--verify`) | `MilkConvertTests`, `Sha256Tests` |
-| 8.11 pack | `milkdawp_preset_pack` target (`tools/mdw-convert/CMakeLists.txt`), `cmake/milkdawp-pack-exclusions.txt`, `BundledContent::defaultPreset` prefers the `.milkdawp`, file associations, `package.sh` check | `BundledContentTests` |
+| 8.11 pack | "Cream of the CrAWp", made by the `milkdawp_preset_pack` target (`tools/mdw-convert/CMakeLists.txt`) from the fetched pack in `_deps/cream-of-the-crop`; `cmake/milkdawp-pack-exclusions.txt` (the 67 projectM can't load); `BundledContent` (`kPackFolderName`, `fromOldPack` for 1.0 sessions); installers remove the old folder; file associations; `package.sh` check | `BundledContentTests` |
 
 Verified for 8.7–8.10: Windows Debug (455 tests), Linux GCC (`ci-linux`) and Clang ASan
 (`ci-linux-asan`) in the container. For 8.11: see the roadmap entry. Not yet: macOS, TSan/RTSan,
 and any hand test. The build now converts the bundled pack, so any bundled preset is a
-`.milkdawp` to hand-test with: automate its Macros in REAPER.
+`.milkdawp` to hand-test with: automate its Macros in REAPER. The shipped pack is "Cream of the
+CrAWp" (converted only, no `.milk`, 2026-10-07).
 
 Still to do in Stage B:
 - A hand test of the proposed Macros (names, ranges) and of ADR-0013's Zoom/Rotation/Trails
   constants, which are guesses until then.
 - After a pack bump, regenerate the exclusions (ADR-0014): build Release `mdw-convert`, then
   `mdw-convert --verify --dry-run --journal j.txt --write-exclusions cmake/milkdawp-pack-exclusions.txt
-  "build-win/content/Presets/Cream of the Crop"` (a couple of hours; rerun with the same journal
+  build-win/_deps/cream-of-the-crop` (about 3 hours; rerun with the same journal
   to carry on after a crash).
 
 ## Next: the 8.12 spike

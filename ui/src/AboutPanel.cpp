@@ -25,10 +25,11 @@ juce::StringArray aboutCredits() {
       "projectM renders the presets: copyright the projectM team, GNU Lesser General Public License "
       "2.1 (LGPL-2.1). MilkDAWp loads it as a separate library (projectM-4.dll, libprojectM-4.so or "
       ".dylib) that you may replace with your own build.",
-      "\"Cream of the Crop\" presets: about 9,800 MilkDrop presets curated and sorted by Jason "
-      "Fletcher (ISOSCELES), packaged by the projectM project, with the MilkDrop texture pack. "
-      "Each preset's author keeps its copyright; they were freely released and are shared "
-      "unchanged. If you wrote one and want it removed, open an issue.",
+      "\"Cream of the CrAWp\" presets: the \"Cream of the Crop\" pack, about 9,700 MilkDrop presets "
+      "curated and sorted by Jason Fletcher (ISOSCELES), packaged by the projectM project, with "
+      "the MilkDrop texture pack. Each preset's author keeps its copyright; they were freely "
+      "released, and each is shared as its author wrote it, with lines added that give it "
+      "MilkDAWp's Macros. If you wrote one and want it removed, open an issue.",
       "Built with JUCE (juce.com), used under the AGPL-3.0. Icons from Lucide (lucide.dev), ISC "
       "licence. MilkDrop was created by Ryan Geiss.",
       "Full licence texts and every third-party notice ship with MilkDAWp (LICENSE, LICENSES/ and "

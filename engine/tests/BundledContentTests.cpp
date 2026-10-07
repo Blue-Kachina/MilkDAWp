@@ -77,7 +77,7 @@ TEST_CASE("BundledContent: a folder is a content root only with its preset folde
   TempDir temp;
   CHECK_FALSE(engine::BundledContent::isContentRoot(temp.dir));
   CHECK_FALSE(engine::BundledContent::isContentRoot(juce::File()));
-  temp.dir.getChildFile("Presets/Cream of the Crop").createDirectory();
+  temp.dir.getChildFile("Presets").getChildFile(engine::BundledContent::kPackFolderName).createDirectory();
   CHECK(engine::BundledContent::isContentRoot(temp.dir));
 }
 
@@ -109,11 +109,33 @@ TEST_CASE("BundledContent: default preset and textures only when present", "[eng
   CHECK(content.defaultPreset() == preset);
   REQUIRE(content.textureSearchPaths().size() == 1);
   CHECK(juce::File(content.textureSearchPaths().front()) == content.texturesFolder());
+}
 
-  // 8.11: the pack's .milkdawp of it, when the build made one.
-  const auto converted = preset.withFileExtension("milkdawp");
-  converted.create();
-  CHECK(content.defaultPreset() == converted);
+TEST_CASE("BundledContent: a 1.0 session's pack folder and preset move to the pack that ships (8.11)",
+          "[engine][content]") {
+  TempDir temp;
+  const engine::BundledContent content{temp.dir};
+  const auto preset = content.presetFolder().getChildFile("Fractal/Some - preset.milkdawp");
+  preset.create();
+  const auto old = temp.dir.getChildFile("Presets").getChildFile(engine::BundledContent::kOldPackFolderName);
+
+  using engine::BundledContent;
+  CHECK(BundledContent::fromOldPack(old.getFullPathName().toStdString()) ==
+        content.presetFolder().getFullPathName().toStdString());
+  CHECK(BundledContent::fromOldPack(old.getChildFile("Fractal/Some - preset.milk").getFullPathName().toStdString()) ==
+        preset.getFullPathName().toStdString());
+  // Forward slashes, as a session saved on another OS might have them.
+  const auto forward = old.getFullPathName().replaceCharacter('\\', '/') + "/Fractal";
+  CHECK(juce::File(BundledContent::fromOldPack(forward.toStdString())) == preset.getParentDirectory());
+
+  // A preset that didn't ship (projectM couldn't load it), a user's own
+  // folder, and a look-alike name are left alone.
+  const auto gone = old.getChildFile("Fractal/Broken.milk").getFullPathName().toStdString();
+  CHECK(BundledContent::fromOldPack(gone) == gone);
+  const auto own = temp.dir.getChildFile("My presets/a.milk").getFullPathName().toStdString();
+  CHECK(BundledContent::fromOldPack(own) == own);
+  const auto alike = (old.getFullPathName() + "ped/a.milk").toStdString();
+  CHECK(BundledContent::fromOldPack(alike) == alike);
 }
 
 TEST_CASE("BundledContent: the fetched pack has the default preset and textures", "[engine][content]") {
@@ -123,6 +145,9 @@ TEST_CASE("BundledContent: the fetched pack has the default preset and textures"
   }
   CHECK(pack->defaultPreset().existsAsFile());
   CHECK(pack->texturesFolder().getNumberOfChildFiles(juce::File::findFiles, "*.jpg;*.png") > 50);
+  // 8.11: the pack ships converted, with no .milk files.
+  CHECK(pack->presetFolder().findChildFiles(juce::File::findFiles, true, "*.milk").isEmpty());
+  CHECK(pack->presetFolder().findChildFiles(juce::File::findFiles, true, "*.milkdawp").size() > 9000);
   CHECK(pack->presetFolder().getChildFile("LICENSE.md").existsAsFile());
 }
 

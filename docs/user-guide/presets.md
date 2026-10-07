@@ -2,8 +2,9 @@
 
 A preset is a MilkDrop `.milk` file: a small program that draws a visual. Your
 **preset folder** is the folder MilkDAWp plays from, including its subfolders.
-It starts on the bundled pack, "Cream of the Crop" (about 9,800 presets,
-sorted into folders such as *Dancer*, *Fractal*, *Geometric*, *Waveform*).
+It starts on the bundled pack, "Cream of the CrAWp" (about 9,700 presets from
+"Cream of the Crop", sorted into folders such as *Dancer*, *Fractal*, *Geometric*,
+*Waveform*), each one a `.milkdawp` with its own Macros.
 
 ## The preset browser
 
@@ -90,8 +91,8 @@ preset's starting value it looks exactly like the `.milk` it was made from.
 
 ### The bundled presets come with Macros
 
-Almost every preset that ships with MilkDAWp comes as a `.milkdawp` beside its
-original `.milk`, with up to 8 Macros chosen for it automatically. Each Macro
+Every preset that ships with MilkDAWp is a `.milkdawp`, the original preset
+with up to 8 Macros chosen for it automatically. Each Macro
 starts in the middle, where the preset looks exactly as its author made it;
 turn it either way from there. A Macro the preset doesn't use is dimmed.
 
@@ -110,6 +111,5 @@ The ones that matter most to a preset come first: values its code drives from
 the music, then what its code animates, then what it shows, then the motion
 every preset has.
 
-The few presets that don't come with Macros are ones whose `.milkdawp` didn't
-render like the original when it was checked, or that projectM can't
-play at all. They're still there as plain `.milk`.
+The original pack has about 70 more presets that projectM can't play at all;
+those aren't included.

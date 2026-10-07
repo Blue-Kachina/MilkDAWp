@@ -359,6 +359,10 @@ GLSL, a superset can still carry it the way `.milk` carries HLSL today (numbered
   it never deletes, moves, renames or rewrites a `.milk`. The bundled Cream of the Crop pack ships
   unchanged beside the `.milkdawp` pack, and a user's own `.milk` folders are read-only to the
   converter. `mdw_source` and `mdw_source_sha256` point each `.milkdawp` back to its original.
+  *Changed 2026-10-07 for the bundled pack (Matthew, ADR-0014):* it ships converted only, as
+  "Cream of the CrAWp", with no `.milk` files and without the 67 presets projectM can't load. The
+  converter still never touches a `.milk`; the build reads the fetched pack and writes the new one
+  elsewhere. Each `.milkdawp` still holds its original byte for byte.
 - **Close is good enough.** The converter does not have to be perfect. Its report flags presets
   that look noticeably different so they can be fixed by hand or left on projectM, but a
   difference is not a failure. (Stage B renders through projectM itself, so neutral controls
@@ -513,7 +517,8 @@ in the roadmap's Phase 8 and ADR-0011.
       originals and never touches a `.milk` (§5.1); a test checks the source tree is byte-identical after a
       run. Curate a first pack from Cream of the Crop by rating.
       *Done 2026-10-06, ADR-0014:* every preset in the pack is rated 5, so instead the whole
-      pack is converted at build time, beside the originals, minus what `--verify` turns down.
+      pack is converted at build time; since 2026-10-07 it ships converted only, as "Cream of the
+      CrAWp", without the 67 presets projectM can't load.
 - [ ] 8.12 (M) Patch 2: external textures (`sampler_camera`, `sampler_video`) and the `mdw_` audio
       variables (`beat_phase`, `bar_phase`, `bpm`, `onset`); a handful of hand-made presets that use them.
       *Upstream check (2026-10-05, master `dd89dfb`):* 4.2's `projectm_set_texture_load_event_callback`
@@ -571,7 +576,8 @@ in the roadmap's Phase 8 and ADR-0011.
    that phase's questions.
 6. ~~Should the curated `.milkdawp` pack replace Cream of the Crop?~~ Decided (2026-10-05): beside it;
    the `.milk` originals are always kept (§5.1). Which one the playlist uses (2026-10-06): the
-   `.milkdawp`, which sits beside its `.milk` and hides it from the list (ADR-0014).
+   `.milkdawp`, which sits beside its `.milk` and hides it from the list (ADR-0014). Superseded
+   2026-10-07: the bundled pack ships only as `.milkdawp` ("Cream of the CrAWp").
 7. ~~Name~~: decided (2026-10-05), **EyesCream** for the renderer. Still open: whether the curated pack
    shares the name ("the EyesCream pack").
 8. ~~Control editor?~~ Decided (2026-10-05): **no, mappings stay static for now.** `.milkdawp` files come
@@ -610,3 +616,8 @@ in the roadmap's Phase 8 and ADR-0011.
 - (2026-10-06) 8.11 (ADR-0014): every Cream of the Crop preset is rated 5, so "curate by rating"
   can't work. Matthew: convert **all** of it, leaving out only what fails the before/after check,
   with each `.milkdawp` **beside its `.milk`** in the bundled content, made at build time.
+- (2026-10-07) Matthew: ship the bundled presets **converted only**, as their own pack
+  **"Cream of the CrAWp"**: no `.milk` files, and without the 67 that projectM can't load. The 9
+  that "rendered differently" ship converted (the difference was projectM's noise). Changes §5.1
+  for the bundled pack (ADR-0014).
+- (2026-10-07) Backlog: "Macro slots as insert slots" (roadmap post-1.0 backlog; see §9 Q8).

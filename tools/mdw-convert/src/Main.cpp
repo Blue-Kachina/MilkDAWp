@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // mdw-convert (Phase 8.11): turns .milk presets into .milkdawp presets with
-// proposed Macros, written beside the originals. A .milk is only ever read:
+// proposed Macros, written beside the originals (or under --out). A .milk is only ever read:
 // never written, moved, renamed or deleted (exploration doc §5.1).
 //
 // Usage:
 //   mdw-convert [options] <folder | preset.milk>...
 //
+//   --out <dir>              write the .milkdawp files under <dir>, in the same layout
+//                            (default: beside each .milk)
 //   --overwrite              replace .milkdawp files already there (default: keep them)
 //   --dry-run                write no presets, only the report
 //   --exclude <file>         presets to leave alone, one relative path per line
@@ -19,7 +21,8 @@
 //   --textures <dir>         texture folder for --verify (default: the bundled one)
 //   --journal <file>         keep --verify results here; a rerun reuses them, so a
 //                            run projectM crashed in carries on (that preset fails)
-//   --write-exclusions <file>  the presets --verify turned down, as an --exclude file
+//   --write-exclusions <file>  the presets projectM can't load, as an --exclude file (other
+//                            rejections are listed as comments)
 //   --quiet                  no progress
 //
 // Dev aids:
@@ -51,7 +54,7 @@ namespace {
 using namespace milkdawp;
 
 void printUsage() {
-  std::cerr << "usage: mdw-convert [--overwrite] [--dry-run] [--exclude <file> [--prune-excluded]] [--report <file.tsv>]\n"
+  std::cerr << "usage: mdw-convert [--out <dir>] [--overwrite] [--dry-run] [--exclude <file> [--prune-excluded]] [--report <file.tsv>]\n"
                "                   [--verify [--frames <n>] [--textures <dir>] [--journal <file>]\n"
                "                    [--write-exclusions <file>]] [--quiet] <folder | preset.milk>...\n";
 }
@@ -196,12 +199,13 @@ int main(int argc, char** argv) {
       verify = true;
     } else if (arg == "--quiet") {
       quiet = true;
-    } else if (arg == "--exclude" || arg == "--report" || arg == "--journal" || arg == "--write-exclusions" ||
+    } else if (arg == "--out" || arg == "--exclude" || arg == "--report" || arg == "--journal" || arg == "--write-exclusions" ||
                arg == "--textures" || arg == "--frames") {
       const auto v = value();
       if (!v) {
         return 1;
       }
+      if (arg == "--out") options.outputRoot = *v;
       if (arg == "--exclude") excludeFiles.emplace_back(*v);
       if (arg == "--report") reportPath = *v;
       if (arg == "--journal") journalPath = *v;
@@ -329,12 +333,15 @@ int main(int argc, char** argv) {
   }
 
   if (exclusionsOut) {
+    // Only what projectM can't load is left out of the pack. A conversion that
+    // "renders differently" is listed for a look, but kept: in the 2026-10-07
+    // run that was always projectM's own render-to-render noise (ADR-0014).
     std::ofstream out(*exclusionsOut, std::ios::binary | std::ios::trunc);
-    out << "# Presets mdw-convert --verify turned down: projectM can't load them, or the\n"
-           "# conversion looks different from the original with every control neutral.\n"
-           "# The build leaves these as plain .milk (milkdawp_preset_pack, tools/mdw-convert/CMakeLists.txt).\n";
+    out << "# Presets left out of the shipped pack (milkdawp_preset_pack, tools/mdw-convert/CMakeLists.txt):\n"
+           "# projectM can't load them at all. Written by mdw-convert --verify --write-exclusions.\n";
     for (const auto& [path, reason] : rejected) {
-      out << "\n# " << reason << "\n" << path << "\n";
+      const bool unloadable = reason.rfind("projectM can't load it:", 0) == 0; // the original, not ours
+      out << "\n# " << reason << "\n" << (unloadable ? "" : "# kept: ") << path << "\n";
     }
   }
 

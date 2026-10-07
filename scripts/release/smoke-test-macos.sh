@@ -29,7 +29,7 @@ content="/Library/Application Support/MilkDAWp"
 
 # 1. Install.
 sudo installer -pkg "$pkg" -target / || fail "installer"
-for path in "$app" "$vst3" "$au" "$content/Presets/Cream of the Crop" "$content/Textures/worms.jpg"; do
+for path in "$app" "$vst3" "$au" "$content/Presets/Cream of the CrAWp" "$content/Textures/worms.jpg"; do
   [[ -e "$path" ]] || fail "not installed: $path"
 done
 presets="$(find "$content/Presets" -name '*.milk' | wc -l | tr -d ' ')"

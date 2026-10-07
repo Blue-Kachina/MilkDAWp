@@ -16,7 +16,8 @@ Two findings changed the plan:
 - **Every preset in Cream of the Crop is rated 5** (`fRating=5.000000` in all
   9,795), so rating can't pick a pack. Matthew (2026-10-06): convert **all of
   it**, leaving out only what fails the check, and put each `.milkdawp`
-  **beside its `.milk`** in the bundled content, made at build time.
+  **beside its `.milk`** in the bundled content, made at build time. Then
+  (2026-10-07) ship only the converted presets, as "Cream of the CrAWp" (below).
 - **projectM is not deterministic from one load to the next**, so "renders the
   same" needed real work (below).
 
@@ -114,41 +115,69 @@ above is part of it). Those 9 stay plain `.milk`.
 `--journal` records each result as it goes (with "start" before a render),
 so a run projectM crashes in can be restarted and that preset fails.
 
-### The bundled pack
+### The bundled pack: "Cream of the CrAWp"
 
-- The build (target `milkdawp_preset_pack`, in `ALL`) runs
-  `mdw-convert --overwrite --prune-excluded` over the fetched pack, leaving
-  out `cmake/milkdawp-pack-exclusions.txt`. That list is committed and comes
-  from a full `--verify --dry-run --write-exclusions` run on this machine;
-  regenerate it whenever the pack pin moves (`cmake/BundledContent.cmake`).
-  Skipped when cross-compiling, and with `MILKDAWP_BUILD_PRESET_PACK=OFF`.
-  About a minute, and only when the pack, the exclusions or the
+First built (2026-10-06) as a `.milkdawp` beside every `.milk` in the
+shipped "Cream of the Crop" folder. Changed the next day, Matthew: **ship
+only the converted presets**, as their own pack, "Cream of the CrAWp", with
+no `.milk` files, and leave out the presets projectM can't load. The 9 that
+"rendered differently" ship too, converted, since that was projectM's noise.
+
+- The fetched pack now sits in `_deps/cream-of-the-crop`
+  (`MILKDAWP_SOURCE_PRESETS_DIR`), only read. The build (target
+  `milkdawp_preset_pack`, in `ALL`) deletes and remakes
+  `content/Presets/Cream of the CrAWp` with `mdw-convert --out`, leaving out
+  `cmake/milkdawp-pack-exclusions.txt` (the 67 that projectM can't load), and
+  copies the pack's `LICENSE.md` and `README.md` beside them (D12: the
+  curator's notice ships unchanged). 9,728 presets.
+- The exclusions list is committed and comes from a full
+  `--verify --dry-run --write-exclusions` run, which writes the presets whose
+  original won't load as entries and any other rejection as a comment to look
+  at; regenerate it whenever the pack pin moves.
+- About a minute, and only when the pack, the exclusions, the removals or the
   conversion's own sources (`MilkConvert.cpp`, `MilkdawpPreset.cpp`) change:
   not whenever `mdw-convert` relinks, which is after any change to core.
-  `package.sh` refuses a content folder that wasn't converted.
-- Re-extracting the pack (a new pin) deletes the `.milkdawp` files with
-  everything else, and the step runs again. A preset removed at its author's
-  request loses its `.milkdawp` too.
-- `BundledContent::defaultPreset()` returns the default preset's `.milkdawp`
-  when there is one, since the playlist lists that in place of the `.milk`.
+  When cross-compiling no presets are bundled (a warning). `package.sh`
+  refuses a content folder without the made pack, or with a pre-8.11
+  "Cream of the Crop" still in it (configure removes that from a build tree).
+- Presets removed at their author's request are taken out of the fetched pack
+  before conversion, so they never reach it.
+- `BundledContent` names the pack's folder (`kPackFolderName`) and its default
+  preset as a `.milkdawp`. `BundledContent::fromOldPack` moves a 1.0 session's
+  "…/Presets/Cream of the Crop/…/x.milk" to the same place in the new pack,
+  when it exists there; the plugin applies it to the restored folder and
+  preset, the app to its saved ones. Ratings and tags are keyed by file name,
+  so they carry over anyway.
+- The installers take the 1.0 folder away on upgrade (Windows
+  `[InstallDelete]`, a macOS `preinstall` script, the Linux tarball's install
+  script; the `.deb` does it itself).
 - File associations cover `.milkdawp` (Windows installer, macOS app,
   Linux MIME type `application/x-milkdawp-preset`).
+- About, the FAQ, `THIRD_PARTY_NOTICES.md` and the preset-removal issue form
+  no longer say the presets ship "unchanged": each is the author's text byte
+  for byte plus our lines.
 
 ## Consequences
 
-- The pack works with Macros from the first launch; nothing generated is
-  committed, and the `.milk` files ship as they were.
+- The pack works with Macros from the first launch, and nothing generated is
+  committed. The original `.milk` files are no longer shipped (a change to
+  exploration doc §5.1, which shipped them for posterity): anyone can get
+  them from the pack's repository, and taking a `.milkdawp`'s `mdw_` lines
+  out gives each one back byte for byte.
+- `presetIndex` automation in a 1.0 session counts through a different list
+  (67 fewer presets), so it may land on other presets.
 - `mdw-convert` also works on anyone's own folders (beside their `.milk`
   files, keeping existing `.milkdawp` files unless told otherwise). It isn't
   shipped to users; it's a dev tool, as `mdw-view` is.
 - The heuristics are a first pass; their names and ranges (and ADR-0013's
   global constants) want a hand test in a DAW.
-- The verify thresholds are empirical. A preset wrongly turned down only
-  loses its Macros (it stays a `.milk`); one wrongly passed still runs the
+- The verify thresholds are empirical, and only "can't load" now keeps a preset
+  out of the pack; a "renders differently" is listed for a look. One wrongly
+  passed still runs the
   same code as the original plus lines that are exact at neutral by
   construction (ADR-0013), so the check is a safety net, not the guarantee.
-- Ruled out: curating by rating (all equal); a separate pack folder (both
-  versions would be listed); committing generated files; a determinism patch
+- Ruled out: curating by rating (all equal); a separate pack folder beside
+  the original (both would be listed); committing generated files; a determinism patch
   to projectM (it would touch five places and projectm-eval's static state).
 - Dev aids: `--print-compiled <preset>` shows what projectM gets;
   `--compare <a> <b>` renders two texts the verify way.

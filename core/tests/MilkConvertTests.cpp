@@ -298,6 +298,29 @@ TEST_CASE("convertFolder writes .milkdawp files beside the presets and never cha
   }
 }
 
+TEST_CASE("convertFolder can write into another folder, with the same layout (8.11)", "[core][MilkConvert]") {
+  TempTree source;
+  source.write("Fractal/Deep/one.milk", kPlain);
+  source.write("two.milk", kPlain);
+  source.write("skip.milk", kPlain);
+  const auto before = source.snapshot();
+  TempTree pack;
+
+  ConvertOptions options;
+  options.outputRoot = pack.root / "Converted";
+  options.exclude = {"skip.milk"};
+  const auto entries = convertFolder(source.root, options);
+  REQUIRE(entries.size() == 3);
+  CHECK(source.snapshot() == before); // nothing new beside the originals
+  const auto written = pack.snapshot();
+  CHECK(written.size() == 2);
+  REQUIRE(written.count("Converted/Fractal/Deep/one.milkdawp") == 1);
+  CHECK(written.count("Converted/two.milkdawp") == 1);
+  const auto one = parseMilkdawp(written.at("Converted/Fractal/Deep/one.milkdawp"));
+  CHECK(one.preset.milk == kPlain);
+  CHECK(one.preset.source == "Fractal/Deep/one.milk");
+}
+
 TEST_CASE("convertFolder takes a single file too (8.11)", "[core][MilkConvert]") {
   TempTree tree;
   tree.write("Sub/a.milk", kPlain);

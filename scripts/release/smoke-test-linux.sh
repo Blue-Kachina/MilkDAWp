@@ -57,8 +57,8 @@ pass "binaries need at most $newest"
 # 2. The AppImage's contents, and the app starting from it.
 [[ -x "$app/usr/bin/MilkDAWp" ]] || fail "no usr/bin/MilkDAWp in the AppImage"
 compgen -G "$app/usr/bin/libprojectM-4*.so" > /dev/null || fail "no libprojectM-4.so in the AppImage"
-[[ -d "$app/usr/share/milkdawp/Presets/Cream of the Crop" ]] || fail "no presets in the AppImage"
-count="$(find "$app/usr/share/milkdawp/Presets" -name '*.milk' | wc -l)"
+[[ -d "$app/usr/share/milkdawp/Presets/Cream of the CrAWp" ]] || fail "no presets in the AppImage"
+count="$(find "$app/usr/share/milkdawp/Presets" -name '*.milkdawp' | wc -l)"
 [[ "$count" -gt 9000 ]] || fail "only $count presets in the AppImage"
 pass "AppImage holds the app, projectM and $count presets"
 chmod +x "$appimage"
@@ -83,7 +83,7 @@ pass "pluginval (strictness 5) on the tarball's VST3"
 # 4. The .deb: install (apt resolves Depends), check, run, remove.
 apt-get install -y -qq "$deb" > /dev/null || fail "apt couldn't install the .deb"
 for path in /usr/bin/milkdawp /usr/lib/milkdawp/MilkDAWp /usr/lib/vst3/MilkDAWp.vst3/Contents/x86_64-linux/MilkDAWp.so \
-            "/usr/share/milkdawp/Presets/Cream of the Crop" /usr/share/applications/milkdawp.desktop \
+            "/usr/share/milkdawp/Presets/Cream of the CrAWp" /usr/share/applications/milkdawp.desktop \
             /usr/share/icons/hicolor/256x256/apps/milkdawp.png; do
   [[ -e "$path" ]] || fail ".deb didn't install $path"
 done

@@ -81,11 +81,14 @@ projectm_copyright="$triplet_dir/share/projectm/copyright"
 # The bundled presets and textures (cmake/BundledContent.cmake). A release
 # without them starts with an empty library, so they're required.
 content="$build_dir/content"
-[[ -d "$content/Presets/Cream of the Crop" && -d "$content/Textures" ]] \
-  || die "no bundled presets in $content (configured with MILKDAWP_BUNDLE_CONTENT=OFF?)"
-# ... converted, so they come with their Macros (8.11, tools/mdw-convert).
-[[ -f "$content/Presets/Cream of the Crop/.milkdawp-pack.stamp" ]] \
-  || die "the bundled presets weren't converted to .milkdawp (build the milkdawp_preset_pack target)"
+[[ -d "$content/Textures" ]] \
+  || die "no bundled textures in $content (configured with MILKDAWP_BUNDLE_CONTENT=OFF?)"
+# The presets are made by the build from the fetched pack, with their Macros
+# (8.11, ADR-0014); the original .milk files don't ship.
+[[ -f "$content/Presets/Cream of the CrAWp/.milkdawp-pack.stamp" ]] \
+  || die "the bundled presets weren't made (build the milkdawp_preset_pack target)"
+[[ ! -e "$content/Presets/Cream of the Crop" ]] \
+  || die "$content/Presets/Cream of the Crop is a build tree from before 8.11; reconfigure to remove it"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -205,9 +208,10 @@ cp "$projectm_copyright" "$stage/LICENSES/projectM-COPYRIGHT.txt"
       ;;
   esac
   echo
-  echo "Bundled presets: \"Cream of the Crop\", curated by Jason Fletcher (ISOSCELES), with"
-  echo "the MilkDrop texture pack, as packaged by the projectM project. Preset authors keep"
-  echo "their copyright; see Presets/Cream of the Crop/LICENSE.md. To have a preset"
+  echo "Bundled presets: \"Cream of the CrAWp\", the \"Cream of the Crop\" pack curated by"
+  echo "Jason Fletcher (ISOSCELES) as packaged by the projectM project, each preset given"
+  echo "MilkDAWp controls (.milkdawp), with the MilkDrop texture pack. Preset authors keep"
+  echo "their copyright; see Presets/Cream of the CrAWp/LICENSE.md. To have a preset"
   echo "removed, open an issue."
   echo
   echo "Licences: MilkDAWp is AGPL-3.0-or-later (LICENSE). projectM is LGPL-2.1, shipped as"

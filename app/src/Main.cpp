@@ -75,6 +75,9 @@ public:
     // 5.2: the library's ratings and tags, shared with the plugin.
     visualizer_->director().setPresetMetadata(engine::PresetMetadataStore::shared());
     visualizer_->director().setTagFilter(state_.tagFilter.toStdString());
+    // Settings from 1.0 may name the bundled pack where 1.0 had it (8.11).
+    state_.presetFolder = engine::BundledContent::fromOldPack(state_.presetFolder.toStdString());
+    state_.currentPresetPath = engine::BundledContent::fromOldPack(state_.currentPresetPath.toStdString());
     if (state_.presetFolder.isNotEmpty() && juce::File(state_.presetFolder).isDirectory()) {
       visualizer_->director().setPresetFolder(state_.presetFolder.toStdString(),
                                               state_.currentPresetPath.toStdString());

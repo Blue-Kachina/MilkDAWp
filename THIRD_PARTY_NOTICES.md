@@ -15,7 +15,7 @@ file; this document is the human-curated index of what's used and why.
 | zlib                                                          | zlib                        | JUCE's bundled copy, compiled in (§4.11; vcpkg's copy is not linked since 2026-09-26)                  | JUCE                                                                                                                                                                                                 |
 | libpng                                                        | libpng-2.0                  | JUCE's bundled copy, compiled in (§4.11; vcpkg's copy is not linked since 2026-09-26)                  | JUCE                                                                                                                                                                                                 |
 | projectM's transitive dependencies                            | various (see each port)     | None ship: the 4.2 pin needs only system libraries and the C/C++ runtime (`ProjectMDependency.cmake`)  | vcpkg                                                                                                                                                                                                |
-| ["Cream of the Crop" presets](https://github.com/projectM-visualizer/presets-cream-of-the-crop) | none formal (see below) | Data files, shipped unchanged with their `LICENSE.md` and `README.md` (6.1, D12) | Pinned commit and SHA-256 in `cmake/BundledContent.cmake` |
+| ["Cream of the Crop" presets](https://github.com/projectM-visualizer/presets-cream-of-the-crop) | none formal (see below) | Data files, shipped as "Cream of the CrAWp": each preset as a `.milkdawp`, its original text kept byte for byte with MilkDAWp control lines added; the 67 projectM can't load left out; `LICENSE.md` and `README.md` unchanged (6.1, D12, ADR-0014) | Pinned commit and SHA-256 in `cmake/BundledContent.cmake` |
 | [MilkDrop texture pack](https://github.com/projectM-visualizer/presets-milkdrop-texture-pack) | none stated (see below) | Image files, shipped unchanged with their `README.md` (6.1, D12) | Pinned commit and SHA-256 in `cmake/BundledContent.cmake` |
 | Microsoft Visual C++ 2015-2022 Redistributable (x64) | Microsoft's redistributable licence (Visual Studio) | Windows installer only: Microsoft's own `vc_redist.x64.exe`, unmodified, run when the runtime is missing or too old (6.2) | `https://aka.ms/vs/17/release/vc_redist.x64.exe` at packaging time |
 
@@ -30,7 +30,11 @@ and after two decades of free redistribution they are treated as public
 domain. The texture pack's README states no licence; it holds the textures
 originally released with MilkDrop plus others common in presets.
 
-We ship both unchanged, with their own notices, and credit the curator in the
+We ship the textures unchanged. The presets ship as "Cream of the CrAWp"
+(8.11, ADR-0014): each one as a `.milkdawp`, which is the original preset's
+text byte for byte plus lines that give it MilkDAWp controls (taking those
+lines out gives the original back); the 67 that projectM can't load are left
+out. Both ship with their own notices, and we credit the curator in the
 release README (and in About, 6.7). If an author asks for a preset or texture
 to be removed, we remove it and follow any removal upstream makes.
 

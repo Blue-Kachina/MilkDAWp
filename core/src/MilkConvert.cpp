@@ -505,7 +505,7 @@ std::vector<ConvertEntry> convertFolder(const std::filesystem::path& root, const
   for (const auto index : order) {
     auto entry = std::move(entries[index]);
     const auto& milkPath = milkFiles[index];
-    auto outPath = milkPath;
+    auto outPath = options.outputRoot.empty() ? milkPath : options.outputRoot / milkPath.lexically_relative(base);
     outPath.replace_extension(".milkdawp");
 
     const auto finish = [&](ConvertOutcome outcome, std::string detail = {}) {
@@ -567,6 +567,7 @@ std::vector<ConvertEntry> convertFolder(const std::filesystem::path& root, const
       continue;
     }
     if (!options.dryRun) {
+      std::filesystem::create_directories(outPath.parent_path(), error);
       if (auto failure = writeFile(outPath, out); !failure.empty()) {
         finish(ConvertOutcome::Failed, std::move(failure));
         continue;

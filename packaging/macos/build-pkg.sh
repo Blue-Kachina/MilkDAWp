@@ -58,8 +58,19 @@ mkdir -p "$presets_root"
 ditto "$content/Presets" "$presets_root/Presets"
 ditto "$content/Textures" "$presets_root/Textures"
 find "$presets_root" -name '.milkdawp-*' -delete
-pkgbuild --root "$presets_root" --identifier com.otitismedia.MilkDAWp.pkg.presets --version "$numeric" \
-  --install-location "/Library/Application Support/MilkDAWp" "$work/pkgs/presets.pkg"
+# 1.0 installed the pack as .milk files in "Cream of the Crop"; it ships as
+# "Cream of the CrAWp" since 8.11 (ADR-0014). Installer never removes files an
+# older version put down, so take the old folder away first.
+presets_scripts="$work/scripts-presets"
+mkdir -p "$presets_scripts"
+cat > "$presets_scripts/preinstall" <<'EOS'
+#!/bin/sh
+rm -rf "/Library/Application Support/MilkDAWp/Presets/Cream of the Crop"
+exit 0
+EOS
+chmod 755 "$presets_scripts/preinstall"
+pkgbuild --root "$presets_root" --scripts "$presets_scripts" --identifier com.otitismedia.MilkDAWp.pkg.presets \
+  --version "$numeric" --install-location "/Library/Application Support/MilkDAWp" "$work/pkgs/presets.pkg"
 
 cp "$stage/LICENSE" "$work/resources/LICENSE.txt"
 cp "$stage/README.txt" "$work/resources/README.txt"

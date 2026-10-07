@@ -1,8 +1,8 @@
-# Regenerate after a pack bump: see docs/adr/0014-mdw-convert.md. Last run 2026-10-07 against
-# presets-cream-of-the-crop 0180df21: 9,719 of 9,795 passed (2,512 exactly).
-# Presets mdw-convert --verify turned down: projectM can't load them, or the
-# conversion looks different from the original with every control neutral.
-# The build leaves these as plain .milk (milkdawp_preset_pack, tools/mdw-convert/CMakeLists.txt).
+# Presets left out of the shipped pack ("Cream of the CrAWp", tools/mdw-convert/CMakeLists.txt):
+# projectM can't load them at all, so they never played. From `mdw-convert --verify` on
+# 2026-10-07 against presets-cream-of-the-crop 0180df21. Regenerate after a pack bump
+# (docs/adr/0014-mdw-convert.md), keeping only the "can't load it" entries: presets that
+# "render differently" are shipped anyway, since that turned out to be projectM's own noise.
 
 # projectM can't load it: [PerPixelContext] Could not compile per-pixel code: syntax error, unexpected VAR(L2 C1)
 Dancer/Blobby Mirror/LuxXx - Beat Machina III.milk
@@ -46,17 +46,8 @@ Dancer/Shapes/Milk Artist At our Best - FED - SlowFast Ft AdamFX n Martin - HD C
 # projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
 Dancer/Tree Branch/martin + stahlregen - martin in da mash 12b.milk
 
-# renders differently: 0.30 from the original at the nearest (3 renders against 4), which differs by up to 0.00 from itself
-Dancer/Wake/suksma - yin - 395 - Artificial Inspiration (brainstorming - outward) + martin + stahlregen - elephant mating nz+2.milk
-
 # projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
 Dancer/Whirl/Liquid Glowsticks - ATwisted Pre Set Mix By AdamFX 2 martin - disco mix Ft Hexocollie 27.milk
-
-# renders differently: 5.61 from the original at the nearest (3 renders against 4), which differs by up to 3.49 from itself
-Drawing/Dunes/shifter + Flexi - liquid circuitry from the oblivion hive nz+.milk
-
-# renders differently: 0.26 from the original at the nearest (3 renders against 4), which differs by up to 0.00 from itself
-Drawing/Growth Mirror/suksma - flexi coheres vacuum energy - now don't freak out, i'm teleporting to your location.milk
 
 # projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
 Fractal/Core Mirror/LuxXx - Burnwheel I.milk
@@ -130,9 +121,6 @@ Fractal/Pointy/Zylot & Idiot24-7 - Unknown Power Source.milk
 # projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L53 C1)
 Geometric/Sphere Wild/AdamFX Enterz Tha Mash With Martin + stahlregen - AdamFX - In Tha Mash Effectz nz splatter bare.milk
 
-# renders differently: 1.01 from the original at the nearest (3 renders against 4), which differs by up to 0.60 from itself
-Geometric/Sphere Wild/nickel advice verqing mai tceqjevle oidaea r.milk
-
 # projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected '*'(L157 C46)
 Geometric/Stripes Dance/martin - beamer code 22h - lines - rhythmic and fast.milk
 
@@ -172,9 +160,6 @@ Reaction/Liquid Blobby/pheremones is spelled pheromones asshole.milk
 # projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
 Reaction/Liquid Blobby/there is gum stuck to my hate.milk
 
-# renders differently: 6.06 from the original at the nearest (3 renders against 4), which differs by up to 3.88 from itself
-Reaction/Liquid Gradient/va ultramix2 - 313_1.milk
-
 # projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
 Reaction/Liquid Ripples/LuxXx - electric cell park a.milk
 
@@ -183,9 +168,6 @@ Reaction/Liquid Ripples/LuxXx - electric cell park b nz+.milk
 
 # projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
 Reaction/Liquid Ripples/LuxXx - electric cell park b.milk
-
-# renders differently: 0.30 from the original at the nearest (3 renders against 4), which differs by up to 0.00 from itself
-Reaction/Liquid Ripples/fed + flexi - tech test 2-1 - humpgorge.milk
 
 # projectM can't load it: [ShapePerFrameContext] Could not compile custom shape 1 per-frame code: syntax error, unexpected end of file(L2 C0)
 Reaction/Liquid Simmering/sonar cow.milk
@@ -198,9 +180,6 @@ Sparkle/Explosions/2009 4th of July with AdamFX n Martin - into the fireworks E.
 
 # projectM can't load it: [PerPixelContext] Could not compile per-pixel code: syntax error, unexpected '*', expecting '('(L12 C12)
 Sparkle/Explosions/LuxXx - Brain Grind i.milk
-
-# renders differently: 2.78 from the original at the nearest (3 renders against 4), which differs by up to 0.37 from itself
-Sparkle/Explosions/suksma - flexi - fractrip - lofted guts - flacc.milk
 
 # projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L22 C1)
 Sparkle/Glimmer Mirror/430.milk
@@ -225,9 +204,3 @@ Supernova/Radiate/EVET - Hypraxis.milk
 
 # projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L22 C1)
 Supernova/Radiate/martin - sparky caleidoscope.milk
-
-# renders differently: 0.55 from the original at the nearest (3 renders against 4), which differs by up to 0.00 from itself
-Waveform/Wire Flat Double/MegalomaGreg - Ambitions [Flexi's mix 25 slip antithesis] [remix 10 zenarchy] --- Isosceles edit.milk
-
-# renders differently: 0.38 from the original at the nearest (3 renders against 4), which differs by up to 0.18 from itself
-Waveform/Wire Spirograph/fat cancer tour meant t nz+ asect.milk

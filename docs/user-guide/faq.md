@@ -15,12 +15,14 @@ pictures come from the presets: see the next question.
 
 ## Who made the presets?
 
-The bundled presets are "Cream of the Crop": about 9,800 MilkDrop presets
-curated and sorted by **Jason Fletcher (ISOSCELES)**, packaged by the projectM
-project with the MilkDrop texture pack. Each preset's author keeps its
-copyright. MilkDrop presets were, almost without exception, released freely
-and without a formal licence, and have been shared in visualizers for more
-than twenty years; the pack is shipped unchanged with its `LICENSE.md`.
+The bundled presets, "Cream of the CrAWp", are the "Cream of the Crop" pack:
+about 9,700 MilkDrop presets curated and sorted by **Jason Fletcher
+(ISOSCELES)**, packaged by the projectM project with the MilkDrop texture pack.
+Each preset's author keeps its copyright. MilkDrop presets were, almost without
+exception, released freely and without a formal licence, and have been shared
+in visualizers for more than twenty years. MilkDAWp ships each one as a
+`.milkdawp`: the preset exactly as its author wrote it, plus lines that give it
+Macros. The pack's `LICENSE.md` ships unchanged beside them.
 If you wrote a preset and want it removed, open an issue and it will be.
 
 ## What is projectM, and why is it a separate file?

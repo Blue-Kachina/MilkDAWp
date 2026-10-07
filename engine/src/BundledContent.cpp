@@ -7,13 +7,28 @@ namespace milkdawp::engine {
 
 juce::File BundledContent::defaultPreset() const {
   const auto file = presetFolder().getChildFile(kDefaultPresetRelativePath);
-  if (!file.existsAsFile()) {
-    return {};
+  return file.existsAsFile() ? file : juce::File();
+}
+
+std::string BundledContent::fromOldPack(const std::string& path) {
+  // "<content root>/Presets/Cream of the Crop[/...]", either slash.
+  const juce::String text(path);
+  const auto normalised = text.replaceCharacter('\\', '/');
+  const juce::String oldSegment = juce::String("/Presets/") + kOldPackFolderName;
+  const auto at = normalised.indexOf(oldSegment);
+  if (at < 0) {
+    return path;
   }
-  // The build converts the pack (8.11); the playlist then lists the
-  // .milkdawp in place of the .milk, so start on that.
-  const auto converted = file.withFileExtension("milkdawp");
-  return converted.existsAsFile() ? converted : file;
+  const auto end = at + oldSegment.length();
+  if (end < normalised.length() && normalised[end] != '/') {
+    return path; // "Cream of the Cropped", not the pack
+  }
+  // Keep everything up to "/Presets/" as it was written, slashes included.
+  juce::File file(text.substring(0, at + 9) + kPackFolderName + text.substring(end));
+  if (file.hasFileExtension("milk")) {
+    file = file.withFileExtension("milkdawp");
+  }
+  return file.exists() ? file.getFullPathName().toStdString() : path;
 }
 
 std::vector<std::string> BundledContent::textureSearchPaths() const {

@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        MilkDAWp ships the "Cream of the Crop" pack unchanged, and removes any preset its author asks it to (see the licence FAQ). We also pass the request on to the projectM project, which maintains the pack.
+        MilkDAWp ships the "Cream of the Crop" pack (as "Cream of the CrAWp": each preset as its author wrote it, with lines added for MilkDAWp's Macros), and removes any preset its author asks it to (see the licence FAQ). We also pass the request on to the projectM project, which maintains the pack.
   - type: textarea
     id: presets
     attributes:

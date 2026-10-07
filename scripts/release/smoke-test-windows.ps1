@@ -40,7 +40,7 @@ $expected = @(
   "$app\MilkDAWp.exe", "$app\projectM-4.dll", "$app\unins000.exe", "$app\licenses\LICENSE.txt",
   "$app\licenses\projectM-COPYRIGHT.txt", "$app\README.txt",
   "$vst3\Contents\x86_64-win\MilkDAWp.vst3", "$vst3\Contents\x86_64-win\projectM-4.dll",
-  "$content\Presets\Cream of the Crop\LICENSE.md", "$content\Textures\worms.jpg"
+  "$content\Presets\Cream of the CrAWp\LICENSE.md", "$content\Textures\worms.jpg"
 )
 foreach ($path in $expected) { if (-not (Test-Path $path)) { Fail "not installed: $path" } }
 $presets = (Get-ChildItem "$content\Presets" -Recurse -Filter *.milk).Count

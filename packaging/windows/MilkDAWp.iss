@@ -89,12 +89,17 @@ Name: "associate"; Description: "Open .milk and .milkdawp preset files with Milk
 [Components]
 Name: "app"; Description: "MilkDAWp app"; Types: full compact custom
 Name: "vst3"; Description: "VST3 plugin (Common Files\VST3)"; Types: full compact custom
-Name: "presets"; Description: "Cream of the Crop presets (~9,800) and textures"; Types: full custom
+Name: "presets"; Description: "Cream of the CrAWp presets (~9,700) and textures"; Types: full custom
 
 [Types]
 Name: "full"; Description: "Everything"
 Name: "compact"; Description: "App and plugin, without the presets"
 Name: "custom"; Description: "Choose"; Flags: iscustom
+
+[InstallDelete]
+; 1.0 installed the pack as .milk files here; it ships as "Cream of the CrAWp"
+; since 8.11 (ADR-0014). Sessions that named the old folder move to the new one.
+Type: filesandordirs; Name: "{commonappdata}\MilkDAWp\Presets\Cream of the Crop"
 
 [Files]
 ; The app folder: MilkDAWp.exe and projectM-4.dll side by side.
