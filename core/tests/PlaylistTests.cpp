@@ -56,6 +56,25 @@ TEST_CASE("Playlist::scanFolder finds only .milk files, recursively, in stable o
   }
 }
 
+TEST_CASE("Playlist::scanFolder finds .milkdawp presets; the .milk one was made from isn't listed twice (8.10)",
+          "[core][Playlist]") {
+  const auto root = std::filesystem::temp_directory_path() /
+                    std::filesystem::path("milkdawp_playlist_mdw_" + std::to_string(std::random_device{}()));
+  std::filesystem::create_directories(root / "pack");
+  for (const char* name : {"a.milk", "a.milkdawp", "b.milk", "C.MILKDAWP", "c.milk", "pack/a.milk", "d.milkdawp"}) {
+    std::ofstream(root / name) << "zoom=1";
+  }
+  const auto entries = Playlist::scanFolder(root.string());
+  std::filesystem::remove_all(root);
+
+  std::vector<std::string> names;
+  for (const auto& entry : entries) {
+    names.push_back(std::filesystem::path(entry.relativePath).generic_string());
+  }
+  // a.milk and c.milk have their .milkdawp beside them; pack/a.milk doesn't.
+  CHECK(names == std::vector<std::string>{"C.MILKDAWP", "a.milkdawp", "b.milk", "d.milkdawp", "pack/a.milk"});
+}
+
 TEST_CASE("Playlist::scanFolder on a nonexistent folder returns empty", "[core][Playlist]") {
   CHECK(Playlist::scanFolder("Z:/definitely/does/not/exist/milkdawp").empty());
 }

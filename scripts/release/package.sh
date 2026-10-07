@@ -83,6 +83,9 @@ projectm_copyright="$triplet_dir/share/projectm/copyright"
 content="$build_dir/content"
 [[ -d "$content/Presets/Cream of the Crop" && -d "$content/Textures" ]] \
   || die "no bundled presets in $content (configured with MILKDAWP_BUNDLE_CONTENT=OFF?)"
+# ... converted, so they come with their Macros (8.11, tools/mdw-convert).
+[[ -f "$content/Presets/Cream of the Crop/.milkdawp-pack.stamp" ]] \
+  || die "the bundled presets weren't converted to .milkdawp (build the milkdawp_preset_pack target)"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT

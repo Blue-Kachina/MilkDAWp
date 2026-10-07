@@ -6,8 +6,11 @@
 #   - No GLEW dependency: 4.2 resolves GL functions itself via vendored glad.
 #   - No macos-pkgconfig.patch: master no longer adds the "opengl" pkg-config
 #     requirement that the patch removed on Apple.
+#   - Our own patches, never submitted upstream (ADR-0012):
+#     0001 adds projectm_set_preset_variable() (Phase 8.7).
 # To bump: change REF, set SHA512 to 0, run the install once, and copy the
-# actual hash from the error message. Then update ADR-0008 and roadmap 2.12.
+# actual hash from the error message. Then re-apply the patches (regenerate
+# any that no longer apply), and update ADR-0008 and roadmap 2.12.
 # The pin must be a full commit hash, never a branch name.
 
 vcpkg_from_github(
@@ -16,6 +19,8 @@ vcpkg_from_github(
     REF 1e7ef7803b69024d1e0656705670adda2ffac817 # master, 2026-09-10
     SHA512 2f07e13b1f67c9ca2988510b08cb04f9abefa1b46fb4a265a35aca02f52d99b7bd9c263916c2f4582d2f6378357875a483cb8a8fb24134f2684b0d1b1570d1ca
     HEAD_REF master
+    PATCHES
+        0001-set-preset-variable.patch
 )
 
 vcpkg_check_features(OUT_FEATURE_OPTIONS FEATURE_OPTIONS

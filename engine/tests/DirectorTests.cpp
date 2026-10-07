@@ -161,6 +161,69 @@ TEST_CASE("Director loads a preset folder, steps through it, and skips files tha
   render.unregisterSurface(surface);
 }
 
+TEST_CASE("Director plays a .milkdawp in place of the .milk beside it, with its Macro defaults and names (8.10)",
+          "[engine][Director][milkdawp]") {
+  engine::Visualizer::Config config;
+  engine::Visualizer visualizer(config);
+  auto& render = visualizer.renderEngine();
+  auto& director = visualizer.director();
+  waitFor([&] { return render.isAvailable() || !render.unavailableReason().empty(); });
+  if (!render.isAvailable()) {
+    SUCCEED("projectM or a GL context is unavailable here: " + render.unavailableReason());
+    return;
+  }
+  const int surface = render.registerSurface();
+  render.reportSurfaceSize(surface, 320, 180, true);
+  engine::EngineControls controls;
+  controls.transitionMode = core::TransitionMode::Manual;
+  controls.cutStyle = core::CutStyle::Hard;
+  visualizer.setControls(controls);
+
+  juce::TemporaryFile holder;
+  const auto folder = holder.getFile();
+  folder.createDirectory();
+  const auto source = juce::File(MILKDAWP_FIXTURES_DIR).getChildFile("presets");
+  source.getChildFile("mdw-border.milk").copyFileTo(folder.getChildFile("mdw-border.milk"));
+  source.getChildFile("mdw-wave.milk").copyFileTo(folder.getChildFile("mdw-wave.milk"));
+  folder.getChildFile("mdw-border.milkdawp")
+      .replaceWithText(source.getChildFile("mdw-border.milk").loadFileAsString() +
+                       "mdw_format=1\n"
+                       "mdw_ctl_1_name=Glow\nmdw_ctl_1_slot=macro2\nmdw_ctl_1_mode=replace\n"
+                       "mdw_ctl_1_target=ob_r\nmdw_ctl_1_value=1\nmdw_ctl_1_default=0.25\n"
+                       "mdw_ctl_2_slot=macro9\nmdw_ctl_2_mode=offset\nmdw_ctl_2_target=rot\n");
+  // Opening the .milk the .milkdawp was made from starts on the .milkdawp.
+  director.setPresetFolder(folder.getFullPathName().toStdString(),
+                           folder.getChildFile("mdw-border.milk").getFullPathName().toStdString());
+
+  REQUIRE(waitFor([&] { return director.status().playlistSize == 2; }));
+  REQUIRE(waitFor([&] { return render.stats().presetsLoaded >= 1; }));
+  CHECK(director.presetNames() == std::vector<std::string>{"mdw-border", "mdw-wave"});
+  auto current = director.currentPreset();
+  CHECK(juce::File(juce::String(current.path)).getFileName() == "mdw-border.milkdawp");
+  CHECK(current.milkdawp);
+  CHECK(current.macroNames[1] == "Glow");
+  CHECK_FALSE(current.macroDefaults[0].has_value());
+  REQUIRE(current.macroDefaults[1].has_value());
+  CHECK(*current.macroDefaults[1] == 0.25f);
+  CHECK(render.stats().presetsFailed == 0); // projectM took the compiled text
+  // The broken control is reported, with the file's name.
+  const auto diagnostics = visualizer.diagnostics();
+  CHECK(std::any_of(diagnostics.recentErrors.begin(), diagnostics.recentErrors.end(),
+                    [](const core::DiagnosticsError& error) {
+                      return error.message.find("mdw-border.milkdawp: Control 2 left out") != std::string::npos;
+                    }));
+
+  director.requestNext();
+  REQUIRE(waitFor([&] { return director.currentPreset().path.find("mdw-wave") != std::string::npos; }));
+  current = director.currentPreset();
+  CHECK_FALSE(current.milkdawp);
+  CHECK(current.macroDefaults == core::MacroDefaults{});
+
+  render.unregisterSurface(surface);
+  director.setPresetFolder({});
+  folder.deleteRecursively();
+}
+
 TEST_CASE("Director advances automatically in Timed mode and not while locked (2.6)", "[engine][Director]") {
   engine::Visualizer::Config config;
   engine::Visualizer visualizer(config);

@@ -6,18 +6,19 @@
 #include <algorithm>
 #include <filesystem>
 #include <numeric>
+#include <set>
 #include <stdexcept>
+#include <string>
 
 namespace milkdawp::core {
 
 namespace {
 constexpr std::size_t kMaxHistoryLength = 256;
 
-bool isMilkFile(const std::filesystem::path& path) {
-  auto ext = path.extension().string();
-  std::transform(ext.begin(), ext.end(), ext.begin(),
+std::string lowered(std::string text) {
+  std::transform(text.begin(), text.end(), text.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  return ext == ".milk";
+  return text;
 }
 } // namespace
 
@@ -29,15 +30,33 @@ std::vector<PlaylistEntry> Playlist::scanFolder(const std::string& rootPath) {
     return entries;
   }
 
+  // Each .milkdawp, as its path without the extension, so the .milk it was
+  // made from (kept beside it, exploration doc §5.1) isn't listed twice.
+  std::set<std::string> milkdawpStems;
+  std::vector<std::filesystem::path> milkFiles;
+  const auto add = [&entries, &root](const std::filesystem::path& path) {
+    PlaylistEntry entry;
+    entry.absolutePath = std::filesystem::absolute(path).string();
+    entry.relativePath = std::filesystem::relative(path, root).string();
+    entries.push_back(std::move(entry));
+  };
   for (const auto& dirEntry : std::filesystem::recursive_directory_iterator(
            root, std::filesystem::directory_options::skip_permission_denied)) {
-    if (!dirEntry.is_regular_file() || !isMilkFile(dirEntry.path())) {
+    if (!dirEntry.is_regular_file()) {
       continue;
     }
-    PlaylistEntry entry;
-    entry.absolutePath = std::filesystem::absolute(dirEntry.path()).string();
-    entry.relativePath = std::filesystem::relative(dirEntry.path(), root).string();
-    entries.push_back(std::move(entry));
+    const auto extension = lowered(dirEntry.path().extension().string());
+    if (extension == ".milkdawp") {
+      milkdawpStems.insert(lowered(std::filesystem::path(dirEntry.path()).replace_extension().string()));
+      add(dirEntry.path());
+    } else if (extension == ".milk") {
+      milkFiles.push_back(dirEntry.path());
+    }
+  }
+  for (auto& path : milkFiles) {
+    if (milkdawpStems.count(lowered(std::filesystem::path(path).replace_extension().string())) == 0) {
+      add(path);
+    }
   }
 
   // Filesystem enumeration order is not guaranteed stable across platforms

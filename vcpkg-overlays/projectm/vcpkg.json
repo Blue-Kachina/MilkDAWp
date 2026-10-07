@@ -1,7 +1,8 @@
 {
-  "$comment": "Overlay port (ADR-0008, D15): upstream projectM master at a pinned commit, pre-release 4.2.0. The registry port is 4.1.7, which cannot render to an FBO. Drop this overlay once upstream tags 4.2.0 and the registry port catches up. The commit hash lives in portfile.cmake.",
+  "$comment": "Overlay port (ADR-0008, D15): upstream projectM master at a pinned commit, pre-release 4.2.0. The registry port is 4.1.7, which cannot render to an FBO. It also carries our own patches (ADR-0012), so it stays even after upstream tags 4.2.0. The commit hash lives in portfile.cmake.",
   "name": "projectm",
   "version": "4.2.0",
+  "port-version": 1,
   "description": "The projectM Music Visualizer. A cross-platform, OpenGL-based reimplementation of Milkdrop as a reusable library. Pre-release 4.2.0 built from a pinned upstream master commit.",
   "homepage": "https://github.com/projectM-visualizer/projectm",
   "license": "LGPL-2.1-only AND MIT AND MIT-0 AND Apache-2.0",

@@ -34,7 +34,10 @@ enum class PlaylistPolicy { Sequential, ShuffleNoRepeat, Weighted };
 /// owns calling into this from the analysis thread (§4.2).
 class Playlist {
 public:
-  /// Recursively scans `rootPath` for `.milk` files. Returns entries sorted
+  /// Recursively scans `rootPath` for `.milk` and `.milkdawp` presets. A
+  /// `.milk` with a `.milkdawp` of the same name beside it is left out: that
+  /// is the original the `.milkdawp` was made from, kept as an archive
+  /// (exploration doc §5.1), and the `.milkdawp` plays it. Returns entries sorted
   /// by relative path, so rescanning an unchanged folder always produces the
   /// same order (§7 Phase 1.11: "stable ordering across rescans") --
   /// filesystem enumeration order is not guaranteed stable on every platform,

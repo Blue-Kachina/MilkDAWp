@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <string>
@@ -11,15 +12,26 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "milkdawp/core/ParameterModel.h"
 #include "milkdawp/ui/KeyboardNavigation.h"
 
 namespace milkdawp::ui {
 
-/// Why a Visual control does nothing yet, or empty if it works now (Phase 8,
-/// Stage A). Shown as the control's tooltip, and the control is dimmed: a
-/// control faked as a post effect would mean something else once its real
-/// version arrives (exploration doc §6.2).
-[[nodiscard]] juce::String visualControlUnavailableReason(const std::string& parameterId);
+/// What the preset playing now offers the Visual panel (Phase 8.10): a
+/// `.milkdawp` takes Warp and gives the Macros it uses a name.
+struct PresetControlsInfo {
+  bool milkdawp = false;
+  std::array<std::string, core::kMacroCount> macroNames{}; // empty: the preset doesn't use that Macro
+
+  friend bool operator==(const PresetControlsInfo&, const PresetControlsInfo&) = default;
+};
+
+/// Why a Visual control does nothing with `preset`, or empty if it works.
+/// Shown as the control's tooltip, and the control is dimmed: a control faked
+/// as a post effect would mean something else once its real version arrives
+/// (exploration doc §6.2).
+[[nodiscard]] juce::String visualControlUnavailableReason(const std::string& parameterId,
+                                                          const PresetControlsInfo& preset = {});
 
 /// The gate's level meter (Phase 8.2b), like the one on a hardware gate: the
 /// layer's input level, the threshold as a line, and a light that is lit while
@@ -68,6 +80,10 @@ public:
   /// The shell's timer, while the panel shows: this instance's layer input and
   /// gate state (`engine::LayerChannel::gateLevelDb()` and `gateOpen()`).
   void setGateMeter(float levelDb, bool open);
+  /// The shell's timer, while the panel shows: what the preset playing now
+  /// offers (`engine::Director::currentPreset()`). Names the Macros it uses
+  /// and dims what it can't use. Cheap when nothing changed.
+  void setPresetControls(const PresetControlsInfo& preset);
   /// "Reset visual": every Visual global back to neutral, through the widgets
   /// (so the shell's attachments write the parameters). Macros and the gate stay.
   void resetVisual();

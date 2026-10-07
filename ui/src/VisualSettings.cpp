@@ -52,12 +52,21 @@ juce::String tooltipFor(const std::string& id) {
 
 } // namespace
 
-juce::String visualControlUnavailableReason(const std::string& parameterId) {
-  if (parameterId == "visualWarp" || parameterId == "visualWaveSize") {
-    return "Needs a .milkdawp preset (coming later): it changes the preset itself, not the picture";
+juce::String visualControlUnavailableReason(const std::string& parameterId, const PresetControlsInfo& preset) {
+  if (parameterId == "visualWarp" && !preset.milkdawp) {
+    return "Needs a .milkdawp preset: it changes the preset's own warp, not the picture";
   }
-  if (parameterId.rfind("macro", 0) == 0) {
-    return ".milk presets don't use Macros: .milkdawp presets (coming later) give them a meaning";
+  if (parameterId == "visualWaveSize") {
+    return "Not available yet: projectM gives a preset's code no wave size to change";
+  }
+  if (parameterId.rfind("macro", 0) == 0 && parameterId.size() == 6) {
+    if (!preset.milkdawp) {
+      return ".milk presets don't use Macros: .milkdawp presets give them a meaning";
+    }
+    const auto slot = static_cast<std::size_t>(parameterId.back() - '1');
+    if (slot < preset.macroNames.size() && preset.macroNames[slot].empty()) {
+      return "This preset doesn't use Macro " + juce::String(static_cast<int>(slot) + 1);
+    }
   }
   return {};
 }
@@ -108,6 +117,7 @@ class VisualSettingsPanel::Content final : public juce::Component {
 public:
   struct Row {
     std::string id;
+    juce::String name; // the label's text when the preset gives it no other
     juce::Label label;
     std::unique_ptr<juce::Component> control;
   };
@@ -138,7 +148,36 @@ public:
 
   GateMeter meter;
 
+  /// Names the Macros the preset uses, and dims what it can't use.
+  void applyPreset(const PresetControlsInfo& preset) {
+    if (preset == preset_) {
+      return;
+    }
+    preset_ = preset;
+    forEachRow([this](Row& row) { style(row); });
+  }
+
 private:
+  void style(Row& row) {
+    if (row.id.rfind("macro", 0) == 0 && row.id.size() == 6) {
+      const auto& name = preset_.macroNames[static_cast<std::size_t>(row.id.back() - '1')];
+      row.label.setText(name.empty() ? row.name : juce::String(name), juce::dontSendNotification);
+    }
+    const auto unavailable = visualControlUnavailableReason(row.id, preset_);
+    auto tooltip = unavailable.isNotEmpty() ? unavailable : tooltipFor(row.id);
+    if (row.label.getText() != row.name && row.name.isNotEmpty()) {
+      tooltip = row.name + ": " + tooltip; // "Macro 1: Each preset decides..."
+    }
+    if (auto* client = dynamic_cast<juce::SettableTooltipClient*>(row.control.get())) {
+      client->setTooltip(tooltip);
+    }
+    row.label.setTooltip(tooltip);
+    // Dimmed, not disabled: it can still be set (and automated) ahead of time.
+    const float alpha = unavailable.isNotEmpty() ? 0.4f : 1.0f;
+    row.control->setAlpha(alpha);
+    row.label.setAlpha(alpha);
+  }
+
   void makeSection(Section& section, const juce::String& title, const std::string& group) {
     section.header.setText(title, juce::dontSendNotification);
     section.header.setFont(juce::FontOptions(13.0f, juce::Font::bold));
@@ -196,17 +235,8 @@ private:
         break;
       }
       }
-      const auto unavailable = visualControlUnavailableReason(spec.id);
-      const auto tooltip = unavailable.isNotEmpty() ? unavailable : tooltipFor(spec.id);
-      if (auto* client = dynamic_cast<juce::SettableTooltipClient*>(row->control.get())) {
-        client->setTooltip(tooltip);
-      }
-      row->label.setTooltip(tooltip);
-      if (unavailable.isNotEmpty()) {
-        // Dimmed, not disabled: it can still be set (and automated) ahead of time.
-        row->control->setAlpha(0.4f);
-        row->label.setAlpha(0.4f);
-      }
+      row->name = row->label.getText();
+      style(*row);
       addAndMakeVisible(*row->control);
       section.rows.push_back(std::move(row));
     }
@@ -290,6 +320,7 @@ private:
   Section visual_;
   Section macros_;
   Section gate_;
+  PresetControlsInfo preset_; // a plain .milk until the shell says otherwise
 };
 
 // ---- VisualSettingsPanel -----------------------------------------------------------
@@ -359,6 +390,8 @@ void VisualSettingsPanel::setGateMeter(float levelDb, bool open) {
   }
   content_->meter.setState(levelDb, threshold, open, enabled);
 }
+
+void VisualSettingsPanel::setPresetControls(const PresetControlsInfo& preset) { content_->applyPreset(preset); }
 
 void VisualSettingsPanel::paint(juce::Graphics& g) {
   const auto bounds = getLocalBounds().toFloat().reduced(0.5f);

@@ -32,7 +32,8 @@ struct BundledContent {
 
   [[nodiscard]] juce::File presetFolder() const { return root.getChildFile("Presets").getChildFile("Cream of the Crop"); }
   [[nodiscard]] juce::File texturesFolder() const { return root.getChildFile("Textures"); }
-  /// The default preset, or a null File if this pack no longer has it.
+  /// The default preset (its .milkdawp when the build made one, 8.11), or a
+  /// null File if this pack no longer has it.
   [[nodiscard]] juce::File defaultPreset() const;
   /// What to hand projectm_set_texture_search_paths(): the textures folder.
   [[nodiscard]] std::vector<std::string> textureSearchPaths() const;

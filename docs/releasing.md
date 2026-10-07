@@ -98,7 +98,7 @@ Locally:
   docker run --rm -v "$PWD:/src" -w /src ubuntu:22.04 bash -c '
     eval "$(bash scripts/release/linux-setup.sh | sed "s/^/export /")" &&
     cmake --preset release-linux -B /tmp/rel -DVCPKG_INSTALLED_DIR=/tmp/rel/vcpkg_installed &&
-    cmake --build /tmp/rel --target milkdawp_plugin_VST3 milkdawp_app &&
+    cmake --build /tmp/rel --target milkdawp_plugin_VST3 milkdawp_app milkdawp_preset_pack &&
     bash scripts/release/package.sh linux /tmp/rel 1.0.0-beta.1 /src/dist &&
     bash scripts/release/smoke-test-linux.sh /src/dist 1.0.0-beta.1'
   ```

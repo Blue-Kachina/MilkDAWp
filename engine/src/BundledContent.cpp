@@ -7,7 +7,13 @@ namespace milkdawp::engine {
 
 juce::File BundledContent::defaultPreset() const {
   const auto file = presetFolder().getChildFile(kDefaultPresetRelativePath);
-  return file.existsAsFile() ? file : juce::File();
+  if (!file.existsAsFile()) {
+    return {};
+  }
+  // The build converts the pack (8.11); the playlist then lists the
+  // .milkdawp in place of the .milk, so start on that.
+  const auto converted = file.withFileExtension("milkdawp");
+  return converted.existsAsFile() ? converted : file;
 }
 
 std::vector<std::string> BundledContent::textureSearchPaths() const {

@@ -29,7 +29,8 @@ struct PresetInfo {
 ///
 /// Keyed by the preset's file name, not its path, so moving or re-rooting a
 /// preset folder keeps them, and the same preset in two packs (a common
-/// thing with MilkDrop packs) shares one rating. Case-insensitive.
+/// thing with MilkDrop packs) shares one rating. Case-insensitive. A
+/// `.milkdawp` counts as the `.milk` it was made from (Phase 8.10).
 ///
 /// Pure value type: the engine's `PresetMetadataStore` loads, saves and
 /// shares it.

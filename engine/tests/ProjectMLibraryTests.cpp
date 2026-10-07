@@ -26,6 +26,7 @@ TEST_CASE("ProjectMFunctions defaults to an all-null table", "[engine][ProjectML
   CHECK(fn.setFrameTime == nullptr);
   CHECK(fn.openglRenderFrameFbo == nullptr);
   CHECK(fn.openglBurnTexture == nullptr);
+  CHECK(fn.setPresetVariable == nullptr);
   CHECK(fn.setPresetSwitchFailedEventCallback == nullptr);
   CHECK(fn.setLogCallback == nullptr);
   CHECK(fn.setLogLevel == nullptr);
@@ -54,6 +55,7 @@ TEST_CASE("ProjectMLibrary::load with a bogus bundle hint never crashes and hono
     CHECK(fn.openglRenderFrameFbo != nullptr);
     CHECK(fn.openglBurnTexture != nullptr);
     CHECK(fn.setFrameTime != nullptr);
+    CHECK(fn.setPresetVariable != nullptr); // our patch (ADR-0012) is in the loaded library
     CHECK(ProjectMLibrary::isSupportedVersion(ProjectMLibrary::parseVersion(result.library->versionString())));
   } else {
     CHECK(result.library == nullptr);

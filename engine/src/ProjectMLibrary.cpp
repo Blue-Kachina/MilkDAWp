@@ -110,13 +110,15 @@ ProjectMLibrary::LoadResult ProjectMLibrary::load(const juce::File& bundleDirect
   require("projectm_set_preset_switch_failed_event_callback", fn.setPresetSwitchFailedEventCallback);
   require("projectm_set_log_callback", fn.setLogCallback);
   require("projectm_set_log_level", fn.setLogLevel);
+  require("projectm_set_preset_variable", fn.setPresetVariable);
   require("projectm_get_version_string", fn.getVersionString);
   require("projectm_free_string", fn.freeString);
 
   if (!allResolved) {
     result.unavailableReason = "loaded '" + std::string(kLibraryFileNames[0]) +
                                 "' but it is missing expected symbol(s): " + missing +
-                                " (projectM older than 4.2? MilkDAWp needs 4.2 or later, see ADR-0008)";
+                                " (projectM older than 4.2, or without MilkDAWp's patches? MilkDAWp needs the "
+                                "patched 4.2 from vcpkg-overlays/projectm, see ADR-0008 and ADR-0012)";
     return result;
   }
 

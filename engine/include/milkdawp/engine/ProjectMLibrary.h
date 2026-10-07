@@ -42,6 +42,9 @@ using ProjectMLogCallback = void (*)(const char* message, int logLevel, void* us
 /// several entries below (`createWithOpenGlLoadProc`, `openglRenderFrameFbo`,
 /// `setFrameTime`, `setLogCallback`) do not exist in 4.1.x, so a 4.1 library
 /// fails load() with those symbols named as missing.
+///
+/// `setPresetVariable` is not upstream at all: it comes from our own patch in
+/// the overlay port (ADR-0012), so a stock projectM 4.2 also fails load().
 struct ProjectMFunctions {
   // 4.2: resolves GL entry points through `loadProc` (or projectM's own
   // resolver when null) on the first create call in the process; later
@@ -91,6 +94,12 @@ struct ProjectMFunctions {
   // the preset's own warp and decay (8.6f, media "Burn in").
   void (*openglBurnTexture)(ProjectMHandle instance, std::uint32_t texture, int left, int top, int width,
                             int height) = nullptr;
+
+  // MilkDAWp patch (ADR-0012, 8.7): sets a variable in the active preset(s)'
+  // per-frame and per-vertex code, written before per-frame code every frame;
+  // both presets get it during a soft cut, and later presets before their
+  // init code. Case-insensitive name; render thread only.
+  void (*setPresetVariable)(ProjectMHandle instance, const char* name, double value) = nullptr;
 
   void (*setPresetSwitchFailedEventCallback)(ProjectMHandle instance,
                                               ProjectMPresetSwitchFailedCallback callback,

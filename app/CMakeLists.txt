@@ -87,10 +87,10 @@ juce_add_gui_app(milkdawp_app
   CAMERA_PERMISSION_ENABLED TRUE
   CAMERA_PERMISSION_TEXT "MilkDAWp shows your camera in the visuals when you choose it as the media source. Nothing is recorded."
   # §4.6: macOS Info.plist document-type metadata for double-clicking a
-  # .milk file. Windows/Linux registry/desktop-file registration is
+  # .milk or .milkdawp (8.11) file. Windows/Linux registry/desktop-file registration is
   # installer work (§9, not started); Main.cpp already handles the file or
   # folder this hands it either way.
-  DOCUMENT_EXTENSIONS "milk"
+  DOCUMENT_EXTENSIONS milk milkdawp
 )
 
 target_sources(milkdawp_app PRIVATE src/Main.cpp)

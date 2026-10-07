@@ -2876,7 +2876,13 @@ controls at neutral renders identically to its `.milk` source in the headless ch
 
 Stage A, controls that work on any renderer:
 
-- [ ] 8.1 (M) ADR (D17) + `ParameterModel`: the 16 Visual globals (Hue, Saturation,
+Update (2026-10-05): Stage A is done, ADR-0011 records it, and CI is green on every job
+(Windows, macOS, Linux GCC, ASan, TSan, RTSan). Matthew hand-tested the Visual panel, an
+image, a camera on Windows, Displace and Burn in. Still to hand-test: OSC, Lock Macros under
+REAPER's write/latch modes, the gate on hard stops, a video following REAPER's playhead, a
+Linux camera, and macOS video on a real Mac. Working notes: `phase8_stageA_handoff.md`.
+
+- [x] 8.1 (M) ADR (D17) + `ParameterModel`: the 16 Visual globals (Hue, Saturation,
       Brightness, Speed, Zoom, Rotation, Warp, Trails, Wave Size, Pixelate, Glow, Blur,
       Mirror, Kaleidoscope, RGB Split, Media Mix; exploration doc §6.2), Macro 1–8 whose
       meaning each preset sets, and Lock Macros (on: Macros keep their values across a preset
@@ -2884,49 +2890,161 @@ Stage A, controls that work on any renderer:
       list, so slots are fixed and Macro names live in the drawer. Parameter groups,
       additive state keys, `docs/parameters.md` regenerated, a "Visual" drawer section in
       both shells.
-- [ ] 8.2 (M) `EffectsChain` in the engine: colour, pixelate, blur, glow, RGB split, mirror,
+      Update (2026-10-05): done; ADR-0011.
+      - **Parameters:** 28 parameters are **appended** after the 26 of 1.0, so REAPER's
+        index-based automation stays valid (a test pins the order). Host groups are "Visual",
+        "Macros" and "Layer Gate", built from contiguous runs so grouping never reorders.
+        `ParameterSpec` gained `group` and `skewCentre` (Speed centres on 1).
+      - **Lock Macros:** `core/MacroLock`, applied as parameter gestures on preset changes, by
+        the plugin processor's timer and the app's. A restored session's preset arriving
+        doesn't count as a change.
+      - **UI:** a "Visual..." popover in both settings menus (`ui/VisualSettings`). It is built
+        from the parameter groups, uses three columns that fit without scrolling, and
+        scrolls in small windows (the wheel scrolls the panel, not the sliders). It dims
+        Warp, Wave Size and the Macros with the reason.
+      - **Plumbing:** the plugin copies every engine-read parameter generically each block
+        (`engine::parameterMember`).
+- [x] 8.2 (M) `EffectsChain` in the engine: colour, pixelate, blur, glow, RGB split, mirror,
       kaleidoscope, extra feedback, per layer and on the canvas; GPU tests against
       hand-computed values; zero cost when every amount is neutral.
-- [ ] 8.2b (M) **Gate**, like a guitar noise gate: with `layerGateEnabled` on, a layer
+      Update (2026-10-05): done (`engine/EffectsChain`).
+      - **Order:** fixed. Colour and geometry in one pass, then separable blur, quarter-res
+        glow, and Trails (`max(cur, prev × 0.96 × trails)`).
+      - **Scaling:** sizes scale with frame height. Rotation is a speed, and the frame settles
+        upright at 0.
+      - **Neutral costs nothing:** `EffectsState` frees its targets while neutral.
+      - **Placement:** a sender's effects run on its own layer; the window owner's run on the
+        mixed canvas (for a lone instance that is its own picture).
+- [x] 8.2b (M) **Gate**, like a guitar noise gate: with `layerGateEnabled` on, a layer
       disappears while its own input is below `layerGateThreshold` (-100..0 dBFS, default
       -80 dB, suited to DI guitar) and comes back the moment it returns, so clean stops in the
       music are clean stops in the picture. `layerGateRelease` (0..2000 ms, default 80 ms)
       sets the fade-out. Instant open, 3 dB hysteresis, short fixed hold; the gated layer keeps rendering so it
       doesn't freeze; drawer meter with threshold line. Layer parameter group, not one of the
       16 globals. Exploration doc §4.4.
-- [ ] 8.3 (S) Speed: integrate `dt × speed` into `projectm_set_frame_time` (never multiply
+      Update (2026-10-05): done (`core/LayerGate`, 50 ms hold).
+      - **Level:** the render thread takes each frame's peak of the samples fed. A frame
+        with no new audio keeps the last level for 150 ms, for hosts with big buffers.
+      - **Rendering:** a gated layer keeps rendering. A lone instance fades from black.
+      - **Meter:** in the Visual panel.
+      - **Tests:** synthetic clean stops and a decaying note at the threshold. Not hand-tested
+        yet.
+- [x] 8.3 (S) Speed: integrate `dt × speed` into `projectm_set_frame_time` (never multiply
       time, so turning the knob never jumps). Document what it can't slow.
-- [ ] 8.4 (M) OSC in/out via `juce_osc`; outbound beat/bar/drop signals.
+      Update (2026-10-05): done (`core/PresetClock`). Every layer now runs on our clock, not
+      projectM's system clock, so a paused engine no longer fast-forwards on resume. A soft
+      cut runs at least real time, so Speed 0 can't freeze a blend. Documented in ADR-0011 and
+      the user guide.
+- [x] 8.4 (M) OSC in/out via `juce_osc`; outbound beat/bar/drop signals.
+      Update (2026-10-05): done (`core/OscAddress`, `engine/OscRemote`, one per process).
+      - **In:** `/milkdawp/[<instance>|*/]<paramId>[/norm] f` and `/milkdawp/[<instance>/]next|prev`,
+        applied as parameter gestures, so the DAW records them.
+      - **Out:** `/beat i`, `/bar i`, `/drop` and `/preset s` per instance (`DirectorStatus`
+        gained `beatIndex`/`barIndex`).
+      - **Settings:** off by default (a firewall prompt), in `osc.json` beside the preset
+        metadata, under Settings > OSC remote control. Not hand-tested yet.
 - [-] 8.5 Web remote: moved to Phase 9 (2026-10-05).
-- [ ] 8.6 (L) Media sources: camera (JUCE `CameraDevice`; V4L2 on Linux), images, video
+- [x] 8.6 (L) Media sources: camera (JUCE `CameraDevice`; V4L2 on Linux), images, video
       (platform decoders: Media Foundation, AVFoundation, MediaCodec, and the system's
       GStreamer loaded at runtime on Linux; no bundled FFmpeg, so no codec-patent exposure
       and no second LGPL dependency; host-transport-synced in the plugin) as
       compositor layers; displacement blend modes. Spike: camera burned into projectM's
       feedback (`burn_texture`). Split before starting.
+      Update (2026-10-05): split as below and done. Media Mix is the media's opacity. The media
+      is drawn over the layer's picture before the effects (over the canvas for a window owner),
+      cropped to fill, not stretched. The source is a setting (Settings > Media source), saved as
+      `mediaSourcePath` in the plugin state and in the app prefs. MediaCodec (Android) waits for
+      Phase 7.
+      - [x] 8.6a Images (`engine/MediaSource`), uploaded to a texture only when a frame is new.
+      - [x] 8.6b Cameras through JUCE's `CameraDevice` (Windows, macOS), opened once per
+            process and shared. Hand-tested on Windows.
+      - [x] 8.6c Video on Windows (Media Foundation), decoded on a thread per source and looping.
+            In the plugin it follows the host's sample position, also while stopped (scrubbing
+            works, renders repeat). In the app it runs freely.
+      - [x] 8.6d Video on macOS (AVFoundation) and Linux (GStreamer via `dlopen`, neither
+            linked nor shipped), and Linux cameras through V4L2 (YUYV or MJPEG). Each platform's
+            tests encode their own clip (`VideoDecoder::writeTestClip`): H.264 on
+            Windows/macOS, Theora on Linux. Not MJPEG: JUCE's bundled libjpeg clashes with
+            GStreamer's in the RTSan build, which exports every symbol.
+      - [x] 8.6e Media blend modes, a setting rather than a 17th global: Normal, Add,
+            Screen, Multiply, Luma key, **Displace** (the media's red/green push the picture,
+            read from a ~90 px mip so camera noise can't jitter it). Not in `layerBlend`:
+            adding a choice would remap recorded automation.
+      - [x] 8.6f Spike → shipped as the **Burn in** blend: `projectm_opengl_burn_texture`
+            every frame, from a cropped copy whose alpha is Media Mix. The first version burned
+            every Nth frame and strobed. Finding for 8.12: projectM 4.2's
+            `projectm_set_texture_load_event_callback` accepts a GL texture for any sampler a
+            preset names, which may make `sampler_camera` possible without patch 2. Ownership
+            (projectM deletes the texture) needs a spike first.
 
 Stage B, `.milkdawp` v1 on patched projectM:
 
-- [ ] 8.7 (M) **Spike:** `projectm_set_preset_variable` patch in `vcpkg-overlays/projectm`;
-      prove per-frame, per-vertex and soft-cut behaviour; ADR; upstream PR.
-- [ ] 8.8 (S) **Compatibility check:** do stock projectM and MilkDrop open a renamed
+- [x] 8.7 (M) **Spike:** `projectm_set_preset_variable` patch in `vcpkg-overlays/projectm`;
+      prove per-frame, per-vertex and soft-cut behaviour; ADR. No upstream PR (2026-10-05): we carry the patch.
+      Update (2026-10-05): done, ADR-0012. All claims proven headless on Windows; Linux CI/macOS pending.
+- [x] 8.8 (S) **Compatibility check:** do stock projectM and MilkDrop open a renamed
       `.milkdawp` (extra `mdw_*` keys) as the plain preset? The superset format is decided and
       our loader strips those keys itself, so the result only goes into the user docs.
-- [ ] 8.9 (M) `core/MilkdawpPreset`: parse, validate, serialize, version migration; compile
+      Update (2026-10-06): yes, both, once renamed to `.milk` (ADR-0013). projectM proven
+      headless; MilkDrop 2 from its source (`state.cpp`): both look up only keys they know.
+      MilkDrop's editor drops the `mdw_` lines when it saves. Found on the way: both readers
+      stop code at the first missing `per_frame_N`, so the doc's `per_frame_9NN` would never
+      have run.
+- [x] 8.9 (M) `core/MilkdawpPreset`: parse, validate, serialize, version migration; compile
       controls (replace / offset / scale / rate / expression) into appended per-frame code;
       tests that neutral controls reproduce the original preset exactly.
-- [ ] 8.10 (M) Engine and library: load `.milkdawp`, push control values per frame, route
+      Update (2026-10-06): done, ADR-0013.
+      - **Reading** never fails: a broken control is left out with a reason (in the recent
+        errors), unknown `mdw_` keys are kept for saving, and the rest is the original byte for byte.
+      - **Compiling**: generated lines are numbered on from the preset's own, and lines past a gap are
+        renamed so they stay unread. Controls come first, then Zoom, Rotation, Warp and Trails.
+      - **Exact at neutral**: a control's value is `default + span × (Macro − Macro default)`,
+        with literals written to the bit, so a Macro on its default leaves every variable exactly as
+        the preset set it. Also `per_pixel` controls, and `mdw_dt` for rates.
+      - **Wave Size can't be done**: projectM reads the wave scale once, not per frame.
+- [x] 8.10 (M) Engine and library: load `.milkdawp`, push control values per frame, route
       globals through overrides where supported and the effects chain otherwise;
       `PresetLibrary` and the browser handle both file types.
-- [ ] 8.11 (L) `tools/mdw-convert`: bulk `.milk` → `.milkdawp` with proposed controls,
+      Update (2026-10-06): done.
+      - **Engine**: the director compiles the file; every frame each layer's preset gets
+        `mdw_m1`..`m8`, `mdw_zoom`/`rot`/`warp`/`trails` and `mdw_dt`. A `.milkdawp` layer's
+        post effects leave out Zoom and Rotation (the preset does them).
+      - **Shells**: Lock Macros off moves to the preset's defaults (`Director::currentPreset()`).
+        The Visual panel names each Macro and dims only what the preset can't use.
+      - **Library**: the scan takes both types and hides a `.milk` whose `.milkdawp` sits beside
+        it; ratings and tags key a `.milkdawp` as its `.milk`; the app opens and accepts drops of both.
+      - **Tests**: headless (Macros, globals, neutral identity), a Director end-to-end test.
+        Windows and Linux GCC. Not hand-tested yet.
+- [x] 8.11 (L) `tools/mdw-convert`: bulk `.milk` → `.milkdawp` with proposed controls,
       headless before/after identity check, report; a first curated pack. Writes beside the
       originals: **`.milk` files are kept for posterity and never deleted, moved or rewritten**
       (exploration doc §5.1).
+      Update (2026-10-06): done; ADR-0014.
+      - **Split** as 8.11a core (`core/MilkConvert`: analysis, Macro proposals,
+        `convertFolder`, `withoutRandomness`; `core/Sha256`), 8.11b the CLI, 8.11c
+        `--verify`, 8.11d the bundled pack.
+      - **Macros**: up to 8 per preset, all centred and neutral: q-variables the preset
+        feeds its shaders or mesh from the music, then what its code animates (Wave,
+        borders, motion vectors, echo, Drift, Centre, Squash), then what it shows, then
+        motion every preset has.
+      - **No rating to curate by**: all 9,795 presets are rated 5. Matthew: convert the
+        whole pack beside the originals at build time (target `milkdawp_preset_pack`),
+        leaving out what `--verify` turns down (`cmake/milkdawp-pack-exclusions.txt`,
+        76 of 9,795: 67 projectM can't load at all, 9 rendered differently). 9,719 convert,
+        2,512 of them rendering exactly like the original; 7.5 Macros per preset.
+      - **Verify** pins projectM's per-load randomness in both texts (`rand()`,
+        `rand_preset`, random and 2D noise textures) and warms up first (the first
+        render in a process differs); what's left (3D noise) is judged against the
+        original's own spread over several renders.
+      - Also: `.milkdawp` file associations (Windows, macOS, Linux MIME), the default
+        preset starts on its `.milkdawp`, `package.sh` refuses an unconverted pack.
+      - **Not yet**: a hand test of the Macro names and ranges in a DAW; macOS and the
+        sanitizer CI jobs.
 - [ ] 8.12 (M) Second patch: external textures (`sampler_camera`, `sampler_video`) and new
       preset variables (beat phase, bar phase, BPM, onset); a few hand-made presets using them.
 
 - [ ] 8.D (S) **Decision gate:** own renderer go / no-go, as an ADR, from what Stage B showed
-      (projectM limits, upstream response, Android performance, cost of carrying patches).
+      (projectM limits, Android performance, cost of carrying patches).
 
 Stage C, EyesCream, our own MilkDrop-compatible renderer (only on "go"; each item L, split
 first):
@@ -3005,6 +3123,22 @@ back, revoke one key.
   transition held at a fixed blend progress: one engine, one audio input, two preset states
   under a per-vertex blend mask. Layers generalizes that to independent inputs. The 1.0
   guardrail lives in 2.13 (per-instance state in a struct).
+- **Macro slots as insert slots** (Matthew, 2026-10-07). Treat the 8 Macros like a DAW
+  channel's insert slots: on the preset that's playing, the user can **add** a control to an
+  empty slot or **replace** the one in a slot, picking from what `mdw-convert` can propose
+  (Wave, borders, motion vectors, echo, Drift, Centre, Squash, and the q-variables this
+  preset feeds its shaders or mesh). The file is never changed: the override renders only
+  while the preset is loaded. Works on a plain `.milk` too, since any preset can take the
+  controls. Shape: the shell keeps a per-preset override list; the director builds the
+  `MilkdawpPreset` from the file plus the overrides and compiles it with
+  `compileForProjectM` (ADR-0013), so it needs no new engine path. Open questions:
+  - Whether overrides persist in the DAW project state, keyed by preset (likely, so a
+    session reopens as it was), or vanish on preset change.
+  - Changing a slot means recompiling, i.e. reloading the preset, which resets its feedback
+    picture. A soft cut onto the same preset may hide that; needs a check.
+  - Whether "save as `.milkdawp`" is ever offered. That would make it the control editor
+    exploration doc §9 Q8 ruled out for now, and it would touch the 1.0 non-goal "we do not
+    author presets".
 
 ---
 
@@ -3072,7 +3206,7 @@ smoke tests and validators rather than a percentage.
 | Preset pack licensing (D12: MilkDrop presets carry no formal licence) | an author asks for removal | ship the pack's LICENSE.md and attribution; honour removal requests and follow upstream removals; the in-app downloader (6.1) remains the fallback if bundling ever has to stop |
 | ~10k bundled presets (D12) | slow first-run scan, unusable popup menu | searchable browser (6.1b); measure scan and shuffle at full pack size in 6.1 |
 | Android build path (JUCE's CMake API has no Android support; our projectM overlay has never built for an Android triplet) | Phase 7 costs much more than estimated, or needs a second build system | 7.1 spike first, time-boxed, before anything else is scheduled; Phase 4 follows ADR-0010's boundary rules so the shell isn't the problem too |
-| Phase 8 depends on a projectM patch (variable setter) that upstream may not take | we carry it in the overlay port on every projectM bump | keep the patch tiny; pinned-hash bump procedure already exists (ADR-0008); own renderer is the long-term exit (8.D) |
+| Phase 8 depends on a projectM patch (variable setter) we don't submit upstream (2026-10-05) | we carry it in the overlay port on every projectM bump | keep the patch tiny; pinned-hash bump procedure already exists (ADR-0008); own renderer is the long-term exit (8.D) |
 | Phase 8's own renderer is the largest item ever proposed here (HLSL translation, MilkDrop quirks) | years of work, or a renderer worse than projectM | gated behind Stage B (8.D); shaders converted offline; "close" is the bar, not pixel-perfect; projectM keeps any preset ours is visibly far off on |
 | Readback surfaces (Linux, Android, refusing drivers) cost a full-frame GPU→CPU→GPU copy per surface | lower frame rate on weak GPUs, especially phones | only while a readback surface exists; adaptive quality (5.3) shrinks the frame; JUCE sharing patch (7.8) removes it on Android |
 

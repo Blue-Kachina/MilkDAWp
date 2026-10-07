@@ -252,7 +252,8 @@ std::string MilkDAWpAudioProcessor::mediaSourcePath() const {
 }
 
 void MilkDAWpAudioProcessor::timerCallback() {
-  const auto current = visualizer_->director().currentPresetPath();
+  const auto preset = visualizer_->director().currentPreset();
+  const auto& current = preset.path;
   if (current.empty() || current == lastPresetPath_) {
     return;
   }
@@ -272,8 +273,8 @@ void MilkDAWpAudioProcessor::timerCallback() {
     return; // the first preset this instance shows: nothing changed from anything
   }
   const bool locked = load(apvts.getRawParameterValue("lockMacros"), 0.0f) > 0.5f;
-  // A .milk declares no Macros; .milkdawp presets will (Stage B).
-  const auto moves = core::macrosAfterPresetChange(locked, core::MacroDefaults{});
+  // A .milk declares no Macros (they go back to 0); a .milkdawp its own defaults.
+  const auto moves = core::macrosAfterPresetChange(locked, preset.macroDefaults);
   for (int slot = 0; slot < core::kMacroCount; ++slot) {
     const auto& move = moves[static_cast<std::size_t>(slot)];
     const juce::String id(core::macroParameterId(slot));

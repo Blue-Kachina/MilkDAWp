@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -15,6 +16,7 @@
 #include "milkdawp/core/AudioRing.h"
 #include "milkdawp/core/HostTransport.h"
 #include "milkdawp/core/LayerGate.h"
+#include "milkdawp/core/MacroLock.h"
 #include "milkdawp/core/Messages.h"
 #include "milkdawp/core/Playlist.h"
 #include "milkdawp/core/SeqlockSnapshot.h"
@@ -60,6 +62,9 @@ struct EngineControls {
   /// reads every frame.
   core::VisualControls visual;
   core::LayerGateSettings gate;
+  /// Phase 8.10: Macro 1-8 (0..1), which `.milkdawp` presets read as
+  /// `mdw_m1`..`mdw_m8`. Like `visual`, handed to the primary layer's channel.
+  std::array<float, core::kMacroCount> macros{};
 };
 
 enum class BeatSource : std::uint8_t { None, Detected, Host };
@@ -89,6 +94,15 @@ struct DirectorStatus {
   // the filter matches nothing (it is then ignored).
   std::uint32_t autoSelectable = 0;
   bool tagFilterMatchesNothing = false;
+};
+
+/// The preset the director last handed over, and what it says about the
+/// Macros (Phase 8.10). A plain `.milk` uses no Macros.
+struct CurrentPreset {
+  std::string path;
+  bool milkdawp = false;
+  core::MacroDefaults macroDefaults{}; // for Lock Macros off; nullopt where unused
+  std::array<std::string, core::kMacroCount> macroNames{}; // empty where unused
 };
 
 /// The engine's analysis thread (§4.2, Phase 2.6). Consumes the audio ring in
@@ -136,14 +150,20 @@ public:
   /// old one that missed cuts while it stood down. No-op without a current preset.
   void requestReissueCurrent() noexcept { reissueRequests_.fetch_add(1); }
 
-  /// Scans `folder` recursively for .milk presets (on the director thread)
-  /// and starts playing: `preferredPresetPath` if it is in the folder,
-  /// otherwise the `presetIndex` control.
+  /// Scans `folder` recursively for .milk and .milkdawp presets (on the
+  /// director thread, `core::Playlist::scanFolder`) and starts playing:
+  /// `preferredPresetPath` if it is in the folder, otherwise the
+  /// `presetIndex` control.
   void setPresetFolder(const std::string& folder, const std::string& preferredPresetPath = {});
   void rescan();
   [[nodiscard]] std::string presetFolder() const;
   [[nodiscard]] std::string currentPresetPath() const;
-  /// Display name (path relative to the folder, without ".milk"), or empty.
+  /// The path and its Macro defaults and names together (one lock), so a
+  /// shell reacting to a preset change never pairs one preset's path with
+  /// another's defaults.
+  [[nodiscard]] CurrentPreset currentPreset() const;
+  /// Display name (path relative to the folder, without ".milk" or
+  /// ".milkdawp"), or empty.
   [[nodiscard]] std::string presetName(std::int32_t index) const;
   /// Every display name, in playlist order (one lock, for the preset picker).
   [[nodiscard]] std::vector<std::string> presetNames() const;
@@ -202,7 +222,7 @@ private:
   mutable std::mutex mutex_; // guards everything below
   FolderRequest folderRequest_;
   std::string currentFolder_;
-  std::string currentPresetPath_;
+  CurrentPreset currentPreset_;
   std::vector<std::string> presetNames_;
   std::vector<std::string> presetPaths_; // parallel to presetNames_
   std::vector<std::pair<std::string, std::string>> pendingBlacklistOps_; // path, reason ("": unblacklist

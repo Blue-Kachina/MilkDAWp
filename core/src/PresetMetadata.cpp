@@ -50,7 +50,14 @@ std::vector<std::string_view> split(std::string_view text, char separator) {
 
 std::string PresetMetadata::keyFor(std::string_view pathOrName) {
   const auto slash = pathOrName.find_last_of("/\\");
-  return lowerAscii(slash == std::string_view::npos ? pathOrName : pathOrName.substr(slash + 1));
+  auto key = lowerAscii(slash == std::string_view::npos ? pathOrName : pathOrName.substr(slash + 1));
+  // A .milkdawp shares its .milk original's ratings and tags (8.10): it plays
+  // the same preset, and the two sit side by side (exploration doc §5.1).
+  constexpr std::string_view milkdawp = ".milkdawp";
+  if (key.size() > milkdawp.size() && key.compare(key.size() - milkdawp.size(), milkdawp.size(), milkdawp) == 0) {
+    key.resize(key.size() - 4); // ".milkdawp" -> ".milk"
+  }
+  return key;
 }
 
 PresetInfo PresetMetadata::get(std::string_view path) const {

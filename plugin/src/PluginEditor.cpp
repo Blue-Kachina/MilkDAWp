@@ -747,6 +747,8 @@ void MilkDAWpAudioProcessorEditor::timerCallback() {
   if (visualSettings.isVisible()) {
     const auto& layer = engine.primaryLayer();
     visualSettings.setGateMeter(layer.gateLevelDb(), layer.gateOpen());
+    const auto preset = processorRef.visualizer().director().currentPreset();
+    visualSettings.setPresetControls({preset.milkdawp, preset.macroNames});
   }
   // Other instances come and go (and link up) while the panel is open.
   if (outputSettings.isVisible()) {

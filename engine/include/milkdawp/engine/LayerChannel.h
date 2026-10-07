@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -11,6 +12,7 @@
 #include "milkdawp/core/AudioRing.h"
 #include "milkdawp/core/LayerGate.h"
 #include "milkdawp/core/Messages.h"
+#include "milkdawp/core/ParameterModel.h"
 #include "milkdawp/core/SeqlockSnapshot.h"
 #include "milkdawp/core/VisualControls.h"
 #include "milkdawp/engine/MediaSource.h"
@@ -101,6 +103,11 @@ public:
   /// thread reads.
   void setVisual(const core::VisualControls& visual) noexcept { visual_.publish(visual); }
   [[nodiscard]] core::VisualControls visual() const noexcept { return visual_.read(); }
+  /// Phase 8.10: Macro 1-8 (0..1). Every frame the render thread sets them in
+  /// this layer's preset as `mdw_m1`..`mdw_m8`, which `.milkdawp` code reads.
+  /// Same writer as `setVisual`.
+  void setMacros(const std::array<float, core::kMacroCount>& macros) noexcept { macros_.publish(macros); }
+  [[nodiscard]] std::array<float, core::kMacroCount> macros() const noexcept { return macros_.read(); }
   /// The gate: while on, the layer fades out whenever its own input is below
   /// the threshold, and is back on the next loud frame. Unlike Mute or an
   /// Opacity of 0, a gated layer keeps being fed and rendered, so on reopening
@@ -174,6 +181,7 @@ private:
   std::atomic<bool> visible_{true};
   std::atomic<int> order_{0};
   core::SeqlockSnapshot<core::VisualControls> visual_;
+  core::SeqlockSnapshot<std::array<float, core::kMacroCount>> macros_;
   std::atomic<bool> gateEnabled_{false};
   std::atomic<float> gateThresholdDb_{-80.0f};
   std::atomic<float> gateReleaseMs_{80.0f};

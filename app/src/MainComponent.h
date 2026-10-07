@@ -145,7 +145,7 @@ private:
   void notifyStateChanged();
   void recordRecentlyPlayed(const juce::String& absolutePath);
   /// Phase 8.1: on a preset change, un-locked Macros move to its defaults.
-  void applyMacroLock();
+  void applyMacroLock(const core::MacroDefaults& defaults);
 
   // juce::FileDragAndDropTarget (§4.6): a .milk file or a preset folder
   // dropped on the main window.

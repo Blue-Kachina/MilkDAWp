@@ -46,14 +46,17 @@ public:
 
   /// Copies `text` into a free slot and offers it to the render thread.
   /// Returns false if no slot is free (the render thread has not caught up
-  /// yet); the caller retries on its next tick.
-  bool offer(std::uint32_t presetId, const std::string& text) {
+  /// yet); the caller retries on its next tick. `milkdawp`: the text was
+  /// compiled from a `.milkdawp` (Phase 8.10), so the preset takes the Visual
+  /// globals it can (Zoom, Rotation) itself rather than as post effects.
+  bool offer(std::uint32_t presetId, const std::string& text, bool milkdawp = false) {
     const auto slot = free_.pop();
     if (!slot) {
       return false;
     }
     slots_[*slot].text = text;
     slots_[*slot].presetId = presetId;
+    slots_[*slot].milkdawp = milkdawp;
     ready_.push(*slot); // cannot fail: at most kSlots slots exist
     return true;
   }
@@ -87,6 +90,7 @@ public:
   }
 
   [[nodiscard]] const char* text(std::uint8_t slot) const noexcept { return slots_[slot].text.c_str(); }
+  [[nodiscard]] bool milkdawp(std::uint8_t slot) const noexcept { return slots_[slot].milkdawp; }
 
   void release(std::uint8_t slot) noexcept {
     if (held_[slot]) {
@@ -101,6 +105,7 @@ private:
   struct Slot {
     std::string text;
     std::uint32_t presetId = 0;
+    bool milkdawp = false;
   };
 
   [[nodiscard]] std::size_t heldCount() const noexcept {

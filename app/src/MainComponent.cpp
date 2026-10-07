@@ -29,7 +29,7 @@ constexpr int kDefaultHeight = 720;
 
 enum MenuIndex { FileMenu = 0, PlaybackMenu = 1, ViewMenu = 2, HelpMenu = 3 };
 
-bool isPresetFile(const juce::File& file) { return file.hasFileExtension("milk"); }
+bool isPresetFile(const juce::File& file) { return file.hasFileExtension("milk;milkdawp"); }
 
 core::WindowBounds toWindowBounds(juce::Rectangle<int> r) noexcept {
   return {r.getX(), r.getY(), r.getWidth(), r.getHeight()};
@@ -964,12 +964,13 @@ void MainComponent::timerCallback() {
     state_.drawerPinned = drawer_.isPinned();
     notifyStateChanged();
   }
-  if (const juce::String current(visualizer_.director().currentPresetPath());
-      current.isNotEmpty() && current != state_.currentPresetPath) {
+  if (const auto preset = visualizer_.director().currentPreset();
+      !preset.path.empty() && juce::String(preset.path) != state_.currentPresetPath) {
+    const juce::String current(preset.path);
     state_.currentPresetPath = current;
     recordRecentlyPlayed(current);
     if (presetSeen_) {
-      applyMacroLock();
+      applyMacroLock(preset.macroDefaults);
     }
     notifyStateChanged();
   }
@@ -978,10 +979,10 @@ void MainComponent::timerCallback() {
   presetSeen_ = presetSeen_ || visualizer_.director().currentPresetPath().size() > 0;
 }
 
-void MainComponent::applyMacroLock() {
+void MainComponent::applyMacroLock(const core::MacroDefaults& defaults) {
   // Phase 8.1: un-locked Macros move to the new preset's defaults. A .milk
-  // declares none; .milkdawp presets will (Stage B).
-  const auto moves = core::macrosAfterPresetChange(binding_.get("lockMacros") > 0.5f, core::MacroDefaults{});
+  // declares none (they go back to 0); a .milkdawp its own (8.10).
+  const auto moves = core::macrosAfterPresetChange(binding_.get("lockMacros") > 0.5f, defaults);
   for (int slot = 0; slot < core::kMacroCount; ++slot) {
     const auto& move = moves[static_cast<std::size_t>(slot)];
     const auto id = core::macroParameterId(slot);
@@ -1055,6 +1056,8 @@ void MainComponent::updateStatusText() {
   if (visualSettings_.isVisible()) {
     const auto& layer = visualizer_.renderEngine().primaryLayer();
     visualSettings_.setGateMeter(layer.gateLevelDb(), layer.gateOpen());
+    const auto preset = visualizer_.director().currentPreset();
+    visualSettings_.setPresetControls({preset.milkdawp, preset.macroNames});
   }
   if (transitionSettings_.isVisible()) {
     transitionSettings_.refreshRelevance();

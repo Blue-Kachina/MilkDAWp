@@ -35,7 +35,7 @@ video, images).
 | Phone / web remote (roadmap Phase 9) | High | M–L | No. Needs a small embedded HTTP + WebSocket server (JUCE has none). |
 | Camera, video, image as compositor layers | High | M | No. They are just more inputs to `LayerCompositor` (L2). |
 | Camera painted *into* projectM's feedback loop | Medium (spike) | S–M | No, if `projectm_opengl_burn_texture` behaves well enough (§8 Q4 in the Layers doc: it is a full-strength one-shot draw). |
-| True per-preset overrides (zoom, rot, warp, wave colour, q-vars) on **every** existing preset, full fidelity | High, *with a small projectM patch* | M | **No.** See §4.2: one setter for named preset variables, carried in our overlay port and offered upstream. |
+| True per-preset overrides (zoom, rot, warp, wave colour, q-vars) on **every** existing preset, full fidelity | High, *with a small projectM patch* | M | **No.** See §4.2: one setter for named preset variables, carried in our overlay port (no upstream PR, decided 2026-10-05). |
 | `.milkdawp` v1 files (a `.milk` plus controls, effects, inputs) | High | M | No. v1 renders on patched projectM. |
 | Camera/video as a texture *inside* preset shaders (`sampler_camera`) | Medium | M | No with a second projectM patch (register an external GL texture by name); yes otherwise. |
 | New preset variables (`beat_phase`, `bar_phase`, `bpm`, `onset`, macros) | High | S | No. Same setter as the overrides. |
@@ -113,25 +113,32 @@ shells get every feature.
 
 ### 4.2 The projectM patch (Stage B's foundation)
 
-Two functions, carried as a patch in `vcpkg-overlays/projectm` (`vcpkg_from_github(... PATCHES ...)`) and
-proposed upstream:
+Two functions, carried as a patch in `vcpkg-overlays/projectm` (`vcpkg_from_github(... PATCHES ...)`). We do
+**not** submit them upstream (decided 2026-10-05): upstream review is slow, and nothing should wait on it.
 
 - `projectm_set_preset_variable(instance, name, value)`: writes a named variable into the active preset's
-  per-frame context *before* per-frame code runs each frame (persisting until changed). Covers macros
-  (`mdw_m1`..`mdw_m8`), new audio variables (`mdw_beat_phase`, `mdw_bar_phase`, `mdw_bpm`, `mdw_onset`), and
-  the override inputs. During a soft-cut both presets receive it.
+  per-frame **and** per-vertex contexts *before* per-frame code runs each frame (persisting until changed).
+  Both, because MilkDrop copies only built-ins and `q1`..`q32` from per-frame to per-vertex code, so a
+  custom variable would never get there on its own (found in 8.7). Covers macros (`mdw_m1`..`mdw_m8`), new
+  audio variables (`mdw_beat_phase`, `mdw_bar_phase`, `mdw_bpm`, `mdw_onset`), and the override inputs.
+  During a soft-cut both presets receive it. Built in 8.7; ADR-0012.
 - Later, `projectm_set_external_texture(instance, name, gl_texture_id, w, h)`: registers a GL texture the
   texture manager hands out as `sampler_<name>` in warp/comp shaders. Covers `sampler_camera`,
   `sampler_video`.
 
 The override itself needs no patch: when we load a `.milkdawp`, we **append** generated per-frame and
-per-pixel lines after the preset's own code (MilkDrop runs `per_frame_N` lines in order), e.g.
+per-pixel lines after the preset's own code (MilkDrop runs `per_frame_N` lines in order), e.g. for a
+preset whose own code ends at `per_frame_7`:
 
 ```
-per_frame_901=zoom = (zoom + (mdw_zoom_v - zoom)*mdw_zoom_amt) * mdw_zoom_mul;
-per_frame_902=rot = rot + mdw_rot_add;
-per_frame_903=wave_r = wave_r * mdw_tint_r;
+per_frame_8=rot = rot + mdw_dt * ((0) + (0.4) * (mdw_m1 - (0.5)));
+per_frame_9=zoom = zoom * pow(1.04, mdw_zoom);
+per_frame_10=warp = warp * mdw_warp;
 ```
+
+The numbers carry on from the preset's own: projectM and MilkDrop both stop reading code at the first
+missing number, so an earlier sketch's `per_frame_901` would never have run (found in 8.8). The exact
+rules, and why a Macro on its default changes nothing bit for bit, are in ADR-0013.
 
 so the preset computes its value, then our line reshapes it, then the warp mesh and shaders see the
 result. Because overrides act on the preset's own variables, they compound through the feedback loop
@@ -275,6 +282,7 @@ Name decided 2026-10-05: **EyesCream**. Only built if the gate in 8.D says so. S
 new keys prefixed `mdw_`, written in the same indexed style MilkDrop already uses (`wavecode_0_r=`). If a
 spike (8.8) shows projectM ignores unknown keys, then a `.milkdawp` loads on stock projectM as its original
 preset, MilkDrop-era editors can still open it, diffs stay readable, and the converter is lossless.
+*8.8 (2026-10-06):* it does, and so does MilkDrop 2, once the file is renamed to `.milk` (ADR-0013).
 
 ```ini
 [preset00]
@@ -315,7 +323,7 @@ per_frame_1=wave_r = 0.5 + 0.5*sin(time*1.13);
 ...
 ```
 
-The `mdw_ctl_*_target`/`mode` pairs are compiled at load into the appended `per_frame_9NN` lines of §4.2;
+The `mdw_ctl_*_target`/`mode` pairs are compiled at load into the appended `per_frame_N` lines of §4.2;
 `expr` controls append their `code` as written.
 
 ### 5.0 Superset vs the alternatives (superset chosen 2026-10-05)
@@ -326,19 +334,19 @@ file to share, rate, tag, put in a playlist), and the original `.milk` still sit
 (§5.1), so the duplication is deliberate: the `.milk` is the archive, the `.milkdawp` is the working copy.
 
 How it loads on patched projectM (Stage B): our loader reads the file, takes out the `mdw_` lines, turns
-the controls into the appended `per_frame_9NN` lines, and hands projectM ordinary `.milk` text through
+the controls into the appended `per_frame_N` lines, and hands projectM ordinary `.milk` text through
 `projectm_load_preset_data`. So projectM never needs to tolerate our keys; spike 8.8 is only about whether
 *stock* tools (projectM elsewhere, MilkDrop itself) can open a renamed `.milkdawp` as a plain preset.
 
-| | **Superset** (chosen) | **Sidecar** | **Container** (TOML/JSON) |
-|---|---|---|---|
-| What it is | `.milk` text + `mdw_` lines, one file | `foo.milkdawp` holds only the `mdw_` lines and names `foo.milk` | New structured file with the `.milk` text embedded as a string |
-| Files per preset | 1 (+ the archived `.milk`) | 2, which must travel together | 1 (+ the archived `.milk`) |
-| Opens in MilkDrop/projectM tools | Yes, if renamed | The `.milk` does; the controls are lost | No |
-| Breaks if the `.milk` is moved/renamed | No | **Yes** | No |
-| Human-readable, diff-friendly | Yes, same style as `.milk` | Yes | Yes, but code in escaped strings |
-| Multi-line code (Stage C GLSL) | Awkward: one `key=value` per line, as `.milk` does (`warp_1=`, `warp_2=`…) | Same | Natural (multi-line strings) |
-| New parser dependency | None (we parse `.milk` already) | None | toml++ or a JSON lib |
+|                                        | **Superset** (chosen)                                                      | **Sidecar**                                                     | **Container** (TOML/JSON)                                      |
+|----------------------------------------|----------------------------------------------------------------------------|-----------------------------------------------------------------|----------------------------------------------------------------|
+| What it is                             | `.milk` text + `mdw_` lines, one file                                      | `foo.milkdawp` holds only the `mdw_` lines and names `foo.milk` | New structured file with the `.milk` text embedded as a string |
+| Files per preset                       | 1 (+ the archived `.milk`)                                                 | 2, which must travel together                                   | 1 (+ the archived `.milk`)                                     |
+| Opens in MilkDrop/projectM tools       | Yes, if renamed                                                            | The `.milk` does; the controls are lost                         | No                                                             |
+| Breaks if the `.milk` is moved/renamed | No                                                                         | **Yes**                                                         | No                                                             |
+| Human-readable, diff-friendly          | Yes, same style as `.milk`                                                 | Yes                                                             | Yes, but code in escaped strings                               |
+| Multi-line code (Stage C GLSL)         | Awkward: one `key=value` per line, as `.milk` does (`warp_1=`, `warp_2=`…) | Same                                                            | Natural (multi-line strings)                                   |
+| New parser dependency                  | None (we parse `.milk` already)                                            | None                                                            | toml++ or a JSON lib                                           |
 
 Caveats of the superset: a MilkDrop-era editor that re-saves the file will drop our `mdw_` lines (it only
 writes keys it knows), and the flat `key=value` style gets verbose for large blocks of code. Neither matters
@@ -382,24 +390,24 @@ Every global has a **neutral** value that leaves the picture untouched, and at n
 "Stage A" is how it works on stock projectM through the effects chain; "Stage B" is what changes once a
 `.milkdawp` preset is playing on patched projectM.
 
-| # | Control | Type, range, neutral | Stage A (any preset) | Stage B (`.milkdawp`) |
-|---|---|---|---|---|
-| 1 | **Hue** | Float, -180..180°, 0 | Hue rotate of the frame | same |
-| 2 | **Saturation** | Float, 0..2, 1 | 0 = greyscale, 2 = vivid | same |
-| 3 | **Brightness** | Float, 0..2, 1 | Exposure of the frame | same |
-| 4 | **Speed** | Float, 0..4, 1 | Integrated into the preset clock (§6.4); time-driven motion only | also scales `rate`-mode controls |
-| 5 | **Zoom** | Float, -1..1, 0 | Zooms the frame in/out | Offsets the preset's own `zoom`: the tunnel really pulls in, through the feedback |
-| 6 | **Rotation** | Float, -1..1, 0 (a speed, integrated) | Spins the frame | Offsets the preset's `rot`: real swirl |
-| 7 | **Warp** | Float, 0..3, 1 | No effect (drawer says "needs a .milkdawp preset") | Scales the preset's `warp` |
-| 8 | **Trails** | Float, 0..1, 0 | Our extra feedback pass (previous frame mixed back in) | Pushes the preset's `decay` towards 1 as well |
-| 9 | **Wave Size** | Float, 0..3, 1 | No effect | Scales waveform and custom wave/shape sizes |
-| 10 | **Pixelate** | Float, 0..1, 0 | Block size, smooth steps | same |
-| 11 | **Glow** | Float, 0..1, 0 | Quarter-res bloom | same |
-| 12 | **Blur** | Float, 0..1, 0 | Separable blur ("smoothing") | same |
-| 13 | **Mirror** | Choice: Off / Left-Right / Top-Bottom / Quad | Fold the frame | same |
-| 14 | **Kaleidoscope** | Choice: Off / 3 / 4 / 5 / 6 / 8 / 12 segments | Radial fold | same |
-| 15 | **RGB Split** | Float, 0..1, 0 | Chromatic offset of the channels | same |
-| 16 | **Media Mix** | Float, 0..1, 0 | Opacity of the chosen camera/video/image (source picked in settings) | also feeds `sampler_camera` presets |
+| #  | Control          | Type, range, neutral                          | Stage A (any preset)                                                 | Stage B (`.milkdawp`)                                                             |
+|----|------------------|-----------------------------------------------|----------------------------------------------------------------------|-----------------------------------------------------------------------------------|
+| 1  | **Hue**          | Float, -180..180°, 0                          | Hue rotate of the frame                                              | same                                                                              |
+| 2  | **Saturation**   | Float, 0..2, 1                                | 0 = greyscale, 2 = vivid                                             | same                                                                              |
+| 3  | **Brightness**   | Float, 0..2, 1                                | Exposure of the frame                                                | same                                                                              |
+| 4  | **Speed**        | Float, 0..4, 1                                | Integrated into the preset clock (§6.4); time-driven motion only     | also scales `rate`-mode controls                                                  |
+| 5  | **Zoom**         | Float, -1..1, 0                               | Zooms the frame in/out                                               | Offsets the preset's own `zoom`: the tunnel really pulls in, through the feedback |
+| 6  | **Rotation**     | Float, -1..1, 0 (a speed, integrated)         | Spins the frame                                                      | Offsets the preset's `rot`: real swirl                                            |
+| 7  | **Warp**         | Float, 0..3, 1                                | No effect (drawer says "needs a .milkdawp preset")                   | Scales the preset's `warp`                                                        |
+| 8  | **Trails**       | Float, 0..1, 0                                | Our extra feedback pass (previous frame mixed back in)               | Pushes the preset's `decay` towards 1 as well                                     |
+| 9  | **Wave Size**    | Float, 0..3, 1                                | No effect                                                            | Scales waveform and custom wave/shape sizes                                       |
+| 10 | **Pixelate**     | Float, 0..1, 0                                | Block size, smooth steps                                             | same                                                                              |
+| 11 | **Glow**         | Float, 0..1, 0                                | Quarter-res bloom                                                    | same                                                                              |
+| 12 | **Blur**         | Float, 0..1, 0                                | Separable blur ("smoothing")                                         | same                                                                              |
+| 13 | **Mirror**       | Choice: Off / Left-Right / Top-Bottom / Quad  | Fold the frame                                                       | same                                                                              |
+| 14 | **Kaleidoscope** | Choice: Off / 3 / 4 / 5 / 6 / 8 / 12 segments | Radial fold                                                          | same                                                                              |
+| 15 | **RGB Split**    | Float, 0..1, 0                                | Chromatic offset of the channels                                     | same                                                                              |
+| 16 | **Media Mix**    | Float, 0..1, 0                                | Opacity of the chosen camera/video/image (source picked in settings) | also feeds `sampler_camera` presets                                               |
 
 Why these: 1–3 cover colour, 4–9 are the "MilkDrop-native" motions you asked for (speed, size, rotation),
 10–15 are the effects (pixelate, glow, smoothing, feedback via Trails), and 16 is the door for camera and
@@ -450,54 +458,74 @@ splitting before starting.
 
 **Stage A: controls on any renderer**
 
-- [ ] 8.1 (M) ADR + `ParameterModel`: the 16 Visual globals (§6.2), Macro 1–8 and Lock Macros (§6.3),
+Done 2026-10-05: all of Stage A. Details, the 8.6 split, and what still needs a hand test are
+in the roadmap's Phase 8 and ADR-0011.
+
+- [x] 8.1 (M) ADR + `ParameterModel`: the 16 Visual globals (§6.2), Macro 1–8 and Lock Macros (§6.3),
       parameter groups, state schema additive keys, `docs/parameters.md` regenerated, drawer section
       "Visual" (both shells). Globals do nothing yet except the ones 8.2/8.3 wire.
-- [ ] 8.2 (M) `EffectsChain` in the engine: hue/sat/brightness/tint, pixelate, blur, glow, RGB split,
+- [x] 8.2 (M) `EffectsChain` in the engine: hue/sat/brightness/tint, pixelate, blur, glow, RGB split,
       mirror, kaleidoscope, extra feedback; per-layer and canvas placement; GPU-tested against
       hand-computed values like `LayerCompositorTests`; skipped entirely when all amounts are neutral.
-- [ ] 8.2b (M) Gate (§4.4): `layerGateEnabled` / `layerGateThreshold` (default -80 dB) /
+- [x] 8.2b (M) Gate (§4.4): `layerGateEnabled` / `layerGateThreshold` (default -80 dB) /
       `layerGateRelease` (default 80 ms), peak envelope from the layer's own ring with 3 dB hysteresis,
       50 ms hold, fade-out over Release, instant open; gated layers keep feeding
       and rendering; lone-instance path through the compositor while enabled; drawer meter with threshold
       line and open light. Tests: a fixture with clean stops (`breakdown_drop` or a new staccato one) opens
       and closes on the right frames; no flicker on a decaying tone at the threshold.
-- [ ] 8.3 (S) Speed: integrate `dt × speed` into the time passed to `projectm_set_frame_time`; document
+- [x] 8.3 (S) Speed: integrate `dt × speed` into the time passed to `projectm_set_frame_time`; document
       what it does not slow (per-frame decay, audio response).
-- [ ] 8.4 (M) OSC in/out (`juce_osc`), per-process in the plugin, outbound beat/bar/drop signals.
+- [x] 8.4 (M) OSC in/out (`juce_osc`), per-process in the plugin, outbound beat/bar/drop signals.
 - [-] 8.5 Web remote: moved to its own phase, roadmap Phase 9 (2026-10-05).
-- [ ] 8.6 (L) Media sources: camera (JUCE `CameraDevice`; V4L2 on Linux), image, video (platform
+- [x] 8.6 (L) Media sources: camera (JUCE `CameraDevice`; V4L2 on Linux), image, video (platform
       decoders, §4.5; GStreamer at runtime on Linux), as compositor layers with transport-synced video in the plugin.
       Displacement blend modes in `LayerCompositor`. Spike: camera via `burn_texture` into projectM's
       feedback.
 
 **Stage B: `.milkdawp` v1 on patched projectM**
 
-- [ ] 8.7 (M) **Spike:** the `projectm_set_preset_variable` patch in the overlay port. Prove: a value set
+- [x] 8.7 (M) **Spike:** the `projectm_set_preset_variable` patch in the overlay port. Prove: a value set
       from outside is read by per-frame code, survives frames, reaches per-vertex code via the usual
-      copy, applies to both presets during a soft-cut. Write the result into an ADR; open the upstream
-      PR.
-- [ ] 8.8 (S) **Compatibility check:** do stock projectM and MilkDrop open a renamed `.milkdawp` (extra
+      copy, applies to both presets during a soft-cut. Write the result into an ADR. No upstream PR
+      (decided 2026-10-05): upstream moves slowly, so we carry the patch ourselves (§8 Risks).
+      *Done (2026-10-05), ADR-0012:* every claim holds, proven by pixel-readback headless tests
+      (`[presetvars]`), plus init code and presets loaded later. One correction: "the usual copy" only
+      carries `q1`..`q32`, so the patch writes per-vertex code's context directly (a control test shows
+      a plain variable doesn't get there). Not covered: custom shape/wave code (route through `q` vars).
+      Windows only so far; Linux CI and macOS still to run.
+      *Upstream check (2026-10-05, master `dd89dfb`; latest tag still v4.1.7):* still no setter for preset
+      variables. Only user sprites have get/set (`projectm_sprite_get_var`/`_set_var`, 2026-08-28). Draft
+      PR #971 (expression variable *watch* API, read-only, stalled since 2026-02) is the closest; no PR
+      or issue proposes a setter. If #971 lands, recheck the patch at the next bump: it touches the same code.
+- [x] 8.8 (S) **Compatibility check:** do stock projectM and MilkDrop open a renamed `.milkdawp` (extra
       `mdw_*` keys) as the plain preset? The superset format is already chosen and our loader strips the
       keys anyway (§5.0), so the result only goes into the user docs ("rename to `.milk` to open
-      elsewhere", or not).
-- [ ] 8.9 (M) `core/MilkdawpPreset`: parse, validate, serialize, version migration, round-trip tests;
-      control → generated code compiler (§4.3) with "neutral = original" tests.
-- [ ] 8.10 (M) Engine: load `.milkdawp`, push control values each frame, globals through the override
+      elsewhere", or not). *Done 2026-10-06: yes, renamed; ADR-0013.*
+- [x] 8.9 (M) `core/MilkdawpPreset`: parse, validate, serialize, version migration, round-trip tests;
+      control → generated code compiler (§4.3) with "neutral = original" tests. *Done 2026-10-06.*
+- [x] 8.10 (M) Engine: load `.milkdawp`, push control values each frame, globals through the override
       layer where the preset supports them and through the effects chain otherwise. `PresetLibrary` and
-      the browser handle both file types.
-- [ ] 8.11 (L) `tools/mdw-convert`: `.milk` → `.milkdawp` in bulk. Heuristics propose controls (variables
+      the browser handle both file types. *Done 2026-10-06; Wave Size turned out impossible on
+      projectM (ADR-0013).*
+- [x] 8.11 (L) `tools/mdw-convert`: `.milk` → `.milkdawp` in bulk. Heuristics propose controls (variables
       the preset actually writes: zoom, rot, warp, wave/shape colours, q-vars), a headless before/after
       render check that defaults are identical, and a report. Writes `.milkdawp` files *beside* the
       originals and never touches a `.milk` (§5.1); a test checks the source tree is byte-identical after a
       run. Curate a first pack from Cream of the Crop by rating.
+      *Done 2026-10-06, ADR-0014:* every preset in the pack is rated 5, so instead the whole
+      pack is converted at build time, beside the originals, minus what `--verify` turns down.
 - [ ] 8.12 (M) Patch 2: external textures (`sampler_camera`, `sampler_video`) and the `mdw_` audio
       variables (`beat_phase`, `bar_phase`, `bpm`, `onset`); a handful of hand-made presets that use them.
+      *Upstream check (2026-10-05, master `dd89dfb`):* 4.2's `projectm_set_texture_load_event_callback`
+      can hand projectM an existing GL `texture_id` for a named texture (docs list "video frames"), a
+      possible substitute for the external-texture half of this patch. Untested; projectM takes ownership
+      and deletes the texture, and the callback fires on load, not per frame. Draft PR #970 (stalled since
+      2026-02) would add a "use but don't own" mode.
 
 **Decision gate**
 
 - [ ] 8.D (S) Own renderer go / no-go, written as an ADR from Stage B experience: what projectM blocked,
-      upstream's response to the patches, performance on Android (Phase 7), maintenance cost of carrying
+      performance on Android (Phase 7), maintenance cost of carrying
       patches.
 
 **Stage C: our own renderer (only on "go")**
@@ -513,8 +541,8 @@ splitting before starting.
 
 ## 8. Risks
 
-- **Patch not accepted upstream:** we carry it in the overlay port forever and re-apply on every projectM
-  bump. Keep it tiny; the pin and bump procedure already exist (ADR-0008).
+- **Carrying our own patch:** we don't submit it upstream (2026-10-05), so we carry it in the overlay port
+  forever and re-apply it on every projectM bump. Keep it tiny; the pin and bump procedure already exist (ADR-0008).
 - **Parameter count explosion:** every global and effect is an automation lane in every host. Group them
   in the host (JUCE parameter groups), keep the count reviewed in the ADR (8.1).
 - **"Zoom" means two different things** in Stage A (canvas zoom) and Stage B (preset zoom) for the same
@@ -542,12 +570,15 @@ splitting before starting.
 5. ~~Web remote~~: deferred to its own phase (roadmap Phase 9). Server library and plugin-vs-app-only are
    that phase's questions.
 6. ~~Should the curated `.milkdawp` pack replace Cream of the Crop?~~ Decided (2026-10-05): beside it;
-   the `.milk` originals are always kept (§5.1). Still open: which one the playlist uses by default.
+   the `.milk` originals are always kept (§5.1). Which one the playlist uses (2026-10-06): the
+   `.milkdawp`, which sits beside its `.milk` and hides it from the list (ADR-0014).
 7. ~~Name~~: decided (2026-10-05), **EyesCream** for the renderer. Still open: whether the curated pack
    shares the name ("the EyesCream pack").
 8. ~~Control editor?~~ Decided (2026-10-05): **no, mappings stay static for now.** `.milkdawp` files come
    from `mdw-convert` and hand editing; the app only plays them. The 1.0 non-goal "we do not author
-   presets" stands.
+   presets" stands. *Note (2026-10-07):* Matthew added "Macro slots as insert slots" to the roadmap's
+   post-1.0 backlog: add or replace a slot's control on the playing preset, in memory only, never
+   written to the file. Close to an editor without saving; the backlog entry lists what's open.
 9. ~~Gate release and default threshold~~: decided (2026-10-05), Release is a parameter from the start
    (default 80 ms); default threshold -80 dB (§4.4).
 
@@ -567,3 +598,15 @@ splitting before starting.
 - (2026-10-05) Matthew: add a **Gate** effect: a layer disappears while its input is below a threshold,
   toggleable, like the gate on his guitar for clean stops. Design in §4.4, item 8.2b.
 - (2026-10-05) Gate: Release is its own parameter from the start; default threshold -80 dB (DI guitar).
+- (2026-10-05) Stage A built (ADR-0011). Decided along the way:
+  - The media blend mode (Normal, Add, Screen, Multiply, Luma key, Displace, Burn in) is a
+    setting, not a 17th Visual global.
+  - Media Mix is the media's opacity over the layer, before the effects.
+  - The `burn_texture` spike became the Burn in blend.
+- (2026-10-05) Finding for 8.12: projectM 4.2's `projectm_set_texture_load_event_callback`
+  takes an app-supplied GL texture for any sampler a preset names. That may give
+  `sampler_camera`/`sampler_video` without patch 2, but projectM owns and deletes that
+  texture, so a live feed needs a spike first.
+- (2026-10-06) 8.11 (ADR-0014): every Cream of the Crop preset is rated 5, so "curate by rating"
+  can't work. Matthew: convert **all** of it, leaving out only what fails the before/after check,
+  with each `.milkdawp` **beside its `.milk`** in the bundled content, made at build time.

@@ -95,8 +95,12 @@ draws, at no extra cost.
   down, mid-grey leaves it alone, and Media Mix sets how far. **Burn in**
   paints the media into the preset itself, so the preset's own motion swirls and
   fades it like anything it drew; Media Mix sets how strongly.
-- **Warp**, **Wave Size** and the **Macros** are dimmed: they need features that
-  aren't released yet, but you can already set and automate them.
+- **Warp** and the **Macros** work with `.milkdawp` presets (see
+  [Presets](presets.md)): each one names its Macros in this panel ("Swirl"), and
+  any it doesn't use are dimmed. With a `.milk` they are dimmed, but you can still
+  set and automate them. With a `.milkdawp` playing, **Zoom** and **Rotation**
+  turn the preset's own zoom and rotation, so a tunnel really pulls in.
+- **Wave Size** is dimmed: it isn't possible with projectM yet.
 - **Lock Macros**: off, the Macros go back to the new preset's starting values
   whenever the preset changes; on, they keep their values.
 - **Gate**: like a noise gate on a guitar. While this instance's input is below

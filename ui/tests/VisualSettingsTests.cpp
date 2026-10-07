@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <set>
 #include <string>
 
@@ -131,6 +132,33 @@ TEST_CASE("Visual controls that need later stages say why", "[ui][VisualSettings
   CHECK(ui::visualControlUnavailableReason("visualGlow").isEmpty());
   CHECK(ui::visualControlUnavailableReason("lockMacros").isEmpty());
   CHECK(ui::visualControlUnavailableReason("layerGateEnabled").isEmpty());
+}
+
+TEST_CASE("A .milkdawp preset brings Warp and the Macros it uses to life (8.10)", "[ui][VisualSettings]") {
+  ui::PresetControlsInfo preset;
+  preset.milkdawp = true;
+  preset.macroNames[2] = "Swirl";
+  CHECK(ui::visualControlUnavailableReason("visualWarp", preset).isEmpty());
+  CHECK(ui::visualControlUnavailableReason("macro3", preset).isEmpty());
+  CHECK(ui::visualControlUnavailableReason("macro1", preset).contains("doesn't use Macro 1"));
+  CHECK(ui::visualControlUnavailableReason("visualWaveSize", preset).isNotEmpty()); // projectM can't
+  CHECK(ui::visualControlUnavailableReason("lockMacros", preset).isEmpty());
+
+  // The panel shows the preset's name for the Macro.
+  ui::VisualSettingsPanel panel;
+  panel.setPresetControls(preset);
+  const auto& sliders = panel.sliders();
+  const auto macro3 = std::find_if(sliders.begin(), sliders.end(), [](const auto& s) { return s.first == "macro3"; });
+  REQUIRE(macro3 != sliders.end());
+  CHECK(macro3->second->getTooltip().startsWith("Macro 3: "));
+  CHECK(macro3->second->getAlpha() == 1.0f);
+  const auto macro1 = std::find_if(sliders.begin(), sliders.end(), [](const auto& s) { return s.first == "macro1"; });
+  REQUIRE(macro1 != sliders.end());
+  CHECK(macro1->second->getAlpha() < 1.0f);
+
+  panel.setPresetControls({}); // back to a .milk
+  CHECK(macro3->second->getAlpha() < 1.0f);
+  CHECK_FALSE(macro3->second->getTooltip().startsWith("Macro 3: "));
 }
 
 TEST_CASE("The OSC dialog's fields become settings, keeping what doesn't parse", "[ui][osc]") {

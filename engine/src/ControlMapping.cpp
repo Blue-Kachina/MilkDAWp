@@ -146,6 +146,11 @@ EngineControls toEngineControls(const ParameterValues& values) noexcept {
   controls.gate.enabled = values.layerGateEnabled > 0.5f;
   controls.gate.thresholdDb = std::clamp(values.layerGateThreshold, -100.0f, 0.0f);
   controls.gate.releaseMs = std::clamp(values.layerGateRelease, 0.0f, 2000.0f);
+  controls.macros = {values.macro1, values.macro2, values.macro3, values.macro4,
+                     values.macro5, values.macro6, values.macro7, values.macro8};
+  for (auto& macro : controls.macros) {
+    macro = std::clamp(macro, 0.0f, 1.0f);
+  }
   return controls;
 }
 

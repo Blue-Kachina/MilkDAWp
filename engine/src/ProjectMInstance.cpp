@@ -94,6 +94,10 @@ void ProjectMInstance::burnTexture(std::uint32_t texture) {
   library_.functions().openglBurnTexture(handle_, texture, 0, 0, width_, height_);
 }
 
+void ProjectMInstance::setPresetVariable(const char* name, double value) {
+  library_.functions().setPresetVariable(handle_, name, value);
+}
+
 void ProjectMInstance::setPresetSwitchFailedCallback(ProjectMPresetSwitchFailedCallback callback, void* userData) {
   library_.functions().setPresetSwitchFailedEventCallback(handle_, callback, userData);
 }

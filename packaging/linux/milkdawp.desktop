@@ -7,6 +7,6 @@ Exec=milkdawp %f
 Icon=milkdawp
 Terminal=false
 Categories=AudioVideo;Audio;Player;
-MimeType=application/x-milkdrop-preset;
+MimeType=application/x-milkdrop-preset;application/x-milkdawp-preset;
 Keywords=milkdrop;projectm;visualizer;visuals;vj;
 StartupWMClass=MilkDAWp

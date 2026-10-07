@@ -46,6 +46,12 @@ add_library(milkdawp_core STATIC
   src/VisualControls.cpp
   include/milkdawp/core/MacroLock.h
   src/MacroLock.cpp
+  include/milkdawp/core/MilkdawpPreset.h
+  src/MilkdawpPreset.cpp
+  include/milkdawp/core/MilkConvert.h
+  src/MilkConvert.cpp
+  include/milkdawp/core/Sha256.h
+  src/Sha256.cpp
   include/milkdawp/core/LayerGate.h
   src/LayerGate.cpp
   include/milkdawp/core/PresetClock.h

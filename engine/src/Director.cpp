@@ -9,11 +9,13 @@
 #include <cmath>
 #include <optional>
 #include <random>
+#include <set>
 
 #include <juce_core/juce_core.h>
 
 #include "milkdawp/core/Analyzer.h"
 #include "milkdawp/core/BeatClock.h"
+#include "milkdawp/core/MilkdawpPreset.h"
 #include "milkdawp/core/OnsetDetector.h"
 #include "milkdawp/core/PresetLibrary.h"
 #include "milkdawp/core/TempoTracker.h"
@@ -40,7 +42,9 @@ namespace {
 
 std::string displayName(const core::PlaylistEntry& entry) {
   auto name = entry.relativePath;
-  if (name.size() > 5 && name.compare(name.size() - 5, 5, ".milk") == 0) {
+  if (core::hasMilkdawpExtension(name)) {
+    name.resize(name.size() - 9);
+  } else if (name.size() > 5 && name.compare(name.size() - 5, 5, ".milk") == 0) {
     name.resize(name.size() - 5);
   }
   return name;
@@ -95,7 +99,7 @@ void Director::setPresetFolder(const std::string& folder, const std::string& pre
 void Director::rescan() {
   const std::lock_guard lock(mutex_);
   if (!folderRequest_.folder.empty()) {
-    folderRequest_.preferredPresetPath = currentPresetPath_;
+    folderRequest_.preferredPresetPath = currentPreset_.path;
     ++folderRequest_.serial;
   }
 }
@@ -107,7 +111,12 @@ std::string Director::presetFolder() const {
 
 std::string Director::currentPresetPath() const {
   const std::lock_guard lock(mutex_);
-  return currentPresetPath_;
+  return currentPreset_.path;
+}
+
+CurrentPreset Director::currentPreset() const {
+  const std::lock_guard lock(mutex_);
+  return currentPreset_;
 }
 
 std::string Director::presetName(std::int32_t index) const {
@@ -206,6 +215,7 @@ void Director::run() {
   core::TransportInfo lastTransport;
 
   DirectorStatus status;
+  std::set<std::string> reportedProblems; // .milkdawp files whose problems were reported once already
 
   // Reads and hands over one playlist entry. False if it can't be used.
   auto issue = [&](std::size_t index, core::CutStyle cutStyle, float blendSeconds, std::int64_t dueAtSample) {
@@ -220,15 +230,33 @@ void Director::run() {
       ++status.presetsSkipped;
       return false;
     }
+    // Phase 8.10: a .milkdawp goes to projectM as plain .milk text with its
+    // controls and the Visual globals compiled in (core::compileForProjectM).
+    CurrentPreset current;
+    current.path = entry.absolutePath;
+    current.milkdawp = core::hasMilkdawpExtension(entry.absolutePath);
+    std::string text;
+    if (current.milkdawp) {
+      const auto parsed = core::parseMilkdawp(fetched.contents);
+      if (reportedProblems.insert(entry.absolutePath).second) {
+        const auto file = juce::File(juce::String(entry.absolutePath)).getFileName().toStdString();
+        for (const auto& problem : parsed.problems) {
+          render_.errors().add("preset", file + ": " + problem);
+        }
+      }
+      text = core::compileForProjectM(parsed.preset);
+      current.macroDefaults = core::macroDefaults(parsed.preset);
+      current.macroNames = core::macroNames(parsed.preset);
+    }
     const auto presetId = library.idFor(entry.absolutePath);
-    if (!render_.presetHandoff().offer(presetId, fetched.contents)) {
+    if (!render_.presetHandoff().offer(presetId, current.milkdawp ? text : fetched.contents, current.milkdawp)) {
       return false; // no free slot this instant; the next trigger tries again
     }
     render_.pushTransition({presetId, cutStyle, blendSeconds, dueAtSample});
     ++status.transitionsIssued;
     status.currentIndex = static_cast<std::int32_t>(index);
     const std::lock_guard lock(mutex_);
-    currentPresetPath_ = entry.absolutePath;
+    currentPreset_ = std::move(current);
     return true;
   };
 
@@ -317,14 +345,25 @@ void Director::run() {
       names.reserve(entries.size());
       paths.reserve(entries.size());
       std::optional<std::size_t> preferredIndex;
+      // A .milk the scan leaves out because its .milkdawp sits beside it
+      // (opened by hand, or saved in an older session) starts on that .milkdawp.
+      const juce::File preferred(juce::String(request.preferredPresetPath));
+      const auto preferredMilkdawp = preferred.withFileExtension("milkdawp");
+      std::optional<std::size_t> preferredSibling;
       for (std::size_t i = 0; i < entries.size(); ++i) {
         names.push_back(displayName(entries[i]));
         paths.push_back(entries[i].absolutePath);
-        if (!request.preferredPresetPath.empty() &&
-            juce::File(juce::String(entries[i].absolutePath)) ==
-                juce::File(juce::String(request.preferredPresetPath))) {
-          preferredIndex = i;
+        if (!request.preferredPresetPath.empty()) {
+          const juce::File file(juce::String(entries[i].absolutePath));
+          if (file == preferred) {
+            preferredIndex = i;
+          } else if (file == preferredMilkdawp) {
+            preferredSibling = i;
+          }
         }
+      }
+      if (!preferredIndex) {
+        preferredIndex = preferredSibling;
       }
       {
         const std::lock_guard lock(mutex_);
@@ -332,7 +371,7 @@ void Director::run() {
         presetNames_ = std::move(names);
         presetPaths_ = std::move(paths);
         if (entries.empty()) {
-          currentPresetPath_.clear();
+          currentPreset_ = {};
         }
       }
       playlist = entries.empty() ? nullptr : std::make_unique<core::Playlist>(std::move(entries));

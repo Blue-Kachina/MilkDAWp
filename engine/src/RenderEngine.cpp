@@ -4,6 +4,7 @@
 #include "milkdawp/engine/RenderEngine.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -13,6 +14,7 @@
 
 #include "milkdawp/core/AdaptiveQuality.h"
 #include "milkdawp/core/LayerGate.h"
+#include "milkdawp/core/MilkdawpPreset.h"
 #include "milkdawp/core/PresetClock.h"
 #include "milkdawp/engine/EffectsChain.h"
 #include "milkdawp/engine/GlFrameTarget.h"
@@ -245,6 +247,12 @@ struct Layer {
   std::unique_ptr<GlFrameTarget> fxTarget;
   // 8.3: the clock this layer's preset runs on, so Speed never jumps it.
   core::PresetClock clock;
+  // 8.10: whether the preset showing was compiled from a .milkdawp (it then
+  // takes Zoom and Rotation itself, not as post effects), and the smoothed
+  // values every preset is given as mdw_* variables each frame.
+  bool milkdawp = false;
+  core::VisualControls presetVisual;
+  std::array<float, core::kMacroCount> macros{};
   // 8.2b: the gate, and the level it listens to. Hosts with large buffers
   // deliver audio less often than once a frame, so a frame with no new audio
   // keeps the last level for a while instead of counting as silence.
@@ -780,6 +788,7 @@ void RenderEngine::run() {
             }
             layer->loadFailure.failed = false;
             const auto loadStart = Clock::now();
+            const bool milkdawp = handoff.milkdawp(*slot);
             layer->instance->loadPresetData(handoff.text(*slot), soft);
             const auto loadMs = static_cast<float>(millisecondsBetween(loadStart, Clock::now()));
             handoff.release(*slot);
@@ -800,9 +809,13 @@ void RenderEngine::run() {
                 errors_.add("projectM", layer->loadFailure.message);
               }
               handoff.reportFailure(due.request.presetId);
-            } else if (isPrimary) {
-              ++stats.presetsLoaded;
-              stats.currentPresetId = due.request.presetId;
+            } else {
+              // On a failed load projectM keeps the old preset, and so do we.
+              layer->milkdawp = milkdawp;
+              if (isPrimary) {
+                ++stats.presetsLoaded;
+                stats.currentPresetId = due.request.presetId;
+              }
             }
           });
       }
@@ -831,7 +844,25 @@ void RenderEngine::run() {
       channel.reportGate(layer->lastPeakDb, layer->gate.isOpen(), layer->gateEnvelope);
 
       layer->visual = channel.visual();
-      layer->effects.advance(layer->visual, frameDt);
+      // 8.10: a .milkdawp preset turns its own zoom and rot (compounding
+      // through its feedback, a real tunnel and swirl), so the post effects
+      // leave those two out for it. Everything else stays a post effect.
+      auto postVisual = layer->visual;
+      if (layer->milkdawp) {
+        postVisual.zoom = 0.0f;
+        postVisual.rotation = 0.0f;
+      }
+      layer->effects.advance(postVisual, frameDt);
+      layer->presetVisual = core::smoothVisualControls(layer->presetVisual, layer->visual, frameDt);
+      const auto macroTargets = channel.macros();
+      const float macroStep = std::clamp(1.0f - std::exp(-frameDt / 0.05f), 0.0f, 1.0f);
+      for (std::size_t k = 0; k < layer->macros.size(); ++k) {
+        auto& macro = layer->macros[k];
+        macro += (macroTargets[k] - macro) * macroStep;
+        if (std::abs(macroTargets[k] - macro) < 1.0e-4f) {
+          macro = macroTargets[k]; // exactly: a Macro on its default leaves the preset exactly as it was
+        }
+      }
       // The texture follows the source even at Media Mix 0, so turning it up is instant.
       const auto mediaSource = channel.mediaSource();
       if (mediaSource != nullptr) {
@@ -846,7 +877,21 @@ void RenderEngine::run() {
 
     // Renders one layer's preset into `framebuffer`, on its own clock (8.3).
     const auto renderLayer = [&](Layer& layer, std::uint32_t framebuffer) {
-      layer.instance->setFrameTime(layer.clock.advance(frameDt, layer.visual.speed));
+      const double before = layer.clock.time();
+      const double now = layer.clock.advance(frameDt, layer.visual.speed);
+      layer.instance->setFrameTime(now);
+      // 8.10: what compiled .milkdawp code reads (core::MilkdawpPreset.h). Set
+      // in every preset: a plain .milk never names them, and the next preset
+      // must already have them when its init code runs.
+      auto& pm = *layer.instance;
+      for (std::size_t k = 0; k < layer.macros.size(); ++k) {
+        pm.setPresetVariable(core::kMacroVariables[k], layer.macros[k]);
+      }
+      pm.setPresetVariable(core::kZoomVariable, layer.presetVisual.zoom);
+      pm.setPresetVariable(core::kRotationVariable, layer.presetVisual.rotation);
+      pm.setPresetVariable(core::kWarpVariable, layer.presetVisual.warp);
+      pm.setPresetVariable(core::kTrailsVariable, layer.presetVisual.trails);
+      pm.setPresetVariable(core::kDtVariable, now - before);
       if (layer.mediaBurns) {
         // Every frame, with Media Mix as the burn's alpha. (Burning only every
         // few frames at low Media Mix strobed: the preset faded it in between.)

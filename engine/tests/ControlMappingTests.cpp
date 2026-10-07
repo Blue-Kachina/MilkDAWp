@@ -67,6 +67,16 @@ TEST_CASE("toEngineControls maps the Visual globals and the gate", "[engine][Con
   CHECK(controls.gate.thresholdDb == -30.0f);
 }
 
+TEST_CASE("toEngineControls passes the Macros through (8.10)", "[engine][ControlMapping]") {
+  engine::ParameterValues values;
+  CHECK(engine::toEngineControls(values).macros == std::array<float, core::kMacroCount>{});
+  values.macro1 = 0.25f;
+  values.macro8 = 3.0f; // out of range: clamped
+  const auto controls = engine::toEngineControls(values);
+  CHECK(controls.macros[0] == 0.25f);
+  CHECK(controls.macros[7] == 1.0f);
+}
+
 TEST_CASE("visualKaleidoscope's choices line up with kKaleidoscopeSegments", "[engine][ControlMapping]") {
   const auto* spec = core::findParameter(core::allParameters(), "visualKaleidoscope");
   REQUIRE(spec != nullptr);

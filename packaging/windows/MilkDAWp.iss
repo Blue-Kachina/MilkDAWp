@@ -84,7 +84,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "associate"; Description: "Open .milk preset files with MilkDAWp"; GroupDescription: "File types:"
+Name: "associate"; Description: "Open .milk and .milkdawp preset files with MilkDAWp"; GroupDescription: "File types:"
 
 [Components]
 Name: "app"; Description: "MilkDAWp app"; Types: full compact custom
@@ -120,8 +120,9 @@ Name: "{autoprograms}\MilkDAWp"; Filename: "{app}\MilkDAWp.exe"; Components: app
 Name: "{autodesktop}\MilkDAWp"; Filename: "{app}\MilkDAWp.exe"; Components: app; Tasks: desktopicon
 
 [Registry]
-; §4.6: double-clicking a .milk file opens it in the app (Main.cpp takes the path).
+; §4.6: double-clicking a .milk or .milkdawp (8.11) file opens it in the app (Main.cpp takes the path).
 Root: HKA; Subkey: "Software\Classes\.milk"; ValueType: string; ValueName: ""; ValueData: "MilkDAWp.Preset"; Flags: uninsdeletevalue; Tasks: associate; Components: app
+Root: HKA; Subkey: "Software\Classes\.milkdawp"; ValueType: string; ValueName: ""; ValueData: "MilkDAWp.Preset"; Flags: uninsdeletevalue; Tasks: associate; Components: app
 Root: HKA; Subkey: "Software\Classes\MilkDAWp.Preset"; ValueType: string; ValueName: ""; ValueData: "MilkDrop preset"; Flags: uninsdeletekey; Tasks: associate; Components: app
 Root: HKA; Subkey: "Software\Classes\MilkDAWp.Preset\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\MilkDAWp.exe"",0"; Tasks: associate; Components: app
 Root: HKA; Subkey: "Software\Classes\MilkDAWp.Preset\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\MilkDAWp.exe"" ""%1"""; Tasks: associate; Components: app

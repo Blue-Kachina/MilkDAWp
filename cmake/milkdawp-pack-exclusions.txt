@@ -1,0 +1,233 @@
+# Regenerate after a pack bump: see docs/adr/0014-mdw-convert.md. Last run 2026-10-07 against
+# presets-cream-of-the-crop 0180df21: 9,719 of 9,795 passed (2,512 exactly).
+# Presets mdw-convert --verify turned down: projectM can't load them, or the
+# conversion looks different from the original with every control neutral.
+# The build leaves these as plain .milk (milkdawp_preset_pack, tools/mdw-convert/CMakeLists.txt).
+
+# projectM can't load it: [PerPixelContext] Could not compile per-pixel code: syntax error, unexpected VAR(L2 C1)
+Dancer/Blobby Mirror/LuxXx - Beat Machina III.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Dancer/Blobby Mirror/martin - purple pulsator - mom - ns2w nz.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Dancer/Blobby Mirror/martin - purple pulsator - mom - ns2w.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame INIT code: syntax error, unexpected VAR(L20 C1)
+Dancer/Blobby/suksma - dicked.milk
+
+# projectM can't load it: [ShapePerFrameContext] Could not compile custom shape 0 per-frame code: syntax error, unexpected VAR(L1 C33)
+Dancer/Comet Mirror/EoS_Phat_PeterP_Sentinel_Aware_6 EoS edit C.milk
+
+# projectM can't load it: [ShapePerFrameContext] Could not compile custom shape 0 per-frame code: syntax error, unexpected VAR(L1 C33)
+Dancer/Comet Mirror/EoS_Phat_PeterP_Sentinel_Aware_6 EoS edit C_b.milk
+
+# projectM can't load it: [ShapePerFrameContext] Could not compile custom shape 0 per-frame code: syntax error, unexpected VAR(L1 C33)
+Dancer/Comet/EoS_Phat_PeterP_Sentinel_Aware_6 EoS edit slice into your beautiful love.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame INIT code: syntax error, unexpected VAR(L20 C1)
+Dancer/Glowsticks Mirror/EoS + Redi Jedi - frequency analysis + glowsticks -  glow - o - scope female (Milkdrop beta ver).milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame INIT code: syntax error, unexpected VAR(L20 C1)
+Dancer/Glowsticks Mirror/EoS + Redi Jedi - frequency analysis + glowsticks -  glow - o - scope male (Milkdrop beta ver).milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame INIT code: syntax error, unexpected VAR(L20 C1)
+Dancer/Glowsticks Mirror/EoS + Redi Jedi - frequency analysis + glowsticks -  glow - o - scope pat (Milkdrop beta ver).milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame INIT code: syntax error, unexpected VAR(L20 C1)
+Dancer/Glowsticks Mirror/EoS + Redi Jedi - frequency analysis + glowsticks - demon's dream (Milkdrop beta ver).milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame INIT code: syntax error, unexpected VAR(L20 C1)
+Dancer/Glowsticks Mirror/EoS + Redi Jedi - frequency analysis + glowsticks - long armed raver (Milkdrop beta ver).milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Dancer/Shapes/Milk Artist At our Best - FED - SlowFast Ft AdamFX n Martin - HD CosmoFX Also Ft Mstress n Armandio  - Thought About YouFX.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Dancer/Tree Branch/martin + stahlregen - martin in da mash 12b.milk
+
+# renders differently: 0.30 from the original at the nearest (3 renders against 4), which differs by up to 0.00 from itself
+Dancer/Wake/suksma - yin - 395 - Artificial Inspiration (brainstorming - outward) + martin + stahlregen - elephant mating nz+2.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Dancer/Whirl/Liquid Glowsticks - ATwisted Pre Set Mix By AdamFX 2 martin - disco mix Ft Hexocollie 27.milk
+
+# renders differently: 5.61 from the original at the nearest (3 renders against 4), which differs by up to 3.49 from itself
+Drawing/Dunes/shifter + Flexi - liquid circuitry from the oblivion hive nz+.milk
+
+# renders differently: 0.26 from the original at the nearest (3 renders against 4), which differs by up to 0.00 from itself
+Drawing/Growth Mirror/suksma - flexi coheres vacuum energy - now don't freak out, i'm teleporting to your location.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Fractal/Core Mirror/LuxXx - Burnwheel I.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Fractal/Core Tunnel/A Tribute to Martin - bombyx mori - Ft Flexi - AdamFX - StahlRegen - Hd In Milk Ailen FX P.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Fractal/Core/LuxXx - Fuck ur Fractal Muscles II.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Fractal/Lattice/Rozzor & Neuro - Starover (Semicolon Mix).milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected NUM(L3 C1)
+Fractal/Lattice/va ultramix - 290_3.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected NUM(L3 C1)
+Fractal/Lattice/va ultramix2 - 532_2.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected NUM(L3 C1)
+Fractal/Lattice/va ultramix2 - 533_1.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected NUM(L3 C1)
+Fractal/Lattice/va ultramix2 - 534.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L40 C1)
+Fractal/Loops/martin - purple pulsator nz+.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Fractal/Loops/martin - purple pulsator.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L27 C1)
+Fractal/Nested Circle/AdamFX Enterz Tha Mash With Martin + stahlregen - AdamFX - In Tha Mash Effectz .milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L27 C1)
+Fractal/Nested Circle/AdamFX Enterz Tha Mash With Martin + stahlregen - AdamFX - In Tha Mash Effectz A.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L27 C1)
+Fractal/Nested Circle/AdamFX Enterz Tha Mash With Martin + stahlregen - AdamFX - In Tha Mash Effectz B.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Fractal/Nested Circle/Halfbreak - EFFECTAMT 4PORT (Seizure Techno).milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L27 C1)
+Fractal/Nested Circle/martin + stahlregen - martin in da mash 13.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame INIT code: syntax error, unexpected VAR(L2 C1)
+Fractal/Nested Dancer/ORB - Toy Snakes Starry Night.milk
+
+# projectM can't load it: [ShapePerFrameContext] Could not compile custom shape 0 per-frame code: syntax error, unexpected invalid token(L9 C8)
+Fractal/Nested Spiral/more breedre presets.milk
+
+# projectM can't load it: [PerPixelContext] Could not compile per-pixel code: syntax error, unexpected invalid token(L3 C1)
+Fractal/Nested Square/Goody's Datura Bloom.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame INIT code: syntax error, unexpected end of file(L10 C0)
+Fractal/Nested Square/Hexcollie - Ultra daze.milk
+
+# projectM can't load it: [PerPixelContext] Could not compile per-pixel code: syntax error, unexpected invalid token(L1 C93)
+Fractal/Nested Square/Idiot24-7-mindbender7(superbendmix1).milk
+
+# projectM can't load it: [PerPixelContext] Could not compile per-pixel code: syntax error, unexpected VAR(L21 C1)
+Fractal/Pointy/Bdrv Aderrasi - Chromatic Voyage bdrv etAL.milk
+
+# projectM can't load it: [PerPixelContext] Could not compile per-pixel code: syntax error, unexpected VAR(L2 C1)
+Fractal/Pointy/LuxXx - All That I Am.milk
+
+# projectM can't load it: [PerPixelContext] Could not compile per-pixel code: syntax error, unexpected VAR(L2 C1)
+Fractal/Pointy/Zylot & Idiot24-7 - Unknown Power Source.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L53 C1)
+Geometric/Sphere Wild/AdamFX Enterz Tha Mash With Martin + stahlregen - AdamFX - In Tha Mash Effectz nz splatter bare.milk
+
+# renders differently: 1.01 from the original at the nearest (3 renders against 4), which differs by up to 0.60 from itself
+Geometric/Sphere Wild/nickel advice verqing mai tceqjevle oidaea r.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected '*'(L157 C46)
+Geometric/Stripes Dance/martin - beamer code 22h - lines - rhythmic and fast.milk
+
+# projectM can't load it: [ShapePerFrameContext] Could not compile custom shape 0 per-frame code: syntax error, unexpected invalid token(L9 C8)
+Geometric/Symbols/amandio c - codex 4 - cabasal dandelioness nz+wp2.milk
+
+# projectM can't load it: [ShapePerFrameContext] Could not compile custom shape 0 per-frame code: syntax error, unexpected invalid token(L9 C8)
+Geometric/Symbols/amandio c - codex 4 - cabasal dandelioness nz+wp3.milk
+
+# projectM can't load it: [ShapePerFrameContext] Could not compile custom shape 0 per-frame code: syntax error, unexpected invalid token(L9 C8)
+Geometric/Symbols/amandio c - codex 4 - plot wag nz+ necrophors gadget lard.milk
+
+# projectM can't load it: [PerPixelContext] Could not compile per-pixel code: syntax error, unexpected invalid token(L9 C23)
+Geometric/Wire Spiral Flower/Stahlregen - funky Blur (lotus mix) the genius in me lies right at the heart of the flacc nz+.milk
+
+# projectM can't load it: [PerPixelContext] Could not compile per-pixel code: syntax error, unexpected invalid token(L9 C23)
+Geometric/Wire Spiral Flower/Stahlregen - funky Blur (lotus mix) the genius in me lies right at the heart of the flacc.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Geometric/Wire Trace Mirror/martin + stahlregen - martin in da mash 12a.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Geometric/Wire Trace/161.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L59 C1)
+Reaction/Automata/suksma - Hexcollie - Julian Carnival - shimmy dumb grid dogmaklyasm nz+5.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L59 C1)
+Reaction/Automata/suksma - Hexcollie - Julian Carnival - shimmy dumb grid dogmaklyasm nz+6.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L27 C1)
+Reaction/Feedback/AdamFX Enterz Tha Mash With Martin + stahlregen - AdamFX - In Tha Mash Effectz nz splatter.milk
+
+# projectM can't load it: [PerPixelContext] Could not compile per-pixel code: syntax error, unexpected invalid token(L1 C13)
+Reaction/Liquid Blobby/pheremones is spelled pheromones asshole.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Reaction/Liquid Blobby/there is gum stuck to my hate.milk
+
+# renders differently: 6.06 from the original at the nearest (3 renders against 4), which differs by up to 3.88 from itself
+Reaction/Liquid Gradient/va ultramix2 - 313_1.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Reaction/Liquid Ripples/LuxXx - electric cell park a.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L47 C1)
+Reaction/Liquid Ripples/LuxXx - electric cell park b nz+.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L23 C1)
+Reaction/Liquid Ripples/LuxXx - electric cell park b.milk
+
+# renders differently: 0.30 from the original at the nearest (3 renders against 4), which differs by up to 0.00 from itself
+Reaction/Liquid Ripples/fed + flexi - tech test 2-1 - humpgorge.milk
+
+# projectM can't load it: [ShapePerFrameContext] Could not compile custom shape 1 per-frame code: syntax error, unexpected end of file(L2 C0)
+Reaction/Liquid Simmering/sonar cow.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame INIT code: syntax error, unexpected VAR(L20 C1)
+Reaction/Liquid Windy/all death angel watch Erd 3y3 mBetraeqx.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L27 C1)
+Sparkle/Explosions/2009 4th of July with AdamFX n Martin - into the fireworks E.milk
+
+# projectM can't load it: [PerPixelContext] Could not compile per-pixel code: syntax error, unexpected '*', expecting '('(L12 C12)
+Sparkle/Explosions/LuxXx - Brain Grind i.milk
+
+# renders differently: 2.78 from the original at the nearest (3 renders against 4), which differs by up to 0.37 from itself
+Sparkle/Explosions/suksma - flexi - fractrip - lofted guts - flacc.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L22 C1)
+Sparkle/Glimmer Mirror/430.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L26 C1)
+Sparkle/Glimmer Mirror/Adam Eatit Mashup FX 2 martin - disco mix + Lodus + Geiss + Fruits Machine .milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L43 C1)
+Sparkle/Glimmer Mirror/EoS - sectorLoc B_phat_ugly remix 01 EoS7p nz+ crab lardvae.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L26 C1)
+Sparkle/Glimmer Mirror/Starz in MilkHDFX - Stahlregen & Aderrasi + EoS + Geiss + Unchained + Zylot + Flexi + Martin + AdamFX A.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L22 C1)
+Sparkle/Mass Squares/LuxXx - A Sober Life (wasted).milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L26 C1)
+Supernova/Burst/Rarian Rakista - On the Water.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L22 C1)
+Supernova/Radiate/EVET - Hypraxis.milk
+
+# projectM can't load it: [PerFrameContext] Could not compile per-frame code: syntax error, unexpected VAR(L22 C1)
+Supernova/Radiate/martin - sparky caleidoscope.milk
+
+# renders differently: 0.55 from the original at the nearest (3 renders against 4), which differs by up to 0.00 from itself
+Waveform/Wire Flat Double/MegalomaGreg - Ambitions [Flexi's mix 25 slip antithesis] [remix 10 zenarchy] --- Isosceles edit.milk
+
+# renders differently: 0.38 from the original at the nearest (3 renders against 4), which differs by up to 0.18 from itself
+Waveform/Wire Spirograph/fat cancer tour meant t nz+ asect.milk

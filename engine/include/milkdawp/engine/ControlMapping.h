@@ -59,7 +59,7 @@ struct ParameterValues {
   float visualKaleidoscope = 0.0f;
   float visualRgbSplit = 0.0f;
   float visualMediaMix = 0.0f;
-  // Macros carry no engine meaning until Stage B gives presets a use for them.
+  // Macros: EngineControls::macros, which .milkdawp presets read (8.10).
   float macro1 = 0.0f;
   float macro2 = 0.0f;
   float macro3 = 0.0f;

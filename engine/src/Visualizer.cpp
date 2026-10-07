@@ -112,6 +112,7 @@ void Visualizer::setControls(const EngineControls& controls) noexcept {
   render_->setBeatSensitivity(controls.beatSensitivity);
   render_->setQualityScale(controls.qualityScale);
   render_->primaryLayer().setVisual(controls.visual);
+  render_->primaryLayer().setMacros(controls.macros);
   render_->primaryLayer().setGate(controls.gate);
   director_->setControls(controls);
 }

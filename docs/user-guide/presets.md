@@ -68,3 +68,48 @@ Where the bundled presets live, if you want to look at them:
 In the app, double-click a `.milk` file (if you chose that when installing on
 Windows), drop it or a folder on the window, or pass it on the command line.
 Its folder becomes the preset folder, starting on that preset.
+
+## `.milkdawp` presets
+
+A `.milkdawp` file is a `.milk` preset with extra lines that give it
+**controls**: it says what each Macro does (Macro 1 might be *Swirl*, Macro 2
+*Blob colour*), and the Visual panel shows those names. Automate a Macro and the
+preset itself changes, not just the finished picture. With every Macro on the
+preset's starting value it looks exactly like the `.milk` it was made from.
+
+- They play anywhere `.milk` files do: in the preset folder, the browser, and
+  by opening or dropping one on the app.
+- A `.milk` with a `.milkdawp` of the same name beside it is left out of the
+  list, since the `.milkdawp` plays the same preset. The `.milk` stays on disk
+  as the original. Ratings, favourites and tags carry over between the two.
+- Other MilkDrop programs (projectM, MilkDrop itself) open a `.milkdawp` as the
+  plain preset if you rename it to `.milk`; they ignore the controls. MilkDrop's
+  preset editor drops the controls if you save the preset from it.
+- If a control in a file is broken, that control is skipped, the preset still
+  plays, and Diagnostics' recent errors say what was wrong.
+
+### The bundled presets come with Macros
+
+Almost every preset that ships with MilkDAWp comes as a `.milkdawp` beside its
+original `.milk`, with up to 8 Macros chosen for it automatically. Each Macro
+starts in the middle, where the preset looks exactly as its author made it;
+turn it either way from there. A Macro the preset doesn't use is dimmed.
+
+| Macro | What it does |
+|---|---|
+| **q1**, **q2**, ... | A value the preset's own code works out every frame and hands to its shaders or its warp, often from the music. Left of centre weakens it, right strengthens it. What it changes depends on the preset: try it. |
+| **Wave** | How strongly the main waveform is drawn |
+| **Outer Border**, **Inner Border** | How strongly the borders are drawn (they smear into trails through the feedback) |
+| **Motion Vectors** | How strongly the motion-vector grid is drawn |
+| **Echo** | How strongly the video echo (a zoomed copy of the picture) is mixed in |
+| **Drift X**, **Drift Y** | Slides the picture sideways or up and down, every frame, so it streams through the feedback |
+| **Centre X**, **Centre Y** | Moves the point the preset zooms and rotates around |
+| **Squash** | Stretches the picture one way and squeezes it the other, every frame |
+
+The ones that matter most to a preset come first: values its code drives from
+the music, then what its code animates, then what it shows, then the motion
+every preset has.
+
+The few presets that don't come with Macros are ones whose `.milkdawp` didn't
+render like the original when it was checked, or that projectM can't
+play at all. They're still there as plain `.milk`.

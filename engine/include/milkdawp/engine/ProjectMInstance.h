@@ -72,6 +72,11 @@ public:
   /// carry it on (8.6f).
   void burnTexture(std::uint32_t texture);
 
+  /// Sets a variable the preset's per-frame and per-vertex code can read
+  /// (ADR-0012), e.g. "mdw_m1". It holds until set again, across frames,
+  /// soft cuts and later presets.
+  void setPresetVariable(const char* name, double value);
+
   /// Called synchronously from inside loadPresetData()/loadPresetFile()
   /// when projectM rejects a preset.
   void setPresetSwitchFailedCallback(ProjectMPresetSwitchFailedCallback callback, void* userData);

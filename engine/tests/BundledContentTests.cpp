@@ -109,6 +109,11 @@ TEST_CASE("BundledContent: default preset and textures only when present", "[eng
   CHECK(content.defaultPreset() == preset);
   REQUIRE(content.textureSearchPaths().size() == 1);
   CHECK(juce::File(content.textureSearchPaths().front()) == content.texturesFolder());
+
+  // 8.11: the pack's .milkdawp of it, when the build made one.
+  const auto converted = preset.withFileExtension("milkdawp");
+  converted.create();
+  CHECK(content.defaultPreset() == converted);
 }
 
 TEST_CASE("BundledContent: the fetched pack has the default preset and textures", "[engine][content]") {

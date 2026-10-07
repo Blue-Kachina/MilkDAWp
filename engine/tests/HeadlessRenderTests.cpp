@@ -10,6 +10,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -19,6 +21,7 @@
 
 #include <juce_opengl/juce_opengl.h>
 
+#include "milkdawp/core/MilkdawpPreset.h"
 #include "milkdawp/engine/GlFrameTarget.h"
 #include "milkdawp/engine/OffscreenGLContext.h"
 #include "milkdawp/engine/ProjectMInstance.h"
@@ -364,4 +367,426 @@ TEST_CASE("Headless render: presets find the bundled textures (6.1)", "[engine][
   CHECK(meanBrightness(with) > 30.0);
   CHECK(meanDifference(with, without) > 10.0);
 #endif
+}
+
+// 8.7 (ADR-0012): projectm_set_preset_variable, our projectM patch. Each preset
+// below turns a variable into its outer border colour, which is drawn opaque
+// every frame and reaches the output unchanged through a plain composite
+// shader, so the border pixel reads the variable back (0..1 -> 0..255).
+namespace {
+
+std::string borderPreset(const std::string& perFrameInit, const std::string& perFrame, const std::string& perPixel) {
+  std::string text = "[preset00]\n"
+                     "MILKDROP_PRESET_VERSION=201\n"
+                     "PSVERSION=2\n"
+                     "PSVERSION_WARP=2\n"
+                     "PSVERSION_COMP=2\n"
+                     "fDecay=0.9\n"
+                     "zoom=1.0\n"
+                     "rot=0.0\n"
+                     "warp=0\n"
+                     "wave_a=0\n"
+                     "ob_size=0.2\n"
+                     "ob_r=0\n"
+                     "ob_g=0\n"
+                     "ob_b=0\n"
+                     "ob_a=1\n";
+  auto addLines = [&text](const char* key, const std::string& code) {
+    int n = 1;
+    std::size_t start = 0;
+    while (start < code.size()) {
+      const auto end = code.find('\n', start);
+      text += key + std::to_string(n++) + "=" + code.substr(start, end - start) + "\n";
+      start = end == std::string::npos ? code.size() : end + 1;
+    }
+  };
+  addLines("per_frame_init_", perFrameInit);
+  addLines("per_frame_", perFrame);
+  addLines("per_pixel_", perPixel);
+  text += "comp_1=`shader_body\n"
+          "comp_2=`{\n"
+          "comp_3=`ret = tex2D(sampler_main, uv).xyz;\n"
+          "comp_4=`}\n";
+  return text;
+}
+
+struct Rgb {
+  int r = 0;
+  int g = 0;
+  int b = 0;
+};
+
+// (4, 4) from the bottom-left: well inside the 20% border.
+Rgb borderPixel(const std::vector<std::uint8_t>& rgba) {
+  const std::size_t i = (static_cast<std::size_t>(4) * kWidth + 4) * 4;
+  return {rgba[i], rgba[i + 1], rgba[i + 2]};
+}
+
+// Mean of one channel over the frame, 0..255.
+double meanChannel(const std::vector<std::uint8_t>& rgba, std::size_t channel) {
+  double sum = 0.0;
+  for (std::size_t i = channel; i < rgba.size(); i += 4) {
+    sum += rgba[i];
+  }
+  return sum / static_cast<double>(rgba.size() / 4);
+}
+
+constexpr int kColourTolerance = 4;
+
+bool matchesColour(int actual, double expected01) {
+  return std::abs(actual - static_cast<int>(std::lround(expected01 * 255.0))) <= kColourTolerance;
+}
+
+} // namespace
+
+TEST_CASE("Preset variables: per-frame and init code read an outside value, and it survives frames (8.7)",
+          "[engine][headless][presetvars]") {
+  HeadlessRig rig;
+  if (!rig.ready()) {
+    reportUnavailable(rig.skipReason);
+    return;
+  }
+  // The preset clobbers mdw_m1 at the end of every frame, so a value that
+  // only lived until the preset's own code changed it would read 0 from
+  // the second frame on.
+  const auto preset = borderPreset("init_seen = mdw_m1;", "ob_r = mdw_m1;\nob_g = init_seen;\nmdw_m1 = 0;", "");
+
+  // Set before the preset loads: the init code sees it too.
+  rig.instance->setPresetVariable("mdw_m1", 0.75);
+  rig.instance->loadPresetData(preset.c_str(), false);
+
+  std::vector<std::uint8_t> pixels;
+  int n = 0;
+  for (; n < 3; ++n) {
+    pixels = rig.renderFrame(n);
+  }
+  auto px = borderPixel(pixels);
+  INFO("after 3 frames: r " << px.r << " g " << px.g << " b " << px.b);
+  CHECK(matchesColour(px.r, 0.75));
+  CHECK(matchesColour(px.g, 0.75));
+  CHECK(matchesColour(px.b, 0.0));
+
+  for (; n < 60; ++n) {
+    pixels = rig.renderFrame(n);
+  }
+  px = borderPixel(pixels);
+  INFO("after 60 frames: r " << px.r << " g " << px.g);
+  CHECK(matchesColour(px.r, 0.75)); // still there, set once, 57 frames ago
+
+  // A new value takes effect on the next frame; init code ran once, so
+  // init_seen keeps the value from load time. Names are case-insensitive.
+  rig.instance->setPresetVariable("MDW_M1", 0.25);
+  pixels = rig.renderFrame(n++);
+  px = borderPixel(pixels);
+  INFO("after the change: r " << px.r << " g " << px.g);
+  CHECK(matchesColour(px.r, 0.25));
+  CHECK(matchesColour(px.g, 0.75));
+}
+
+TEST_CASE("Preset variables: per-vertex code reads an outside value (8.7)", "[engine][headless][presetvars]") {
+  HeadlessRig rig;
+  if (!rig.ready()) {
+    reportUnavailable(rig.skipReason);
+    return;
+  }
+  // Per-vertex code copies the variable into reg01 (global registers are
+  // shared by all of a preset's code), and per-frame code shows reg01 on
+  // the next frame. Per-frame code never names mdw_m2, so the value can only
+  // have reached the per-vertex context directly.
+  //
+  // reg02 is the control: a plain per-frame variable is NOT visible to
+  // per-vertex code (MilkDrop copies only q1..q32 across), which is why the
+  // patch writes into both contexts instead of relying on "the usual copy".
+  const auto preset =
+      borderPreset("", "plain_var = 0.5;\nob_r = reg01;\nob_g = reg02;", "reg01 = mdw_m2;\nreg02 = plain_var;");
+  rig.instance->setPresetVariable("mdw_m2", 0.6);
+  rig.instance->loadPresetData(preset.c_str(), false);
+
+  std::vector<std::uint8_t> pixels;
+  for (int n = 0; n < 5; ++n) {
+    pixels = rig.renderFrame(n);
+  }
+  const auto px = borderPixel(pixels);
+  INFO("r " << px.r << " g " << px.g);
+  CHECK(matchesColour(px.r, 0.6));
+  CHECK(matchesColour(px.g, 0.0));
+}
+
+TEST_CASE("Preset variables: both presets receive a value set during a soft cut (8.7)",
+          "[engine][headless][presetvars]") {
+  HeadlessRig rig;
+  if (!rig.ready()) {
+    reportUnavailable(rig.skipReason);
+    return;
+  }
+  // A shows the variable in red only, B in green only, so each channel of
+  // the blended output belongs to one preset.
+  const auto presetA = borderPreset("", "ob_r = mdw_m3;", "");
+  const auto presetB = borderPreset("", "ob_g = mdw_m3;", "");
+  constexpr double softCutSeconds = 2.0;
+  rig.instance->setSoftCutDuration(softCutSeconds);
+
+  rig.instance->setPresetVariable("mdw_m3", 0.0);
+  rig.instance->loadPresetData(presetA.c_str(), false);
+  int n = 0;
+  for (; n < 10; ++n) {
+    rig.renderFrame(n);
+  }
+  rig.instance->loadPresetData(presetB.c_str(), /*smoothTransition=*/true);
+
+  // A quarter into the blend, both presets still read 0.
+  std::vector<std::uint8_t> pixels;
+  const int framesPerBlend = static_cast<int>(softCutSeconds * kFps);
+  const int quarter = n + framesPerBlend / 4;
+  for (; n < quarter; ++n) {
+    pixels = rig.renderFrame(n);
+  }
+  const double redBefore = meanChannel(pixels, 0);
+  const double greenBefore = meanChannel(pixels, 1);
+  const double blueBefore = meanChannel(pixels, 2);
+
+  // Set mid-transition, once. Both presets were loaded with 0, so each can
+  // only show 1 if this call reached it. projectM picks a random transition,
+  // and some show one preset far more than the other at any given moment, so
+  // A (outgoing) is checked early, where it still dominates, and B
+  // (incoming) late, where it does.
+  rig.instance->setPresetVariable("mdw_m3", 1.0);
+  pixels = rig.renderFrame(n++);
+  const double redEarly = meanChannel(pixels, 0);
+  const double blueEarly = meanChannel(pixels, 2);
+
+  const int threeQuarters = quarter + framesPerBlend / 2;
+  for (; n < threeQuarters; ++n) {
+    pixels = rig.renderFrame(n);
+  }
+  const double greenLate = meanChannel(pixels, 1);
+  const double blueLate = meanChannel(pixels, 2);
+
+  INFO("before: r " << redBefore << " g " << greenBefore << " b " << blueBefore << "; 25%: r " << redEarly
+                    << " b " << blueEarly << "; 75%: g " << greenLate << " b " << blueLate);
+  // Before: dark, and the same in every channel (whatever faint level the
+  // blend itself adds), so neither preset's border colour is showing yet.
+  CHECK(redBefore < 8.0);
+  CHECK(std::abs(redBefore - blueBefore) < 0.5);
+  CHECK(std::abs(greenBefore - blueBefore) < 0.5);
+  // After: each preset's channel stands out from blue, which neither draws.
+  CHECK(redEarly > blueEarly + 10.0); // preset A (outgoing) got it
+  CHECK(greenLate > blueLate + 10.0); // preset B (incoming) got it
+}
+
+TEST_CASE("Preset variables: a value set earlier reaches a preset loaded later (8.7)",
+          "[engine][headless][presetvars]") {
+  HeadlessRig rig;
+  if (!rig.ready()) {
+    reportUnavailable(rig.skipReason);
+    return;
+  }
+  const auto first = borderPreset("", "ob_b = 1;", "");
+  const auto second = borderPreset("", "ob_r = mdw_m4;", "");
+  rig.instance->loadPresetData(first.c_str(), false);
+  rig.instance->setPresetVariable("mdw_m4", 0.5); // only the first preset exists now
+  int n = 0;
+  for (; n < 3; ++n) {
+    rig.renderFrame(n);
+  }
+  rig.instance->loadPresetData(second.c_str(), false);
+  std::vector<std::uint8_t> pixels;
+  for (; n < 6; ++n) {
+    pixels = rig.renderFrame(n);
+  }
+  const auto px = borderPixel(pixels);
+  INFO("r " << px.r << " b " << px.b);
+  CHECK(matchesColour(px.r, 0.5));
+  CHECK(matchesColour(px.b, 0.0));
+}
+
+// ---- .milkdawp on projectM (8.8-8.10) ----------------------------------------------
+
+namespace {
+
+using MacroValues = std::array<float, milkdawp::core::kMacroCount>;
+
+// What the render engine sets in every preset each frame (RenderEngine.cpp),
+// with the Macros on `macros` and the Visual globals at the given values.
+void setPresetInputs(ProjectMInstance& instance, const MacroValues& macros, float zoom = 0.0f, float rotation = 0.0f,
+                     float warp = 1.0f, float trails = 0.0f) {
+  for (std::size_t k = 0; k < macros.size(); ++k) {
+    instance.setPresetVariable(milkdawp::core::kMacroVariables[k], macros[k]);
+  }
+  instance.setPresetVariable(milkdawp::core::kZoomVariable, zoom);
+  instance.setPresetVariable(milkdawp::core::kRotationVariable, rotation);
+  instance.setPresetVariable(milkdawp::core::kWarpVariable, warp);
+  instance.setPresetVariable(milkdawp::core::kTrailsVariable, trails);
+  instance.setPresetVariable(milkdawp::core::kDtVariable, 1.0 / kFps);
+}
+
+MacroValues defaultMacros(const milkdawp::core::MilkdawpPreset& preset) {
+  MacroValues macros{};
+  const auto defaults = milkdawp::core::macroDefaults(preset);
+  for (std::size_t k = 0; k < macros.size(); ++k) {
+    macros[k] = defaults[k].value_or(0.0f);
+  }
+  return macros;
+}
+
+// mdw-border.milk as a .milkdawp: lines before [preset00], odd case, a space
+// for '=', code full of '=' and ';', and a control in every mode.
+std::string borderAsMilkdawp() {
+  auto text = readPreset("mdw-border.milk");
+  text.insert(0, "MDW_FORMAT=1\nmdw_title Border\n");
+  text += "mdw_ctl_1_name=Swirl\nmdw_ctl_1_slot=macro1\nmdw_ctl_1_mode=rate\nmdw_ctl_1_target=rot\n"
+          "mdw_ctl_2_slot=macro2\nmdw_ctl_2_mode=scale\nmdw_ctl_2_target=zoom\nmdw_ctl_2_min=0.5\nmdw_ctl_2_max=1.7\n"
+          "mdw_ctl_3_slot=macro3\nmdw_ctl_3_mode=replace\nmdw_ctl_3_target=ob_r\nmdw_ctl_3_value=1\n"
+          "mdw_ctl_4_slot=macro4\nmdw_ctl_4_mode=offset\nmdw_ctl_4_target=dx\nmdw_ctl_4_stage=pixel\n"
+          "mdw_ctl_5_slot=macro5\nmdw_ctl_5_mode=expr\nmdw_ctl_5_code=ob_g = ob_g + mdw_c5; q1 = q1 == 0;\n"
+          "mdw_fx_1=glow,amount:0.35\n";
+  return text;
+}
+
+} // namespace
+
+TEST_CASE(".milkdawp: projectM opens one as its plain preset, and compiled with neutral controls it "
+          "looks the same (8.8, 8.9)",
+          "[engine][headless][milkdawp]") {
+  // The border colour is a pure function of time (see the set_frame_time
+  // test), so the same frames must show the same colour all three ways.
+  const auto plain = readPreset("mdw-border.milk");
+  const auto raw = borderAsMilkdawp();
+  const auto parsed = milkdawp::core::parseMilkdawp(raw);
+  REQUIRE(parsed.problems.size() == 1); // only mdw_fx_1: not used yet
+  REQUIRE(parsed.preset.controls.size() == 5);
+  const auto compiled = milkdawp::core::compileForProjectM(parsed.preset);
+
+  const std::vector<int> frames{10, 40, 70};
+  const auto borderColours = [&frames](const std::string& text, const milkdawp::core::MilkdawpPreset* inputs,
+                                       std::vector<Rgb>& out) {
+    HeadlessRig rig;
+    if (!rig.ready()) {
+      return rig.skipReason;
+    }
+    if (inputs != nullptr) {
+      setPresetInputs(*rig.instance, defaultMacros(*inputs));
+    }
+    rig.instance->loadPresetData(text.c_str(), false);
+    int next = 0;
+    for (const int wanted : frames) {
+      std::vector<std::uint8_t> pixels;
+      while (next <= wanted) {
+        pixels = rig.renderFrame(next++);
+      }
+      out.push_back(borderPixel(pixels));
+    }
+    return std::string{};
+  };
+  std::vector<Rgb> expected;
+  std::vector<Rgb> asRenamed;
+  std::vector<Rgb> asCompiled;
+  if (const auto skip = borderColours(plain, nullptr, expected); !skip.empty()) {
+    reportUnavailable(skip);
+    return;
+  }
+  // 8.8: projectM reading the file itself (our patch leaves its parser alone)
+  // ignores every mdw_ key, so it plays the plain preset.
+  borderColours(raw, nullptr, asRenamed);
+  // 8.9: what we load: every Macro on its default, the globals neutral.
+  borderColours(compiled, &parsed.preset, asCompiled);
+  REQUIRE(asRenamed.size() == frames.size());
+  REQUIRE(asCompiled.size() == frames.size());
+  const auto close = [](const Rgb& a, const Rgb& b) {
+    return std::abs(a.r - b.r) <= 2 && std::abs(a.g - b.g) <= 2 && std::abs(a.b - b.b) <= 2;
+  };
+  for (std::size_t k = 0; k < frames.size(); ++k) {
+    INFO("frame " << frames[k] << ": plain " << expected[k].r << "," << expected[k].g << "," << expected[k].b
+                  << " renamed " << asRenamed[k].r << "," << asRenamed[k].g << "," << asRenamed[k].b << " compiled "
+                  << asCompiled[k].r << "," << asCompiled[k].g << "," << asCompiled[k].b);
+    CHECK(close(expected[k], asRenamed[k]));
+    CHECK(close(expected[k], asCompiled[k]));
+  }
+}
+
+TEST_CASE(".milkdawp: Macros drive the preset through its controls (8.10)", "[engine][headless][milkdawp]") {
+  HeadlessRig rig;
+  if (!rig.ready()) {
+    reportUnavailable(rig.skipReason);
+    return;
+  }
+  const auto text = borderPreset("", "ob_r = 0.2;\nob_g = 0.5;\nob_b = 0;", "") +
+                    "mdw_format=1\n"
+                    "mdw_ctl_1_slot=macro1\nmdw_ctl_1_mode=replace\nmdw_ctl_1_target=ob_r\nmdw_ctl_1_value=1\n"
+                    "mdw_ctl_2_slot=macro2\nmdw_ctl_2_mode=offset\nmdw_ctl_2_target=ob_g\n"
+                    "mdw_ctl_2_min=-0.5\nmdw_ctl_2_max=0.5\n"
+                    "mdw_ctl_3_slot=macro3\nmdw_ctl_3_mode=expr\nmdw_ctl_3_code=ob_b = mdw_c3\n"
+                    "mdw_ctl_3_min=0\nmdw_ctl_3_max=1\nmdw_ctl_3_default=0.25\n";
+  const auto parsed = milkdawp::core::parseMilkdawp(text);
+  REQUIRE(parsed.problems.empty());
+  const auto compiled = milkdawp::core::compileForProjectM(parsed.preset);
+
+  // On their defaults the preset is as written (Macro 3's default is 0.25).
+  auto macros = defaultMacros(parsed.preset);
+  CHECK(macros[1] == 0.5f);
+  CHECK(macros[2] == 0.25f);
+  setPresetInputs(*rig.instance, macros);
+  rig.instance->loadPresetData(compiled.c_str(), false);
+  int n = 0;
+  std::vector<std::uint8_t> pixels;
+  for (; n < 3; ++n) {
+    pixels = rig.renderFrame(n);
+  }
+  auto px = borderPixel(pixels);
+  INFO("defaults: " << px.r << "," << px.g << "," << px.b);
+  CHECK(matchesColour(px.r, 0.2));
+  CHECK(matchesColour(px.g, 0.5));
+  CHECK(matchesColour(px.b, 0.25));
+
+  // Half way to 1; +0.3; and the expression's own value.
+  macros[0] = 0.5f;
+  macros[1] = 0.8f;
+  macros[2] = 0.75f;
+  setPresetInputs(*rig.instance, macros);
+  pixels = rig.renderFrame(n++);
+  px = borderPixel(pixels);
+  INFO("moved: " << px.r << "," << px.g << "," << px.b);
+  CHECK(matchesColour(px.r, 0.6));
+  CHECK(matchesColour(px.g, 0.8));
+  CHECK(matchesColour(px.b, 0.75));
+}
+
+TEST_CASE(".milkdawp: Zoom, Rotation and Warp reach the preset's own zoom, rot and warp (8.10)",
+          "[engine][headless][milkdawp]") {
+  HeadlessRig rig;
+  if (!rig.ready()) {
+    reportUnavailable(rig.skipReason);
+    return;
+  }
+  // Per-vertex code runs after all per-frame code (ours included) and starts
+  // from its results. It copies them into registers, and per-frame code shows
+  // them on the next frame: red = zoom, green = rot, blue = warp.
+  auto text = borderPreset("", "ob_r = (reg01 - 1) * 5 + 0.5;\nob_g = reg02 * 5 + 0.5;\nob_b = reg03;",
+                           "reg01 = zoom;\nreg02 = rot;\nreg03 = warp;");
+  text.replace(text.find("warp=0\n"), 7, "warp=0.5\n");
+  const auto compiled = milkdawp::core::compileForProjectM(milkdawp::core::parseMilkdawp(text).preset);
+  const MacroValues macros{};
+
+  setPresetInputs(*rig.instance, macros); // neutral
+  rig.instance->loadPresetData(compiled.c_str(), false);
+  int n = 0;
+  std::vector<std::uint8_t> pixels;
+  for (; n < 3; ++n) {
+    pixels = rig.renderFrame(n);
+  }
+  auto px = borderPixel(pixels);
+  INFO("neutral: " << px.r << "," << px.g << "," << px.b);
+  CHECK(matchesColour(px.r, 0.5));
+  CHECK(matchesColour(px.g, 0.5));
+  CHECK(matchesColour(px.b, 0.5));
+
+  setPresetInputs(*rig.instance, macros, 1.0f, 1.0f, 2.0f);
+  for (const int last = n + 2; n < last; ++n) {
+    pixels = rig.renderFrame(n);
+  }
+  px = borderPixel(pixels);
+  INFO("turned: " << px.r << "," << px.g << "," << px.b);
+  CHECK(matchesColour(px.r, 0.7)); // zoom x 1.04
+  CHECK(matchesColour(px.g, 0.7)); // rot + 0.04
+  CHECK(matchesColour(px.b, 1.0)); // warp 0.5 x 2
 }

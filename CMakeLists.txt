@@ -146,6 +146,7 @@ endif()
 add_subdirectory(tools/mdw-analyze)     # offline analysis CLI     [0.2, Phase 1]
 add_subdirectory(tools/generate-param-docs) # docs/parameters.md generator [1.13]
 add_subdirectory(tools/generate-fixtures)   # fixtures/ generator      [1.9]
+add_subdirectory(tools/mdw-convert)         # .milk -> .milkdawp converter [8.11]
 option(MILKDAWP_BUILD_MDW_VIEW "Build the mdw-view developer viewer (Phase 2.9)" ON)
 if(MILKDAWP_BUILD_MDW_VIEW)
   add_subdirectory(tools/mdw-view)      # dev viewer: WAV -> engine -> window [2.9]

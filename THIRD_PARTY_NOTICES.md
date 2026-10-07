@@ -9,7 +9,7 @@ file; this document is the human-curated index of what's used and why.
 | Component                                                     | License                     | Linkage                                                                                                | Source                                                                                                                                                                                               |
 |---------------------------------------------------------------|-----------------------------|--------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [JUCE 9](https://github.com/juce-framework/JUCE)              | AGPL-3.0 (open-source path) | Statically compiled in via `FetchContent` (`cmake/FetchJuce.cmake`)                                    | Pinned tag + commit hash                                                                                                                                                                             |
-| [projectM 4](https://github.com/projectM-visualizer/projectm) | LGPL-2.1                    | **Dynamically** linked (required by LGPL; see `triplets/*.cmake` and `cmake/ProjectMDependency.cmake`) | vcpkg overlay port `vcpkg-overlays/projectm`, pre-release 4.2.0 built from upstream commit `1e7ef7803b69024d1e0656705670adda2ffac817` (ADR-0008). The LGPL source offer refers to that exact commit. |
+| [projectM 4](https://github.com/projectM-visualizer/projectm) | LGPL-2.1                    | **Dynamically** linked (required by LGPL; see `triplets/*.cmake` and `cmake/ProjectMDependency.cmake`) | vcpkg overlay port `vcpkg-overlays/projectm`, pre-release 4.2.0 built from upstream commit `1e7ef7803b69024d1e0656705670adda2ffac817` (ADR-0008), **modified** by MilkDAWp's patches in `vcpkg-overlays/projectm/*.patch` (ADR-0012). The LGPL source offer refers to that exact commit plus those patches. |
 | [Lucide](https://lucide.dev) icons                            | ISC                         | Icon path data compiled in (`ui/src/Icons.cpp`, which carries the licence notice)                      | Copied from lucide.dev, redrawn as absolute SVG path strings                                                                                                                                         |
 | [Catch2 v3](https://github.com/catchorg/Catch2)               | BSL-1.0                     | Test-only, not shipped in any release binary                                                           | `FetchContent` (`cmake/FetchCatch2.cmake`)                                                                                                                                                           |
 | zlib                                                          | zlib                        | JUCE's bundled copy, compiled in (§4.11; vcpkg's copy is not linked since 2026-09-26)                  | JUCE                                                                                                                                                                                                 |
@@ -41,8 +41,10 @@ non-(L)GPL-compatible-licensed binary would extend LGPL obligations to the
 whole binary; MilkDAWp avoids that by linking it as a shared library on every
 platform (enforced by the `*-dynamic` triplets and checked at configure time).
 The compiled shared library, its licence, and a written offer for its source
-(if not already satisfied by pointing at the upstream project) ship alongside
-every installer (Phase 6.2-6.4).
+ship alongside every installer (Phase 6.2-6.4). Since ADR-0012 we ship a
+modified projectM, so pointing at the upstream project is no longer enough:
+the offer must include our patches (LGPL-2.1 §2 also requires the modified
+files to carry a notice of the change, which each patched file carries at its top).
 
 ## Generating a release's full notices
 

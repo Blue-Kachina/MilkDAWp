@@ -102,12 +102,15 @@ set(MILKDAWP_PRESET_REMOVALS
 foreach(_mdw_removed IN LISTS MILKDAWP_PRESET_REMOVALS)
   set(_mdw_removed_path "${MILKDAWP_CONTENT_DIR}/Presets/Cream of the Crop/${_mdw_removed}")
   if(EXISTS "${_mdw_removed_path}")
-    file(REMOVE "${_mdw_removed_path}")
+    # And the .milkdawp a build made of it (8.11).
+    string(REGEX REPLACE "\\.[^./]*$" ".milkdawp" _mdw_removed_converted "${_mdw_removed_path}")
+    file(REMOVE "${_mdw_removed_path}" "${_mdw_removed_converted}")
     message(STATUS "MilkDAWp: removed preset at its author's request: ${_mdw_removed}")
   endif()
 endforeach()
 unset(_mdw_removed)
 unset(_mdw_removed_path)
+unset(_mdw_removed_converted)
 
 # The texture repo keeps its images in textures/; flatten that into Textures/.
 milkdawp_fetch_archive(textures

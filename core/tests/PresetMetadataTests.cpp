@@ -11,6 +11,8 @@ TEST_CASE("Preset metadata is keyed by file name, case-insensitively", "[core][P
   CHECK(PresetMetadata::keyFor("C:\\Presets\\Pack\\Geiss - Dust.milk") == "geiss - dust.milk");
   CHECK(PresetMetadata::keyFor("/home/me/presets/Geiss - Dust.milk") == "geiss - dust.milk");
   CHECK(PresetMetadata::keyFor("Geiss - Dust.milk") == "geiss - dust.milk");
+  // 8.10: a .milkdawp shares the ratings of the .milk it was made from.
+  CHECK(PresetMetadata::keyFor("C:\\Presets\\Geiss - Dust.MILKDAWP") == "geiss - dust.milk");
 
   PresetMetadata metadata;
   metadata.set("C:/old/place/Geiss - Dust.milk", {4, false, {"calm"}});
