@@ -32,7 +32,7 @@ sudo installer -pkg "$pkg" -target / || fail "installer"
 for path in "$app" "$vst3" "$au" "$content/Presets/Cream of the CrAWp" "$content/Textures/worms.jpg"; do
   [[ -e "$path" ]] || fail "not installed: $path"
 done
-presets="$(find "$content/Presets" -name '*.milk' | wc -l | tr -d ' ')"
+presets="$(find "$content/Presets" -name '*.milkdawp' | wc -l | tr -d ' ')"
 [[ "$presets" -gt 9000 ]] || fail "only $presets presets installed"
 pass "installed ($presets presets)"
 

@@ -43,7 +43,7 @@ $expected = @(
   "$content\Presets\Cream of the CrAWp\LICENSE.md", "$content\Textures\worms.jpg"
 )
 foreach ($path in $expected) { if (-not (Test-Path $path)) { Fail "not installed: $path" } }
-$presets = (Get-ChildItem "$content\Presets" -Recurse -Filter *.milk).Count
+$presets = (Get-ChildItem "$content\Presets" -Recurse -Filter *.milkdawp).Count
 if ($presets -lt 9000) { Fail "only $presets presets installed" }
 $extra = Get-ChildItem "$vst3\Contents\x86_64-win" | Where-Object { $_.Name -notin @("MilkDAWp.vst3", "projectM-4.dll") }
 if ($extra) { Fail "unexpected files next to the plugin: $($extra.Name -join ', ')" }
