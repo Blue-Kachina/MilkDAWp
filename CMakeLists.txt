@@ -46,7 +46,7 @@ endif()
 # MilkDAWp 2 -- ground-up rebuild of MilkDAWp (see development_roadmap.md).
 # This is Phase 0.1: top-level project setup, dependency plumbing, and build
 # presets. milkdawp_core/engine/ui/plugin/app do not exist yet (Phase 0.2).
-project(MilkDAWp VERSION 1.0.0 LANGUAGES C CXX)
+project(MilkDAWp VERSION 1.0.1 LANGUAGES C CXX)
 # 8.6d: AVFoundation video (engine/src/VideoDecoderMac.mm) is Objective-C++.
 if(APPLE)
   enable_language(OBJC OBJCXX)
