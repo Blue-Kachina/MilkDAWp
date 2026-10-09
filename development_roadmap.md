@@ -3043,8 +3043,29 @@ Stage B, `.milkdawp` v1 on patched projectM:
         preset is a `.milkdawp`, `package.sh` refuses a content folder without the pack.
       - **Not yet**: a hand test of the Macro names and ranges in a DAW; macOS and the
         sanitizer CI jobs.
-- [ ] 8.12 (M) Second patch: external textures (`sampler_camera`, `sampler_video`) and new
+- [x] 8.12 (M) Second patch: external textures (`sampler_camera`, `sampler_video`) and new
       preset variables (beat phase, bar phase, BPM, onset); a few hand-made presets using them.
+      Update (2026-10-08): done, **without a second patch**; ADR-0015.
+      - **Spike**: projectM 4.2's texture-load callback is enough. At our pin it does *not*
+        own a texture handed over by id (its header is stale), keeps it under its name and
+        samples it every frame, so new contents show with no reload. It asks again only after
+        purging it. It reads row 0 as the top, so GL-order pictures are flipped.
+      - **Textures**: one per layer, for both names (any wrap/filter prefix, `texsize_` too):
+        the layer's media at full strength, cropped to fill, whatever Media Mix and the blend
+        are. Black without media.
+      - **Music**: the director publishes a `core::BeatSnapshot` to the layer's channel (host
+        transport while it plays, with its time signature; otherwise the detector, 4/4); the
+        render thread sets `mdw_beat_phase`, `mdw_bar_phase`, `mdw_bpm` (0 with no beat) and
+        `mdw_onset` (1 at a broadband onset, 0.1 s decay) every frame
+        (`core::presetAudioInputs`).
+      - **Presets**: Camera Tunnel, Bar Spinner and Onset Edges in
+        `resources/presets/MilkDAWp Originals/`, shipped in the pack as that folder.
+      - **Tests**: the spike, the engine end to end (media upright and cropped, `mdw_bpm`),
+        the director, the phase maths, and the three presets (compile with no projectM
+        warning; picture moves; media presets change with black media). Windows; Linux GCC
+        and Clang ASan in the container. Checked by eye in `mdw-view` with an image (no audio). Not yet: a
+        hand test with music, a camera and a video.
+      - Also: `mdw-view --set macroN=` now reaches the engine.
 
 - [ ] 8.D (S) **Decision gate:** own renderer go / no-go, as an ADR, from what Stage B showed
       (projectM limits, Android performance, cost of carrying patches).

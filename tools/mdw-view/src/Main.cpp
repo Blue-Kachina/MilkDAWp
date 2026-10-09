@@ -183,6 +183,7 @@ public:
     const auto mapped = engine::toEngineControls(parameters_);
     controls_.visual = mapped.visual;
     controls_.gate = mapped.gate;
+    controls_.macros = mapped.macros; // --set macro1=... (it never moves them to a preset's defaults)
     publish();
     return true;
   }

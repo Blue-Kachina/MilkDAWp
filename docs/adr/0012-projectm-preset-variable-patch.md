@@ -97,4 +97,5 @@ Linux CI (Mesa llvmpipe) and macOS.
   upstream PR #971 lands, recheck the patch: it touches the same code.
 - The own-renderer decision (8.D) no longer weighs "upstream's response",
   only the cost of carrying this patch and any later one (8.12's external
-  textures, unless 4.2's texture-load callback is enough).
+  textures, unless 4.2's texture-load callback is enough). *2026-10-08:* it
+  was (ADR-0015), so this stays the only patch.

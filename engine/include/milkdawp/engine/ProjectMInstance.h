@@ -77,6 +77,12 @@ public:
   /// soft cuts and later presets.
   void setPresetVariable(const char* name, double value);
 
+  /// Called synchronously from inside loadPresetData()/loadPresetFile() for
+  /// each texture a preset names that projectM doesn't hold yet (8.12). A
+  /// texture handed over must outlive this instance: projectM never deletes
+  /// it, and samples it in every later frame of a preset that names it.
+  void setTextureLoadCallback(ProjectMTextureLoadCallback callback, void* userData);
+
   /// Called synchronously from inside loadPresetData()/loadPresetFile()
   /// when projectM rejects a preset.
   void setPresetSwitchFailedCallback(ProjectMPresetSwitchFailedCallback callback, void* userData);

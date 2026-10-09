@@ -13,6 +13,7 @@
 #include "milkdawp/core/LayerGate.h"
 #include "milkdawp/core/Messages.h"
 #include "milkdawp/core/ParameterModel.h"
+#include "milkdawp/core/PresetInputs.h"
 #include "milkdawp/core/SeqlockSnapshot.h"
 #include "milkdawp/core/VisualControls.h"
 #include "milkdawp/engine/MediaSource.h"
@@ -148,6 +149,13 @@ public:
   [[nodiscard]] LayerBlend mediaBlend() const noexcept { return mediaBlend_.load(); }
   [[nodiscard]] MediaTimeline mediaTimeline() const noexcept { return mediaTimeline_.read(); }
 
+  /// 8.12: the beat and onsets of this layer's audio, as its director last
+  /// saw them; the render thread makes `mdw_beat_phase` and the rest from it
+  /// at the moment it draws (`core::presetAudioInputs`). Director thread
+  /// writes, any thread reads.
+  void setBeat(const core::BeatSnapshot& beat) noexcept { beat_.publish(beat); }
+  [[nodiscard]] core::BeatSnapshot beat() const noexcept { return beat_.read(); }
+
   /// Render thread only.
   void reportGate(float levelDb, bool open, float envelope) noexcept {
     gateLevelDb_.store(levelDb);
@@ -191,6 +199,7 @@ private:
   mutable std::mutex mediaMutex_; // never taken on the audio thread
   std::shared_ptr<MediaSource> media_;
   core::SeqlockSnapshot<MediaTimeline> mediaTimeline_;
+  core::SeqlockSnapshot<core::BeatSnapshot> beat_;
   std::atomic<LayerBlend> mediaBlend_{LayerBlend::Normal};
 };
 

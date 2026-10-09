@@ -82,6 +82,7 @@ BeatClockState BeatClock::processHop(std::uint64_t currentSamplePos, const Tempo
                         ? static_cast<std::uint32_t>((beatIndex_ - downbeatPhase_) / 4)
                         : 0;
   state.confidence = tempo.confidence;
+  state.beatInBar = static_cast<std::uint32_t>((beatIndex_ + 4 - downbeatPhase_ % 4) % 4);
   return state;
 }
 

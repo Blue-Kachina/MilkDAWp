@@ -74,6 +74,14 @@ TEST_CASE("HostTransport derives bar index from the time signature", "[core][Hos
   auto state = transport.processTransport(info);
   CHECK(state.beatIndex == 9);
   CHECK(state.barIndex == 2);
+  CHECK(state.beatsPerBar == 4);
+  CHECK(state.beatInBar == 1);
+
+  info.timeSigNumerator = 3; // beat 9 -> bar 3, its first beat
+  state = transport.processTransport(info);
+  CHECK(state.barIndex == 3);
+  CHECK(state.beatsPerBar == 3);
+  CHECK(state.beatInBar == 0);
 }
 
 TEST_CASE("HostTransport reflects a loop (ppq jumping backward) with no stale state",

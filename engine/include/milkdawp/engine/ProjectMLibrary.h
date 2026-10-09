@@ -21,6 +21,24 @@ using ProjectMPresetSwitchFailedCallback = void (*)(const char* presetFilename,
                                                      const char* message,
                                                      void* userData);
 
+/// `projectm_texture_load_data` (4.2, callbacks.h): what a texture-load
+/// callback hands back. Left untouched, projectM looks on disk instead.
+/// Given a `textureId`, projectM samples that texture but does *not* own it:
+/// at our pinned commit `TextureManager::TryLoadingTexture` wraps it with
+/// `owned = false`, whatever the header comment says (8.12 spike).
+struct ProjectMTextureLoadData {
+  const unsigned char* data = nullptr; // raw RGBA/RGB pixels, bottom row first; or null
+  unsigned int width = 0;
+  unsigned int height = 0;
+  unsigned int channels = 0;
+  unsigned int textureId = 0; // an existing GL texture; or 0
+};
+
+/// `projectm_texture_load_event` (4.2): `textureName` is the name a preset
+/// uses, without `sampler_` or a wrap/filter prefix ("camera" for
+/// `sampler_fc_camera`), in the preset's own case.
+using ProjectMTextureLoadCallback = void (*)(const char* textureName, ProjectMTextureLoadData* data, void* userData);
+
 /// `projectm_load_proc` (4.2): resolves a GL function by name.
 using ProjectMGlLoadProc = void* (*)(const char* name, void* userData);
 
@@ -100,6 +118,14 @@ struct ProjectMFunctions {
   // both presets get it during a soft cut, and later presets before their
   // init code. Case-insensitive name; render thread only.
   void (*setPresetVariable)(ProjectMHandle instance, const char* name, double value) = nullptr;
+
+  // 4.2: asked on the render thread, while a preset loads, for each texture
+  // the preset names that projectM doesn't hold yet (8.12: `sampler_camera`,
+  // `sampler_video`). projectM keeps what it is given under that name and asks
+  // again only after purging it, so a live feed is one texture whose contents
+  // keep changing.
+  void (*setTextureLoadEventCallback)(ProjectMHandle instance, ProjectMTextureLoadCallback callback,
+                                      void* userData) = nullptr;
 
   void (*setPresetSwitchFailedEventCallback)(ProjectMHandle instance,
                                               ProjectMPresetSwitchFailedCallback callback,

@@ -25,6 +25,7 @@ add_executable(milkdawp_engine_tests
 milkdawp_test_no_crash_dialogs(milkdawp_engine_tests)
 target_compile_definitions(milkdawp_engine_tests PRIVATE
   MILKDAWP_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/fixtures"
+  MILKDAWP_ORIGINAL_PRESETS_DIR="${CMAKE_SOURCE_DIR}/resources/presets/MilkDAWp Originals"
 )
 
 target_link_libraries(milkdawp_engine_tests PRIVATE

@@ -87,6 +87,17 @@ inline constexpr const char* kRotationVariable = "mdw_rot";  // Visual Rotation,
 inline constexpr const char* kWarpVariable = "mdw_warp";     // Visual Warp, 0..3 (neutral 1)
 inline constexpr const char* kTrailsVariable = "mdw_trails"; // Visual Trails, 0..1 (neutral 0)
 inline constexpr const char* kDtVariable = "mdw_dt";         // this frame's step of the preset clock, in seconds
+// 8.12: the music, any preset can read them (PresetInputs.h says how they move).
+inline constexpr const char* kBeatPhaseVariable = "mdw_beat_phase"; // 0..1 through each beat
+inline constexpr const char* kBarPhaseVariable = "mdw_bar_phase";   // 0..1 through each bar
+inline constexpr const char* kBpmVariable = "mdw_bpm";              // the tempo; 0 with no beat
+inline constexpr const char* kOnsetVariable = "mdw_onset";          // 1 at a note or hit, decaying to 0
+/// 8.12: the textures the engine hands presets, as `sampler_camera` and
+/// `sampler_video` in warp and composite shaders (any wrap/filter prefix,
+/// `texsize_` too). Both are the layer's media source (camera, video or
+/// image), whatever it is; black while there is none.
+inline constexpr const char* kCameraTexture = "camera";
+inline constexpr const char* kVideoTexture = "video";
 
 /// True for a line `.milkdawp` owns: its key (up to the first space or '=',
 /// as projectM and MilkDrop read keys) starts with `mdw_`, in any case.

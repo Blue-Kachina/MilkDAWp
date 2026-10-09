@@ -4,10 +4,15 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
+#include <memory>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include "milkdawp/core/AudioRing.h"
+#include "milkdawp/engine/MediaSource.h"
 #include "milkdawp/engine/RenderEngine.h"
 
 using namespace milkdawp::engine;
@@ -496,4 +501,170 @@ TEST_CASE("Several engines in one process share the GPU budget; a hidden one doe
 
   a->unregisterSurface(slotA);
   b->unregisterSurface(slotB);
+}
+
+namespace {
+
+// A layer's picture as the readback copy has it: the frame after `after`.
+std::vector<std::uint8_t> frameAfter(const RenderEngine& engine, std::uint64_t after, std::uint64_t& number) {
+  std::vector<std::uint8_t> rgba;
+  waitUntil([&] {
+    const auto frame = engine.latestReadbackFrame();
+    if (!frame || frame->number <= after) {
+      return false;
+    }
+    rgba = frame->rgba;
+    number = frame->number;
+    return true;
+  });
+  return rgba;
+}
+
+struct Pixel {
+  int r = 0;
+  int g = 0;
+  int b = 0;
+};
+
+Pixel pixelAt(const std::vector<std::uint8_t>& rgba, int width, int x, int y) { // y from the bottom
+  const auto i = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)) * 4;
+  return {rgba[i], rgba[i + 1], rgba[i + 2]};
+}
+
+bool loadPreset(RenderEngine& engine, std::uint32_t id, const std::string& text) {
+  const auto before = engine.stats().presetsLoaded;
+  return engine.presetHandoff().offer(id, text) &&
+         engine.pushTransition({id, milkdawp::core::CutStyle::Hard, 0.0f, 0}) &&
+         waitUntil([&] { return engine.stats().presetsLoaded > before; });
+}
+
+std::string compositePreset(const std::string& perFrame, const std::string& composite) {
+  return "[preset00]\n"
+         "MILKDROP_PRESET_VERSION=201\n"
+         "PSVERSION=2\n"
+         "PSVERSION_WARP=2\n"
+         "PSVERSION_COMP=2\n"
+         "fDecay=0.9\n"
+         "fWaveAlpha=0\n"
+         "ob_size=0.5\n"
+         "ob_a=1\n"
+         "per_frame_1=" +
+         perFrame +
+         "\n"
+         "comp_1=`shader_body\n"
+         "comp_2=`{\n"
+         "comp_3=`ret = " +
+         composite +
+         ";\n"
+         "comp_4=`}\n";
+}
+
+} // namespace
+
+TEST_CASE("RenderEngine hands a layer's media to presets as sampler_camera and sampler_video (8.12)",
+          "[engine][RenderEngine][externaltex]") {
+  milkdawp::core::AudioRing ring(1 << 14, 2);
+  const auto engine = RenderEngine::create(ring);
+  waitForStartup(*engine);
+  if (!engine->isAvailable()) {
+    SUCCEED("projectM or a GL context is unavailable here: " + engine->unavailableReason());
+    return;
+  }
+  constexpr int kW = 320;
+  constexpr int kH = 180;
+  const int slot = engine->registerSurface();
+  engine->reportSurfaceSize(slot, kW, kH, /*visible=*/true);
+  engine->addReadbackClient();
+
+  // Wider than the frame (2:1), so it is cropped at the sides: a red top half
+  // and a blue bottom half, with green bands at the far left and right that a
+  // crop to fill leaves out. Bottom row first, like every MediaFrame.
+  MediaFrame image;
+  image.width = 64;
+  image.height = 32;
+  image.rgba.resize(static_cast<std::size_t>(image.width * image.height) * 4);
+  for (int y = 0; y < image.height; ++y) {
+    for (int x = 0; x < image.width; ++x) {
+      auto* p = &image.rgba[static_cast<std::size_t>(y * image.width + x) * 4];
+      const bool band = x < 3 || x >= image.width - 3; // the crop takes 3.5 texels each side
+      const bool top = y >= image.height / 2;
+      p[0] = !band && top ? 255 : 0;
+      p[1] = band ? 255 : 0;
+      p[2] = !band && !top ? 255 : 0;
+      p[3] = 255;
+    }
+  }
+  engine->primaryLayer().setMediaSource(std::make_shared<ImageMediaSource>(std::move(image), "test"));
+  // Media Mix stays 0: the preset's texture doesn't depend on it.
+
+  for (const char* sampler : {"sampler_camera", "sampler_fc_video"}) {
+    INFO(sampler);
+    REQUIRE(loadPreset(*engine, sampler[8] == 'c' ? 21U : 22U,
+                       compositePreset("", std::string("tex2D(") + sampler + ", uv).xyz")));
+    std::uint64_t number = engine->latestFrame() ? engine->latestFrame()->number : 0;
+    const auto rgba = frameAfter(*engine, number + 2, number);
+    REQUIRE(rgba.size() == static_cast<std::size_t>(kW * kH * 4));
+    const auto top = pixelAt(rgba, kW, kW / 2, kH * 3 / 4);
+    const auto bottom = pixelAt(rgba, kW, kW / 2, kH / 4);
+    const auto left = pixelAt(rgba, kW, 2, kH * 3 / 4);
+    INFO("top " << top.r << "," << top.g << "," << top.b << " bottom " << bottom.r << "," << bottom.g << ","
+                << bottom.b << " left " << left.r << "," << left.g << "," << left.b);
+    CHECK(top.r > 200); // upright
+    CHECK(top.b < 50);
+    CHECK(bottom.b > 200);
+    CHECK(bottom.r < 50);
+    CHECK(left.g < 50); // cropped to fill, not stretched
+  }
+
+  // No media: the texture goes black.
+  engine->primaryLayer().setMediaSource(nullptr);
+  std::uint64_t number = engine->latestFrame()->number;
+  const auto rgba = frameAfter(*engine, number + 2, number);
+  const auto middle = pixelAt(rgba, kW, kW / 2, kH * 3 / 4);
+  CHECK(middle.r + middle.g + middle.b < 30);
+
+  engine->removeReadbackClient();
+  engine->unregisterSurface(slot);
+}
+
+TEST_CASE("RenderEngine gives presets the layer's beat as mdw_bpm and the phases (8.12)",
+          "[engine][RenderEngine][presetvars]") {
+  milkdawp::core::AudioRing ring(1 << 14, 2);
+  const auto engine = RenderEngine::create(ring);
+  waitForStartup(*engine);
+  if (!engine->isAvailable()) {
+    SUCCEED("projectM or a GL context is unavailable here: " + engine->unavailableReason());
+    return;
+  }
+  constexpr int kW = 320;
+  constexpr int kH = 180;
+  const int slot = engine->registerSurface();
+  engine->reportSurfaceSize(slot, kW, kH, /*visible=*/true);
+  engine->addReadbackClient();
+
+  // The border (the whole frame at ob_size 0.5) shows mdw_bpm / 240 in red,
+  // and in green whether both phases are in range.
+  REQUIRE(loadPreset(*engine, 31,
+                     compositePreset("ob_r = mdw_bpm / 240; ob_g = (mdw_beat_phase >= 0) * (mdw_beat_phase < 1) * "
+                                     "(mdw_bar_phase >= 0) * (mdw_bar_phase < 1); ob_b = 0;",
+                                     "tex2D(sampler_main, uv).xyz")));
+  std::uint64_t number = engine->latestFrame() ? engine->latestFrame()->number : 0;
+  auto rgba = frameAfter(*engine, number + 2, number);
+  auto px = pixelAt(rgba, kW, 4, 4);
+  INFO("no beat: " << px.r << "," << px.g);
+  CHECK(px.r < 5); // no beat: 0
+
+  milkdawp::core::BeatSnapshot beat;
+  beat.bpm = 120.0f;
+  beat.confidence = 1.0f;
+  beat.nextBeatSample = 24000;
+  engine->primaryLayer().setBeat(beat);
+  rgba = frameAfter(*engine, number + 2, number);
+  px = pixelAt(rgba, kW, 4, 4);
+  INFO("120 bpm: " << px.r << "," << px.g);
+  CHECK(std::abs(px.r - 128) <= 4);
+  CHECK(px.g > 250);
+
+  engine->removeReadbackClient();
+  engine->unregisterSurface(slot);
 }

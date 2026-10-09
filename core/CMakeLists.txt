@@ -58,6 +58,8 @@ add_library(milkdawp_core STATIC
   src/PresetClock.cpp
   include/milkdawp/core/OscAddress.h
   src/OscAddress.cpp
+  include/milkdawp/core/PresetInputs.h
+  src/PresetInputs.cpp
 )
 
 target_include_directories(milkdawp_core PUBLIC

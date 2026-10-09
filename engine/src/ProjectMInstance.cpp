@@ -98,6 +98,10 @@ void ProjectMInstance::setPresetVariable(const char* name, double value) {
   library_.functions().setPresetVariable(handle_, name, value);
 }
 
+void ProjectMInstance::setTextureLoadCallback(ProjectMTextureLoadCallback callback, void* userData) {
+  library_.functions().setTextureLoadEventCallback(handle_, callback, userData);
+}
+
 void ProjectMInstance::setPresetSwitchFailedCallback(ProjectMPresetSwitchFailedCallback callback, void* userData) {
   library_.functions().setPresetSwitchFailedEventCallback(handle_, callback, userData);
 }

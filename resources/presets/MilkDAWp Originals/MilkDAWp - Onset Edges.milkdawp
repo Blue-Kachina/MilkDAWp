@@ -1,0 +1,55 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+// MilkDAWp original preset (AGPL-3.0-or-later, written for this repo; 8.12).
+// The outlines of the layer's media (Settings > Media source; a video file
+// suits it best) as sampler_video, found with texsize_video and flashed into
+// the feedback on every onset (mdw_onset), where they drift and fade. Their
+// colour runs once round the hue wheel each bar (mdw_bar_phase). The media
+// itself shows faintly underneath.
+mdw_format=1
+mdw_title=MilkDAWp - Onset Edges
+mdw_tags=milkdawp,video,onset
+mdw_renderer=projectm
+mdw_ctl_1_name=Video
+mdw_ctl_1_slot=macro1
+mdw_ctl_1_mode=offset
+mdw_ctl_1_target=q7
+mdw_ctl_1_min=-0.2
+mdw_ctl_1_max=0.8
+mdw_ctl_1_default=0
+mdw_ctl_2_name=Flash
+mdw_ctl_2_slot=macro2
+mdw_ctl_2_mode=scale
+mdw_ctl_2_target=q2
+mdw_ctl_2_min=0
+mdw_ctl_2_max=2
+mdw_ctl_2_default=1
+fDecay=1.0
+zoom=1.0
+rot=0.0
+warp=0.0
+fWaveAlpha=0
+ob_size=0
+ib_size=0
+per_frame_1=q2 = 0.15 + 0.85 * mdw_onset;
+per_frame_2=q6 = mdw_bar_phase;
+per_frame_3=q7 = 0.2;
+per_frame_4=zoom = 1.01;
+per_frame_5=dy = -0.002;
+warp_1=`shader_body
+warp_2=`{
+warp_3=`  float2 px = texsize_video.zw * 1.5;
+warp_4=`  float3 h = tex2D(sampler_video, uv_orig + float2(px.x, 0)).xyz - tex2D(sampler_video, uv_orig - float2(px.x, 0)).xyz;
+warp_5=`  float3 v = tex2D(sampler_video, uv_orig + float2(0, px.y)).xyz - tex2D(sampler_video, uv_orig - float2(0, px.y)).xyz;
+warp_6=`  float edge = saturate((dot(abs(h), 1) + dot(abs(v), 1)) * 1.5 - 0.1);
+warp_7=`  float3 hue = 0.5 + 0.5 * cos(6.2831853 * (q6 + float3(0, 0.333, 0.667)));
+warp_8=`  ret = tex2D(sampler_main, uv).xyz * 0.94 + edge * hue * q2;
+warp_9=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  float3 video = tex2D(sampler_video, uv).xyz;
+comp_4=`  ret = tex2D(sampler_main, uv).xyz + video * saturate(q7);
+comp_5=`}

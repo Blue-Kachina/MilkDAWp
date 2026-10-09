@@ -600,6 +600,266 @@ TEST_CASE("Preset variables: a value set earlier reaches a preset loaded later (
   CHECK(matchesColour(px.b, 0.0));
 }
 
+// ---- external textures through projectM's texture-load callback (8.12) -------------
+
+namespace {
+
+// A preset whose composite shader shows `sampler` and nothing else.
+std::string samplerPreset(const std::string& sampler) {
+  return "[preset00]\n"
+         "MILKDROP_PRESET_VERSION=201\n"
+         "PSVERSION=2\n"
+         "PSVERSION_WARP=2\n"
+         "PSVERSION_COMP=2\n"
+         "fWaveAlpha=0\n"
+         "comp_1=`shader_body\n"
+         "comp_2=`{\n"
+         "comp_3=`ret = tex2D(" +
+         sampler +
+         ", uv).xyz;\n"
+         "comp_4=`}\n";
+}
+
+// What the callback was asked, and the texture it hands over for "camera".
+struct TextureRequests {
+  std::uint32_t camera = 0;
+  std::vector<std::string> names;
+};
+
+void onTextureLoad(const char* name, ProjectMTextureLoadData* data, void* userData) {
+  auto& requests = *static_cast<TextureRequests*>(userData);
+  requests.names.emplace_back(name);
+  if (juce::String(name).equalsIgnoreCase("camera")) {
+    data->textureId = requests.camera;
+    data->width = 2;
+    data->height = 2;
+    data->channels = 4;
+  } else if (juce::String(name).startsWithIgnoreCase("extra")) {
+    static constexpr std::array<unsigned char, 16> grey{128, 128, 128, 255, 128, 128, 128, 255,
+                                                        128, 128, 128, 255, 128, 128, 128, 255};
+    data->data = grey.data(); // projectM copies it into a texture of its own
+    data->width = 2;
+    data->height = 2;
+    data->channels = 4;
+  }
+}
+
+// A 2x2 texture: `bottom` in row 0, `top` in row 1 (GL's order).
+void fillTexture(std::uint32_t texture, Rgb bottom, Rgb top) {
+  using namespace juce::gl;
+  const auto c = [](int v) { return static_cast<std::uint8_t>(v); };
+  const std::array<std::uint8_t, 16> rgba{c(bottom.r), c(bottom.g), c(bottom.b), 255, c(bottom.r), c(bottom.g),
+                                          c(bottom.b), 255,        c(top.r),    c(top.g),    c(top.b),    255,
+                                          c(top.r),    c(top.g),    c(top.b),    255};
+  glBindTexture(GL_TEXTURE_2D, texture);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+  glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+Rgb pixelAt(const std::vector<std::uint8_t>& rgba, int x, int y) { // y from the bottom
+  const std::size_t i = (static_cast<std::size_t>(y) * kWidth + static_cast<std::size_t>(x)) * 4;
+  return {rgba[i], rgba[i + 1], rgba[i + 2]};
+}
+
+} // namespace
+
+TEST_CASE("External textures: a preset samples a texture we own, live, and projectM never deletes it (8.12)",
+          "[engine][headless][externaltex]") {
+  HeadlessRig rig;
+  if (!rig.ready()) {
+    reportUnavailable(rig.skipReason);
+    return;
+  }
+  using namespace juce::gl;
+  TextureRequests requests;
+  glGenTextures(1, &requests.camera);
+  fillTexture(requests.camera, {0, 0, 255}, {255, 0, 0}); // blue at the bottom, red at the top
+  rig.instance->setTextureLoadCallback(&onTextureLoad, &requests);
+
+  const auto camera = samplerPreset("sampler_camera");
+  rig.instance->loadPresetData(camera.c_str(), false);
+  CHECK(std::find(requests.names.begin(), requests.names.end(), "camera") != requests.names.end());
+  std::vector<std::uint8_t> pixels;
+  int n = 0;
+  for (; n < 3; ++n) {
+    pixels = rig.renderFrame(n);
+  }
+  // projectM reads row 0 as the *top* (stb_image's order, like its own file
+  // textures), not GL's bottom: a picture in GL order shows upside down, so
+  // the engine stamps media into this texture flipped. (Read at the texel
+  // centres, a quarter of the way in, where filtering mixes nothing.)
+  const auto top = pixelAt(pixels, kWidth / 2, kHeight * 3 / 4);
+  const auto bottom = pixelAt(pixels, kWidth / 2, kHeight / 4);
+  INFO("top " << top.r << "," << top.g << "," << top.b << " bottom " << bottom.r << "," << bottom.g << ","
+              << bottom.b);
+  CHECK(top.b > 200); // GL row 0
+  CHECK(top.r < 50);
+  CHECK(bottom.r > 200); // GL row 1
+  CHECK(bottom.b < 50);
+
+  // Live: new contents show on the next frame, with no reload and no new request.
+  const auto asked = requests.names.size();
+  fillTexture(requests.camera, {0, 255, 0}, {0, 255, 0});
+  pixels = rig.renderFrame(n++);
+  const auto green = pixelAt(pixels, kWidth / 2, kHeight / 2);
+  INFO("after the update " << green.r << "," << green.g << "," << green.b);
+  CHECK(green.g > 200);
+  CHECK(green.r < 50);
+  CHECK(requests.names.size() == asked);
+
+  // Never deleted: not when presets that don't use it age it out of projectM's
+  // cache, and not when the instance goes. projectM purges at most one texture
+  // per load, the oldest-and-biggest, once at least two of different ages are
+  // two or more loads old (with one, its weighting is 0/0 and nothing goes),
+  // so each preset in between names a texture of its own.
+  for (int load = 0; load < 6; ++load) {
+    const auto other = samplerPreset("sampler_extra" + std::to_string(load));
+    rig.instance->loadPresetData(other.c_str(), false);
+    rig.renderFrame(n++);
+  }
+  CHECK(glIsTexture(requests.camera) == GL_TRUE);
+  // After a purge, a preset naming it asks again, and gets the same texture.
+  rig.instance->loadPresetData(camera.c_str(), false);
+  for (int i = 0; i < 2; ++i) {
+    pixels = rig.renderFrame(n++);
+  }
+  CHECK(std::count(requests.names.begin(), requests.names.end(), "camera") == 2);
+  CHECK(pixelAt(pixels, kWidth / 2, kHeight / 2).g > 200);
+  rig.instance.reset();
+  CHECK(glIsTexture(requests.camera) == GL_TRUE);
+  glDeleteTextures(1, &requests.camera);
+}
+
+namespace {
+
+// Hands one texture over for both of the engine's names, as RenderEngine does.
+void onMediaTextureLoad(const char* name, ProjectMTextureLoadData* data, void* userData) {
+  const juce::String texture(name);
+  if (texture.equalsIgnoreCase(milkdawp::core::kCameraTexture) ||
+      texture.equalsIgnoreCase(milkdawp::core::kVideoTexture)) {
+    data->textureId = *static_cast<std::uint32_t*>(userData);
+    data->width = 64;
+    data->height = 36;
+    data->channels = 4;
+  }
+}
+
+void collectProjectMErrors(const char* message, int, void* userData) {
+  static_cast<std::vector<std::string>*>(userData)->emplace_back(message != nullptr ? message : "");
+}
+
+} // namespace
+
+TEST_CASE("The hand-made 8.12 presets compile, and draw from the media and the beat",
+          "[engine][headless][externaltex][originals]") {
+  HeadlessRig rig;
+  if (!rig.ready()) {
+    reportUnavailable(rig.skipReason);
+    return;
+  }
+  using namespace juce::gl;
+  // A checkerboard "camera" picture, so edges and media both show; or black.
+  std::uint32_t media = 0;
+  glGenTextures(1, &media);
+  const auto fillMedia = [&](bool checker) {
+    std::vector<std::uint8_t> rgba(64U * 36U * 4U, 0);
+    for (int y = 0; y < 36 && checker; ++y) {
+      for (int x = 0; x < 64; ++x) {
+        auto* p = &rgba[static_cast<std::size_t>(y * 64 + x) * 4];
+        const bool on = ((x / 8) + (y / 8)) % 2 == 0;
+        p[0] = on ? 230 : 20;
+        p[1] = on ? 180 : 40;
+        p[2] = on ? 90 : 120;
+      }
+    }
+    for (std::size_t i = 3; i < rgba.size(); i += 4) {
+      rgba[i] = 255;
+    }
+    glBindTexture(GL_TEXTURE_2D, media);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 64, 36, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+  };
+  fillMedia(true);
+  rig.instance->setTextureLoadCallback(&onMediaTextureLoad, &media);
+  std::vector<std::string> errors;
+  const auto& fn = rig.library->functions();
+  fn.setLogCallback(&collectProjectMErrors, /*currentThreadOnly=*/true, &errors);
+  // Warn, not Error: a composite shader that fails to compile is only a
+  // warning (projectM falls back to its default one), as is a missing texture.
+  fn.setLogLevel(static_cast<int>(ProjectMLogLevel::Warn), true);
+  // ...and it is heard: a composite shader that can't compile.
+  const auto broken = samplerPreset("sampler_main) + nonsense(");
+  rig.instance->loadPresetData(broken.c_str(), false);
+  CHECK_FALSE(errors.empty());
+
+  const auto folder = juce::File(MILKDAWP_ORIGINAL_PRESETS_DIR);
+  const auto files = folder.findChildFiles(juce::File::findFiles, false, "*.milkdawp");
+  REQUIRE(files.size() >= 3);
+  int n = 0;
+  for (const auto& file : files) {
+    INFO(file.getFileName());
+    const auto text = file.loadFileAsString().toStdString();
+    const auto parsed = milkdawp::core::parseMilkdawp(text);
+    for (const auto& problem : parsed.problems) {
+      INFO(problem);
+    }
+    CHECK(parsed.problems.empty());
+    CHECK(parsed.preset.controls.size() >= 2);
+    const auto compiled = milkdawp::core::compileForProjectM(parsed.preset);
+    const auto defaults = milkdawp::core::macroDefaults(parsed.preset);
+    // Loads the preset fresh and plays 1.5 s at 120 bpm with an onset on every
+    // beat, Macros on their defaults; the frames half way and at the end.
+    const auto play = [&](std::vector<std::uint8_t>& early, std::vector<std::uint8_t>& late) {
+      errors.clear();
+      rig.instance->loadPresetData(compiled.c_str(), false);
+      for (int frame = 0; frame < 90; ++frame, ++n) {
+        const double beats = frame / kFps * 2.0;
+        const double phase = beats - std::floor(beats);
+        rig.instance->setPresetVariable(milkdawp::core::kBpmVariable, 120.0);
+        rig.instance->setPresetVariable(milkdawp::core::kBeatPhaseVariable, phase);
+        rig.instance->setPresetVariable(milkdawp::core::kBarPhaseVariable, std::fmod(beats, 4.0) / 4.0);
+        rig.instance->setPresetVariable(milkdawp::core::kOnsetVariable, std::exp(-phase * 0.5 / 0.1));
+        for (std::size_t k = 0; k < milkdawp::core::kMacroCount; ++k) {
+          rig.instance->setPresetVariable(milkdawp::core::kMacroVariables[k], defaults[k].value_or(0.0f));
+        }
+        rig.instance->setPresetVariable(milkdawp::core::kWarpVariable, 1.0);
+        auto pixels = rig.renderFrame(n);
+        if (frame == 45) {
+          early = std::move(pixels);
+        } else if (frame == 89) {
+          late = std::move(pixels);
+        }
+      }
+      for (const auto& error : errors) {
+        INFO("projectM: " << error);
+      }
+      CHECK(errors.empty());
+    };
+    std::vector<std::uint8_t> early;
+    std::vector<std::uint8_t> late;
+    play(early, late);
+    INFO("brightness " << meanBrightness(late) << ", change " << meanDifference(early, late));
+    CHECK(meanBrightness(late) > 30.0);
+    CHECK(meanDifference(early, late) > 1.0);
+    // A preset that names the media shows it: black media changes the picture.
+    if (text.find("sampler_camera") != std::string::npos || text.find("sampler_video") != std::string::npos) {
+      fillMedia(false);
+      std::vector<std::uint8_t> blackEarly;
+      std::vector<std::uint8_t> blackLate;
+      play(blackEarly, blackLate);
+      fillMedia(true);
+      INFO("with black media: change " << meanDifference(late, blackLate));
+      CHECK(meanDifference(late, blackLate) > 10.0);
+    }
+  }
+  fn.setLogCallback(nullptr, true, nullptr);
+  rig.instance.reset();
+  glDeleteTextures(1, &media);
+}
+
 // ---- .milkdawp on projectM (8.8-8.10) ----------------------------------------------
 
 namespace {

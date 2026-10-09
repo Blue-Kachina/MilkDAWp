@@ -1,0 +1,67 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+// MilkDAWp original preset (AGPL-3.0-or-later, written for this repo; 8.12).
+// Locked to the bar: the picture turns once a bar (mdw_bar_phase), so it is
+// back where it started on every downbeat, and flashes on every beat
+// (mdw_beat_phase). Its trails fade faster at faster tempos (mdw_bpm).
+// Needs no media.
+mdw_format=1
+mdw_title=MilkDAWp - Bar Spinner
+mdw_tags=milkdawp,beat,bar
+mdw_renderer=projectm
+mdw_ctl_1_name=Flash
+mdw_ctl_1_slot=macro1
+mdw_ctl_1_mode=scale
+mdw_ctl_1_target=q1
+mdw_ctl_1_min=0
+mdw_ctl_1_max=2
+mdw_ctl_1_default=1
+mdw_ctl_2_name=Glow
+mdw_ctl_2_slot=macro2
+mdw_ctl_2_mode=offset
+mdw_ctl_2_target=q5
+mdw_ctl_2_min=-0.5
+mdw_ctl_2_max=1
+mdw_ctl_2_default=0
+fDecay=1.0
+zoom=1.0
+rot=0.0
+warp=0.0
+nWaveMode=0
+bAdditiveWaves=1
+bWaveThick=1
+fWaveScale=1.0
+fWaveAlpha=0.9
+wave_x=0.5
+wave_y=0.5
+ob_size=0
+ib_size=0
+per_frame_1=q1 = pow(1 - mdw_beat_phase, 4) * above(mdw_bpm, 0);
+per_frame_2=q4 = mdw_bar_phase * 6.2831853;
+per_frame_3=q5 = 0.5;
+per_frame_4=zoom = 0.985;
+per_frame_5=hue = q4 + time * 0.1;
+per_frame_6=wave_r = 0.5 + 0.5 * sin(hue);
+per_frame_7=wave_g = 0.5 + 0.5 * sin(hue + 2.094);
+per_frame_8=wave_b = 0.5 + 0.5 * sin(hue + 4.189);
+per_frame_9=q6 = if(above(mdw_bpm, 0), min(max(mdw_bpm / 120, 0.5), 2), 1);
+warp_1=`shader_body
+warp_2=`{
+warp_3=`  ret = tex2D(sampler_main, uv).xyz * (1 - 0.03 * q6) - 0.003;
+warp_4=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  float k = texsize.x * texsize.w;
+comp_4=`  float2 d = uv - 0.5;
+comp_5=`  d.x *= k;
+comp_6=`  float s = sin(q4);
+comp_7=`  float c = cos(q4);
+comp_8=`  float2 r = float2(d.x * c - d.y * s, d.x * s + d.y * c);
+comp_9=`  r.x /= k;
+comp_10=`  float3 col = tex2D(sampler_main, r + 0.5).xyz;
+comp_11=`  float3 glow = GetBlur1(r + 0.5);
+comp_12=`  ret = (col + glow * q5) * (1 + 0.6 * q1);
+comp_13=`}

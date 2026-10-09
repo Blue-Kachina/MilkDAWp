@@ -107,6 +107,7 @@ ProjectMLibrary::LoadResult ProjectMLibrary::load(const juce::File& bundleDirect
   require("projectm_set_frame_time", fn.setFrameTime);
   require("projectm_opengl_render_frame_fbo", fn.openglRenderFrameFbo);
   require("projectm_opengl_burn_texture", fn.openglBurnTexture);
+  require("projectm_set_texture_load_event_callback", fn.setTextureLoadEventCallback);
   require("projectm_set_preset_switch_failed_event_callback", fn.setPresetSwitchFailedEventCallback);
   require("projectm_set_log_callback", fn.setLogCallback);
   require("projectm_set_log_level", fn.setLogLevel);

@@ -33,8 +33,8 @@ std::vector<BeatClockState> simulateSteadyClock(float bpm, float confidence, std
       ++beatIndex;
       nextBeatSample += periodSamples;
     }
-    states[hop] = BeatClockState{bpm, nextBeatSample, beatIndex, static_cast<std::uint32_t>(beatIndex / 4),
-                                  confidence};
+    states[hop] = BeatClockState{bpm,        nextBeatSample, beatIndex, static_cast<std::uint32_t>(beatIndex / 4),
+                                  confidence, 4,              static_cast<std::uint32_t>(beatIndex % 4)};
   }
   return states;
 }

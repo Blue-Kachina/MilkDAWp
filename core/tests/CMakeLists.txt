@@ -28,6 +28,7 @@ add_executable(milkdawp_core_tests
   OscAddressTests.cpp
   MilkdawpPresetTests.cpp
   MilkConvertTests.cpp
+  PresetInputsTests.cpp
   Sha256Tests.cpp
 )
 milkdawp_test_no_crash_dialogs(milkdawp_core_tests)

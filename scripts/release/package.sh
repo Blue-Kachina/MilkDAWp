@@ -87,6 +87,8 @@ content="$build_dir/content"
 # (8.11, ADR-0014); the original .milk files don't ship.
 [[ -f "$content/Presets/Cream of the CrAWp/.milkdawp-pack.stamp" ]] \
   || die "the bundled presets weren't made (build the milkdawp_preset_pack target)"
+[[ -f "$content/Presets/Cream of the CrAWp/.milkdawp-originals.stamp" ]] \
+  || die "our own presets aren't in the pack (build the milkdawp_original_presets target)"
 [[ ! -e "$content/Presets/Cream of the Crop" ]] \
   || die "$content/Presets/Cream of the Crop is a build tree from before 8.11; reconfigure to remove it"
 
@@ -212,7 +214,8 @@ cp "$projectm_copyright" "$stage/LICENSES/projectM-COPYRIGHT.txt"
   echo "Jason Fletcher (ISOSCELES) as packaged by the projectM project, each preset given"
   echo "MilkDAWp controls (.milkdawp), with the MilkDrop texture pack. Preset authors keep"
   echo "their copyright; see Presets/Cream of the CrAWp/LICENSE.md. To have a preset"
-  echo "removed, open an issue."
+  echo "removed, open an issue. The \"MilkDAWp Originals\" folder in it holds MilkDAWp's own"
+  echo "presets (AGPL-3.0-or-later), which use the media source and the beat."
   echo
   echo "Licences: MilkDAWp is AGPL-3.0-or-later (LICENSE). projectM is LGPL-2.1, shipped as"
   echo "a separate shared library you may replace (LICENSES/projectM-COPYRIGHT.txt; source"

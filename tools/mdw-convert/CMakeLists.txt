@@ -53,5 +53,23 @@ if(MILKDAWP_BUNDLE_CONTENT)
       VERBATIM)
     add_custom_target(milkdawp_preset_pack ALL DEPENDS "${_mdw_pack_stamp}")
     add_dependencies(milkdawp_preset_pack mdw-convert) # built first, but no rerun when it relinks
+
+    # 8.12: our own presets, which play with the media and the beat
+    # (resources/presets/MilkDAWp Originals), as a folder of their own in the
+    # pack. Copied after the pack is made: making it starts from an empty
+    # folder, which takes this stamp with it, so they're copied again.
+    set(_mdw_originals_src "${CMAKE_SOURCE_DIR}/resources/presets/MilkDAWp Originals")
+    file(GLOB _mdw_originals CONFIGURE_DEPENDS "${_mdw_originals_src}/*")
+    set(_mdw_originals_stamp "${_mdw_pack}/.milkdawp-originals.stamp")
+    add_custom_command(
+      OUTPUT "${_mdw_originals_stamp}"
+      COMMAND ${CMAKE_COMMAND} -E rm -rf "${_mdw_pack}/MilkDAWp Originals"
+      COMMAND ${CMAKE_COMMAND} -E copy_directory "${_mdw_originals_src}" "${_mdw_pack}/MilkDAWp Originals"
+      COMMAND ${CMAKE_COMMAND} -E touch "${_mdw_originals_stamp}"
+      DEPENDS "${_mdw_pack_stamp}" ${_mdw_originals}
+      COMMENT "Adding the MilkDAWp Originals presets to the bundled pack (8.12)"
+      VERBATIM)
+    add_custom_target(milkdawp_original_presets ALL DEPENDS "${_mdw_originals_stamp}")
+    add_dependencies(milkdawp_original_presets milkdawp_preset_pack)
   endif()
 endif()

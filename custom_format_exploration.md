@@ -122,9 +122,9 @@ Two functions, carried as a patch in `vcpkg-overlays/projectm` (`vcpkg_from_gith
   custom variable would never get there on its own (found in 8.7). Covers macros (`mdw_m1`..`mdw_m8`), new
   audio variables (`mdw_beat_phase`, `mdw_bar_phase`, `mdw_bpm`, `mdw_onset`), and the override inputs.
   During a soft-cut both presets receive it. Built in 8.7; ADR-0012.
-- Later, `projectm_set_external_texture(instance, name, gl_texture_id, w, h)`: registers a GL texture the
+- ~~Later, `projectm_set_external_texture(instance, name, gl_texture_id, w, h)`: registers a GL texture the
   texture manager hands out as `sampler_<name>` in warp/comp shaders. Covers `sampler_camera`,
-  `sampler_video`.
+  `sampler_video`.~~ Not needed (8.12, ADR-0015): projectM 4.2's texture-load callback does it unpatched.
 
 The override itself needs no patch: when we load a `.milkdawp`, we **append** generated per-frame and
 per-pixel lines after the preset's own code (MilkDrop runs `per_frame_N` lines in order), e.g. for a
@@ -411,7 +411,7 @@ Every global has a **neutral** value that leaves the picture untouched, and at n
 | 13 | **Mirror**       | Choice: Off / Left-Right / Top-Bottom / Quad  | Fold the frame                                                       | same                                                                              |
 | 14 | **Kaleidoscope** | Choice: Off / 3 / 4 / 5 / 6 / 8 / 12 segments | Radial fold                                                          | same                                                                              |
 | 15 | **RGB Split**    | Float, 0..1, 0                                | Chromatic offset of the channels                                     | same                                                                              |
-| 16 | **Media Mix**    | Float, 0..1, 0                                | Opacity of the chosen camera/video/image (source picked in settings) | also feeds `sampler_camera` presets                                               |
+| 16 | **Media Mix**    | Float, 0..1, 0                                | Opacity of the chosen camera/video/image (source picked in settings) | not `sampler_camera`: presets see the media at full (ADR-0015)                           |
 
 Why these: 1–3 cover colour, 4–9 are the "MilkDrop-native" motions you asked for (speed, size, rotation),
 10–15 are the effects (pixelate, glow, smoothing, feedback via Trails), and 16 is the door for camera and
@@ -519,13 +519,16 @@ in the roadmap's Phase 8 and ADR-0011.
       *Done 2026-10-06, ADR-0014:* every preset in the pack is rated 5, so instead the whole
       pack is converted at build time; since 2026-10-07 it ships converted only, as "Cream of the
       CrAWp", without the 67 presets projectM can't load.
-- [ ] 8.12 (M) Patch 2: external textures (`sampler_camera`, `sampler_video`) and the `mdw_` audio
+- [x] 8.12 (M) Patch 2: external textures (`sampler_camera`, `sampler_video`) and the `mdw_` audio
       variables (`beat_phase`, `bar_phase`, `bpm`, `onset`); a handful of hand-made presets that use them.
       *Upstream check (2026-10-05, master `dd89dfb`):* 4.2's `projectm_set_texture_load_event_callback`
       can hand projectM an existing GL `texture_id` for a named texture (docs list "video frames"), a
       possible substitute for the external-texture half of this patch. Untested; projectM takes ownership
       and deletes the texture, and the callback fires on load, not per frame. Draft PR #970 (stalled since
       2026-02) would add a "use but don't own" mode.
+      *Done 2026-10-08, ADR-0015, with no patch 2:* at our pin projectM does not own a texture handed
+      over (the header is stale) and samples it every frame, so one texture per layer, refreshed
+      every frame, is a live feed. Three presets ship as "MilkDAWp Originals" in the pack.
 
 **Decision gate**
 
@@ -621,3 +624,7 @@ in the roadmap's Phase 8 and ADR-0011.
   that "rendered differently" ship converted (the difference was projectM's noise). Changes §5.1
   for the bundled pack (ADR-0014).
 - (2026-10-07) Backlog: "Macro slots as insert slots" (roadmap post-1.0 backlog; see §9 Q8).
+- (2026-10-08) 8.12 (ADR-0015): no second patch. The 8.6f finding held up and the ownership worry
+  didn't: at our pin projectM doesn't own a callback texture. `sampler_camera` and `sampler_video`
+  are both the layer's media at full strength, whatever Media Mix is (Media Mix stays the
+  overlay's opacity, §6.2 row 16). Three hand-made presets ship as "MilkDAWp Originals" in the pack.

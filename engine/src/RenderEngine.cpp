@@ -16,6 +16,7 @@
 #include "milkdawp/core/LayerGate.h"
 #include "milkdawp/core/MilkdawpPreset.h"
 #include "milkdawp/core/PresetClock.h"
+#include "milkdawp/core/PresetInputs.h"
 #include "milkdawp/engine/EffectsChain.h"
 #include "milkdawp/engine/GlFrameTarget.h"
 #include "milkdawp/engine/LayerCompositor.h"
@@ -216,21 +217,32 @@ private:
   std::uint64_t serial_ = 0;
 };
 
+void onTextureLoad(const char* name, ProjectMTextureLoadData* data, void* userData);
+
 // Render-thread state for one layer: its projectM instance, the cursor it
 // reads its channel's audio with, and its load-failure flag. Always held by
-// unique_ptr: projectM keeps a pointer to `loadFailure`, so a Layer must never
-// move. The channel is the director-side half (LayerChannel.h) and outlives it.
+// unique_ptr: projectM keeps pointers to `loadFailure` and to the layer itself
+// (`onTextureLoad`), so a Layer must never move. The channel is the
+// director-side half (LayerChannel.h) and outlives it.
 struct Layer {
   Layer(LayerChannel& channelRef, std::unique_ptr<ProjectMInstance> instanceRef, float beatSensitivity)
       : channel(channelRef), instance(std::move(instanceRef)),
         feeder(std::max(instance->maxPcmSamples(), 1U), channelRef.audio().numChannels()),
         appliedBeatSensitivity(beatSensitivity) {
     instance->setPresetSwitchFailedCallback(&onPresetSwitchFailed, &loadFailure);
+    instance->setTextureLoadCallback(&onTextureLoad, this);
   }
   Layer(const Layer&) = delete;
   Layer& operator=(const Layer&) = delete;
 
   LayerChannel& channel;
+  // 8.12: what presets sample as `sampler_camera` and `sampler_video`: the
+  // layer's media, frame-sized and cropped to fill, made when a preset first
+  // names one. projectM holds its name but never deletes it, so it is
+  // declared before `instance` to be destroyed after it, and keeps its name
+  // across resizes (GlFrameTarget).
+  std::unique_ptr<GlFrameTarget> presetMedia;
+  bool presetMediaBlank = false; // black, for want of media, since it was last cleared
   std::unique_ptr<ProjectMInstance> instance;
   PcmFeeder feeder;
   LoadFailureFlag loadFailure;
@@ -260,13 +272,39 @@ struct Layer {
   float lastPeakDb = -200.0f;
   float secondsWithoutAudio = 0.0f;
   float gateEnvelope = 1.0f;
-  // 8.6: the layer's media source on the GPU, and whether Media Mix shows it this frame.
+  // 8.6: the layer's media source on the GPU, whether it has a picture, and
+  // whether Media Mix shows it this frame.
   MediaTexture media;
+  bool mediaReady = false;
   bool mediaShown = false;
-  // Burn in (8.6f): drawn into the preset rather than over it, through urnTarget.
+  // Burn in (8.6f): drawn into the preset rather than over it, through burnTarget.
   bool mediaBurns = false;
   std::unique_ptr<GlFrameTarget> burnTarget;
 };
+
+// projectM asks this while a layer's preset loads, for each texture the preset
+// names that it doesn't hold yet (8.12). For our two names it gets the layer's
+// `presetMedia`, made on first use; anything else it looks for on disk.
+void onTextureLoad(const char* name, ProjectMTextureLoadData* data, void* userData) {
+  using namespace ::juce::gl;
+  const juce::String texture(name != nullptr ? name : "");
+  if (!texture.equalsIgnoreCase(core::kCameraTexture) && !texture.equalsIgnoreCase(core::kVideoTexture)) {
+    return;
+  }
+  auto& layer = *static_cast<Layer*>(userData);
+  if (!layer.presetMedia) {
+    // Made inside projectM's load: leave its texture binding as it was.
+    GLint bound = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
+    layer.presetMedia = std::make_unique<GlFrameTarget>(layer.instance->width(), layer.instance->height());
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(bound));
+    layer.presetMediaBlank = true; // a new target starts black
+  }
+  data->textureId = layer.presetMedia->texture();
+  data->width = static_cast<unsigned int>(layer.presetMedia->width());
+  data->height = static_cast<unsigned int>(layer.presetMedia->height());
+  data->channels = 4;
+}
 
 // How long a layer's level holds when no new audio arrives, before it counts as
 // silence (the transport stopped, or the host stopped calling).
@@ -868,7 +906,8 @@ void RenderEngine::run() {
       if (mediaSource != nullptr) {
         mediaSource->setTimeline(channel.mediaTimeline()); // a video follows the host (8.6c)
       }
-      layer->mediaShown = layer->media.update(mediaSource) && layer->visual.mediaMix > 0.0f;
+      layer->mediaReady = layer->media.update(mediaSource);
+      layer->mediaShown = layer->mediaReady && layer->visual.mediaMix > 0.0f;
       layer->mediaBurns = layer->mediaShown && channel.mediaBlend() == LayerBlend::BurnIn;
       if (layer->mediaBurns) {
         layer->mediaShown = false; // never drawn over the picture
@@ -892,6 +931,36 @@ void RenderEngine::run() {
       pm.setPresetVariable(core::kWarpVariable, layer.presetVisual.warp);
       pm.setPresetVariable(core::kTrailsVariable, layer.presetVisual.trails);
       pm.setPresetVariable(core::kDtVariable, now - before);
+      // 8.12: the music, at the newest audio this layer has (what it was fed).
+      const auto music = core::presetAudioInputs(layer.channel.beat(), layer.channel.audio().samplePosition());
+      pm.setPresetVariable(core::kBeatPhaseVariable, music.beatPhase);
+      pm.setPresetVariable(core::kBarPhaseVariable, music.barPhase);
+      pm.setPresetVariable(core::kBpmVariable, music.bpm);
+      pm.setPresetVariable(core::kOnsetVariable, music.onset);
+      // 8.12: `sampler_camera`/`sampler_video`, once a preset has named one.
+      // The media at full strength whatever Media Mix and the blend are (those
+      // are how it goes *over* the picture), cropped to fill, and flipped:
+      // projectM reads a texture's first row as its top, GL's frames are
+      // bottom row first.
+      if (layer.presetMedia && compositor.ok()) {
+        const int w = layer.instance->width();
+        const int h = layer.instance->height();
+        layer.presetMedia->resize(w, h);
+        if (layer.mediaReady) {
+          auto draw = layer.media.draw(1.0f, LayerBlend::Normal, w, h);
+          draw.uvScaleY = -draw.uvScaleY;
+          compositor.stamp(*layer.presetMedia, draw);
+          layer.presetMediaBlank = false;
+        } else if (!layer.presetMediaBlank) {
+          GLint previous = 0;
+          glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
+          glBindFramebuffer(GL_FRAMEBUFFER, layer.presetMedia->framebuffer());
+          glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+          glClear(GL_COLOR_BUFFER_BIT);
+          glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
+          layer.presetMediaBlank = true;
+        }
+      }
       if (layer.mediaBurns) {
         // Every frame, with Media Mix as the burn's alpha. (Burning only every
         // few frames at low Media Mix strobed: the preset faded it in between.)

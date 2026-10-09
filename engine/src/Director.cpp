@@ -26,12 +26,13 @@ namespace milkdawp::engine {
 
 struct Director::Pipeline {
   explicit Pipeline(double rate)
-      : sampleRate(rate), analyzer(rate), bassOnsets(rate), tempo(rate), beatClock(rate), hostTransport(rate),
-        scheduler(rate, core::Analyzer::hopSize) {}
+      : sampleRate(rate), analyzer(rate), bassOnsets(rate), onsets(rate), tempo(rate), beatClock(rate),
+        hostTransport(rate), scheduler(rate, core::Analyzer::hopSize) {}
 
   double sampleRate;
   core::Analyzer analyzer;
   core::OnsetDetector bassOnsets;
+  core::OnsetDetector onsets; // broadband: what presets read as mdw_onset (8.12)
   core::TempoTracker tempo;
   core::BeatClock beatClock;
   core::HostTransport hostTransport;
@@ -194,6 +195,7 @@ void Director::run() {
   std::vector<float> monoHop(hop);
 
   std::unique_ptr<Pipeline> pipeline;
+  core::BeatSnapshot beatSnapshot; // 8.12: what presets read, published after each run of hops
   std::unique_ptr<core::Playlist> playlist;
   core::PresetLibrary library;
   PresetLoader loader;
@@ -518,6 +520,7 @@ void Director::run() {
     }
     pipeline->scheduler.setConfig(schedulerConfigFor(controls));
 
+    bool beatChanged = false;
     while (ring_.consumeHop(interleavedHop.data(), hop)) {
       const auto hopEnd = ring_.readPosition();
       const auto hopStart = hopEnd - hop;
@@ -533,6 +536,11 @@ void Director::run() {
       const auto bassOnset = pipeline->bassOnsets.processHop(frame.bassOnsetStrength);
       const auto tempo = pipeline->tempo.processHop(frame.onsetStrength);
       const auto detected = pipeline->beatClock.processHop(hopStart, tempo, bassOnset);
+      // A confirmed onset is the previous hop's (one hop of latency).
+      if (pipeline->onsets.processHop(frame.onsetStrength)) {
+        beatSnapshot.hasOnset = true;
+        beatSnapshot.lastOnsetSample = hopStart >= hop ? hopStart - hop : 0;
+      }
 
       // Host transport (plugin): the host's beat grid wins while it plays
       // (§4.3); the detector keeps running for energy and for when it stops.
@@ -578,6 +586,17 @@ void Director::run() {
       status.bassReferenceDb = section.referenceDb;
       status.inBreakdown = section.breakdown;
       status.dropsDetected += section.drop ? 1 : 0;
+
+      beatSnapshot.sampleRate = rate;
+      beatSnapshot.bpm = beat.bpm;
+      beatSnapshot.confidence = beat.confidence;
+      beatSnapshot.nextBeatSample = beat.nextBeatSample;
+      beatSnapshot.beatsPerBar = beat.beatsPerBar;
+      beatSnapshot.beatInBar = beat.beatInBar;
+      beatChanged = true;
+    }
+    if (beatChanged) {
+      render_.primaryLayer().setBeat(beatSnapshot);
     }
 
     status_.publish(status);

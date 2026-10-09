@@ -20,6 +20,10 @@ struct BeatClockState {
   std::uint64_t beatIndex = 0;
   std::uint32_t barIndex = 0; // assumes 4/4; see the class comment
   float confidence = 0.0f;
+  /// 8.12: where in the bar the beat `beatIndex` counts is (from 0), and how
+  /// many beats a bar has: 4 for the detector, the time signature for the host.
+  std::uint32_t beatsPerBar = 4;
+  std::uint32_t beatInBar = 0;
 };
 
 /// Predictive beat-phase tracker: turns a TempoTracker's bpm into a

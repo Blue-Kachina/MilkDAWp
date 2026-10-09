@@ -45,6 +45,8 @@ BeatClockState HostTransport::processTransport(const TransportInfo& info) const 
   state.beatIndex = beatIndex;
   state.barIndex = barIndex;
   state.confidence = 1.0f;
+  state.beatsPerBar = static_cast<std::uint32_t>(timeSigNum);
+  state.beatInBar = static_cast<std::uint32_t>(beatIndex % static_cast<std::uint64_t>(timeSigNum));
   return state;
 }
 

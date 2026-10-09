@@ -96,6 +96,7 @@ TEST_CASE("BeatClock's downbeat heuristic favors the consistently louder beat ph
   std::uint64_t samplePos = 0;
   BeatClockState state = clock.processHop(samplePos, tempo, std::nullopt);
   std::vector<std::uint32_t> barIncrementedAtPhase;
+  std::vector<std::uint32_t> beatInBarAtBarStart;
   std::uint32_t lastBarIndex = state.barIndex;
 
   for (int beat = 0; beat < 64; ++beat) {
@@ -110,9 +111,14 @@ TEST_CASE("BeatClock's downbeat heuristic favors the consistently louder beat ph
       state = clock.processHop(samplePos, tempo, onset);
       if (state.barIndex != lastBarIndex) {
         barIncrementedAtPhase.push_back(static_cast<std::uint32_t>((state.beatIndex - 1) % 4));
+        beatInBarAtBarStart.push_back(state.beatInBar);
         lastBarIndex = state.barIndex;
       }
     }
+  }
+  // 8.12: a new bar starts on its first beat.
+  for (std::size_t i = 2; i < beatInBarAtBarStart.size(); ++i) {
+    CHECK(beatInBarAtBarStart[i] == 0);
   }
 
   REQUIRE_FALSE(barIncrementedAtPhase.empty());

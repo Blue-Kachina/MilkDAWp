@@ -1,0 +1,64 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+// MilkDAWp original preset (AGPL-3.0-or-later, written for this repo; 8.12).
+// The layer's media (Settings > Media source: a camera, video or image) as
+// sampler_camera: a little of it goes into the feedback every frame, a lot on
+// each onset (mdw_onset), so it streams out down a tunnel that kicks forward
+// on every beat (mdw_beat_phase). The waveform's colour turns once a bar
+// (mdw_bar_phase). Without media it is a waveform tunnel.
+mdw_format=1
+mdw_title=MilkDAWp - Camera Tunnel
+mdw_tags=milkdawp,camera,beat
+mdw_renderer=projectm
+mdw_ctl_1_name=Camera
+mdw_ctl_1_slot=macro1
+mdw_ctl_1_mode=offset
+mdw_ctl_1_target=q3
+mdw_ctl_1_min=-0.15
+mdw_ctl_1_max=0.6
+mdw_ctl_1_default=0
+mdw_ctl_2_name=Kick
+mdw_ctl_2_slot=macro2
+mdw_ctl_2_mode=expr
+mdw_ctl_2_min=0
+mdw_ctl_2_max=2
+mdw_ctl_2_default=1
+mdw_ctl_2_code=zoom = 1 + (zoom - 1) * mdw_c2; q1 = q1 * mdw_c2;
+fDecay=1.0
+zoom=1.0
+rot=0.0
+warp=0.0
+nWaveMode=6
+bAdditiveWaves=1
+fWaveScale=1.2
+fWaveAlpha=0.8
+wave_r=1.0
+wave_g=0.5
+wave_b=0.2
+ob_size=0
+ib_size=0
+per_frame_1=pulse = pow(1 - mdw_beat_phase, 6) * above(mdw_bpm, 0);
+per_frame_2=q1 = pulse;
+per_frame_3=q2 = mdw_onset;
+per_frame_4=q3 = 0.15;
+per_frame_5=zoom = 1.006 + 0.05 * pulse;
+per_frame_6=rot = 0.003 * sin(time * 0.37);
+per_frame_7=hue = mdw_bar_phase * 6.2831853;
+per_frame_8=wave_r = 0.6 + 0.4 * sin(hue);
+per_frame_9=wave_g = 0.6 + 0.4 * sin(hue + 2.094);
+per_frame_10=wave_b = 0.6 + 0.4 * sin(hue + 4.189);
+warp_1=`shader_body
+warp_2=`{
+warp_3=`  float3 fb = tex2D(sampler_main, uv).xyz * 0.97 - 0.002;
+warp_4=`  float3 cam = tex2D(sampler_camera, uv_orig).xyz;
+warp_5=`  ret = lerp(fb, cam, saturate(0.03 + 0.45 * q2));
+warp_6=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  float3 fb = tex2D(sampler_main, uv).xyz;
+comp_4=`  float3 cam = tex2D(sampler_camera, uv).xyz;
+comp_5=`  ret = lerp(fb, cam, saturate(q3)) * (1 + 0.35 * q1);
+comp_6=`}

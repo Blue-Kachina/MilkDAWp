@@ -82,7 +82,74 @@ struct AudioPump {
   }
 };
 
+// Clicks four times a second, with a playing 120 bpm 3/4 host transport, like
+// a plugin's audio callback.
+struct ClickPump {
+  engine::Visualizer& visualizer;
+  std::atomic<bool> stop{false};
+  std::thread thread;
+
+  explicit ClickPump(engine::Visualizer& v) : visualizer(v) {
+    thread = std::thread([this] {
+      constexpr int kBlock = 480;
+      std::vector<float> left(kBlock, 0.0f);
+      std::vector<float> right(kBlock, 0.0f);
+      const float* channels[] = {left.data(), right.data()};
+      std::uint64_t sample = 0;
+      while (!stop.load()) {
+        for (int i = 0; i < kBlock; ++i) {
+          const bool click = (sample + static_cast<std::uint64_t>(i)) % 12000 < 96;
+          left[static_cast<std::size_t>(i)] = right[static_cast<std::size_t>(i)] = click ? 0.9f : 0.0f;
+        }
+        core::TransportInfo transport;
+        transport.isPlaying = true;
+        transport.bpm = 120.0;
+        transport.timeSigNumerator = 3;
+        transport.ppqPosition = static_cast<double>(sample) / 24000.0;
+        transport.samplePos = sample;
+        visualizer.processAudio(channels, 2, kBlock, &transport);
+        sample += kBlock;
+        std::this_thread::sleep_for(10ms);
+      }
+    });
+  }
+  ~ClickPump() {
+    stop.store(true);
+    thread.join();
+  }
+};
+
 } // namespace
+
+TEST_CASE("Director publishes the beat and onsets that presets read (8.12)", "[engine][Director]") {
+  engine::Visualizer::Config config;
+  config.followHostTransport = true;
+  engine::Visualizer visualizer(config);
+  visualizer.prepare(48000.0, 480);
+  engine::EngineControls controls;
+  controls.useHostTempo = true;
+  visualizer.setControls(controls);
+  auto& layer = visualizer.renderEngine().primaryLayer();
+  CHECK(layer.beat().bpm == 0.0f); // nothing yet
+
+  ClickPump pump(visualizer);
+  REQUIRE(waitFor([&] { return layer.beat().bpm > 0.0f && layer.beat().hasOnset; }));
+  const auto beat = layer.beat();
+  CHECK(beat.bpm == 120.0f); // the host's
+  CHECK(beat.confidence == 1.0f);
+  CHECK(beat.beatsPerBar == 3);
+  CHECK(beat.beatInBar < 3);
+  CHECK(beat.sampleRate == 48000.0);
+  const auto now = visualizer.audioRing().samplePosition();
+  // The next beat is at most a beat away (24000 samples), the onset recent.
+  CHECK(beat.nextBeatSample + 24000 >= now);
+  CHECK(beat.lastOnsetSample <= now);
+  CHECK(now - beat.lastOnsetSample < 48000);
+  const auto inputs = core::presetAudioInputs(beat, now);
+  CHECK(inputs.bpm == 120.0);
+  CHECK(inputs.beatPhase >= 0.0);
+  CHECK(inputs.beatPhase < 1.0);
+}
 
 TEST_CASE("Director loads a preset folder, steps through it, and skips files that are not presets (2.6)",
           "[engine][Director]") {
