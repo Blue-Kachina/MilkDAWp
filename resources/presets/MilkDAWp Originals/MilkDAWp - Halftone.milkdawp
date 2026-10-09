@@ -1,0 +1,81 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+// MilkDAWp original preset (AGPL-3.0-or-later, written for this repo).
+// The camera (sampler_camera) as a halftone print: a slowly turning grid of
+// dots, each as big as the picture is bright there. The grid steps between
+// sizes on each beat (mdw_beat_phase) and the dots swell on every beat and
+// onset (mdw_onset). Paper turns it into black ink on newsprint.
+mdw_format=1
+mdw_title=MilkDAWp - Halftone
+mdw_tags=milkdawp,camera,beat
+mdw_renderer=projectm
+mdw_ctl_1_name=Dot size
+mdw_ctl_1_slot=macro1
+mdw_ctl_1_mode=scale
+mdw_ctl_1_target=q1
+mdw_ctl_1_min=0.4
+mdw_ctl_1_max=3
+mdw_ctl_1_default=1
+mdw_ctl_2_name=Paper
+mdw_ctl_2_slot=macro2
+mdw_ctl_2_mode=offset
+mdw_ctl_2_target=q4
+mdw_ctl_2_min=0
+mdw_ctl_2_max=1
+mdw_ctl_2_default=0
+mdw_ctl_3_name=Spin
+mdw_ctl_3_slot=macro3
+mdw_ctl_3_mode=rate
+mdw_ctl_3_target=spin
+mdw_ctl_3_min=-0.5
+mdw_ctl_3_max=0.5
+mdw_ctl_3_default=0.05
+fDecay=1.0
+zoom=1.0
+rot=0.0
+warp=0.0
+fWaveAlpha=0
+ob_size=0
+ib_size=0
+mv_a=0
+per_frame_init_1=lastbp = 0;
+per_frame_init_2=beats = 0;
+per_frame_init_3=spin = 0.4;
+per_frame_1=newbeat = below(mdw_beat_phase, lastbp - 0.5);
+per_frame_2=lastbp = mdw_beat_phase;
+per_frame_3=beats = beats + newbeat;
+per_frame_4=k = beats % 4;
+per_frame_5=q1 = 10 * if(equal(k, 1), 1.5, if(equal(k, 3), 0.75, 1));
+per_frame_6=q2 = 1 + 0.25 * pow(1 - mdw_beat_phase, 4) * above(mdw_bpm, 0) + 0.3 * mdw_onset;
+per_frame_7=q4 = 0;
+per_frame_8=q3 = spin;
+warp_1=`shader_body
+warp_2=`{
+warp_3=`  ret = float3(0, 0, 0);
+warp_4=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  float2 cen = texsize.xy * 0.5;
+comp_4=`  float s = sin(q3);
+comp_5=`  float c = cos(q3);
+comp_6=`  // Into the grid's turned frame, in pixels.
+comp_7=`  float2 p = uv * texsize.xy - cen;
+comp_8=`  float2 r = float2(p.x * c - p.y * s, p.x * s + p.y * c);
+comp_9=`  float cell = max(q1, 3);
+comp_10=`  float2 idx = floor(r / cell);
+comp_11=`  float2 local = r - (idx + 0.5) * cell;
+comp_12=`  // The cell's centre back in the picture, where the dot takes its colour.
+comp_13=`  float2 cr = (idx + 0.5) * cell;
+comp_14=`  float2 cuv = (float2(cr.x * c + cr.y * s, -cr.x * s + cr.y * c) + cen) * texsize.zw;
+comp_15=`  float3 col = tex2D(sampler_camera, cuv).xyz;
+comp_16=`  float l = dot(col, float3(0.299, 0.587, 0.114));
+comp_17=`  float dist = length(local);
+comp_18=`  float lightDot = saturate(sqrt(l) * cell * 0.62 * q2 - dist + 0.5);
+comp_19=`  float inkDot = saturate(sqrt(1 - l) * cell * 0.62 * q2 - dist + 0.5);
+comp_20=`  float3 onBlack = col * 1.25 * lightDot;
+comp_21=`  float3 onPaper = float3(0.95, 0.93, 0.86) * (1 - inkDot);
+comp_22=`  ret = lerp(onBlack, onPaper, saturate(q4));
+comp_23=`}

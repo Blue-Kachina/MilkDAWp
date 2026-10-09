@@ -1,0 +1,76 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+// MilkDAWp original preset (AGPL-3.0-or-later, written for this repo).
+// A photo booth on the downbeat: on each bar's first beat (mdw_bar_phase)
+// the camera (sampler_camera) is stamped into the picture with a flash, then
+// it melts, swirls and drifts in colour until the next bar. Each of the bar's
+// other beats (mdw_beat_phase) stamps a fainter snapshot over the melt. With no beat at
+// all, it snaps every two seconds.
+mdw_format=1
+mdw_title=MilkDAWp - Downbeat Freeze
+mdw_tags=milkdawp,camera,bar,beat
+mdw_renderer=projectm
+mdw_ctl_1_name=Melt
+mdw_ctl_1_slot=macro1
+mdw_ctl_1_mode=scale
+mdw_ctl_1_target=warp
+mdw_ctl_1_min=0
+mdw_ctl_1_max=3
+mdw_ctl_1_default=1
+mdw_ctl_2_name=Beat snaps
+mdw_ctl_2_slot=macro2
+mdw_ctl_2_mode=scale
+mdw_ctl_2_target=q2
+mdw_ctl_2_min=0
+mdw_ctl_2_max=2.5
+mdw_ctl_2_default=1
+mdw_ctl_3_name=Flash
+mdw_ctl_3_slot=macro3
+mdw_ctl_3_mode=scale
+mdw_ctl_3_target=q3
+mdw_ctl_3_min=0
+mdw_ctl_3_max=2.5
+mdw_ctl_3_default=1
+fDecay=1.0
+zoom=1.0
+rot=0.0
+warp=1.0
+fWarpAnimSpeed=1.0
+fWarpScale=1.5
+fWaveAlpha=0
+ob_size=0
+ib_size=0
+mv_a=0
+per_frame_init_1=lastbp = 0;
+per_frame_init_2=lastbarp = 1;
+per_frame_init_3=sincesnap = 0;
+per_frame_init_4=flash = 0;
+per_frame_1=dt = if(above(mdw_dt, 0), mdw_dt, 0.0167);
+per_frame_2=newbeat = below(mdw_beat_phase, lastbp - 0.5);
+per_frame_3=lastbp = mdw_beat_phase;
+per_frame_4=newbar = below(mdw_bar_phase, lastbarp - 0.5);
+per_frame_5=lastbarp = mdw_bar_phase;
+per_frame_6=sincesnap = sincesnap + dt;
+per_frame_7=newbar = if(above(mdw_bpm, 0), newbar, max(newbar, above(sincesnap, 2)));
+per_frame_8=sincesnap = if(newbar, 0, sincesnap);
+per_frame_9=flash = if(newbar, 1, max(flash - dt * 4, 0));
+per_frame_10=q1 = newbar;
+per_frame_11=q2 = newbeat * (1 - newbar) * 0.35;
+per_frame_12=q3 = flash * 0.4;
+per_frame_13=zoom = 1.004;
+per_frame_14=rot = 0.004 * sin(time * 0.7);
+per_frame_15=warp = 0.15 + 0.9 * mdw_bar_phase * mdw_bar_phase;
+warp_1=`shader_body
+warp_2=`{
+warp_3=`  float3 old = tex2D(sampler_main, uv).xyz * 0.993;
+warp_4=`  old = lerp(old, old.yzx, 0.012);
+warp_5=`  float3 cam = tex2D(sampler_camera, uv_orig).xyz;
+warp_6=`  ret = lerp(old, cam, saturate(q1 + q2));
+warp_7=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  ret = tex2D(sampler_main, uv).xyz + q3;
+comp_4=`}

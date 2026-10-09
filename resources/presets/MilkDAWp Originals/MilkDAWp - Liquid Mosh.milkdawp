@@ -1,0 +1,80 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+// MilkDAWp original preset (AGPL-3.0-or-later, written for this repo).
+// A datamosh made of liquid: wherever something moves in the camera
+// (sampler_camera), the picture is dragged along with it, like broken video
+// compression, then slowly settles back. Every onset (mdw_onset) makes the
+// next moves drag much further.
+// The feedback buffer holds state, not a picture: red is last frame's camera
+// brightness, green and blue how far each spot has been pushed sideways and
+// up or down (0.5 = not at all). The composite shows the camera, displaced.
+mdw_format=1
+mdw_title=MilkDAWp - Liquid Mosh
+mdw_tags=milkdawp,camera,motion,glitch
+mdw_renderer=projectm
+mdw_ctl_1_name=Drag
+mdw_ctl_1_slot=macro1
+mdw_ctl_1_mode=scale
+mdw_ctl_1_target=q2
+mdw_ctl_1_min=0
+mdw_ctl_1_max=3
+mdw_ctl_1_default=1
+mdw_ctl_2_name=Settle
+mdw_ctl_2_slot=macro2
+mdw_ctl_2_mode=scale
+mdw_ctl_2_target=q6
+mdw_ctl_2_min=0.1
+mdw_ctl_2_max=4
+mdw_ctl_2_default=1
+mdw_ctl_3_name=Threshold
+mdw_ctl_3_slot=macro3
+mdw_ctl_3_mode=offset
+mdw_ctl_3_target=q1
+mdw_ctl_3_min=-0.025
+mdw_ctl_3_max=0.1
+mdw_ctl_3_default=0
+fDecay=1.0
+zoom=1.0
+rot=0.0
+warp=0.0
+fWaveAlpha=0
+ob_size=0
+ib_size=0
+mv_a=0
+per_frame_init_1=age = 0;
+per_frame_1=dt = if(above(mdw_dt, 0), mdw_dt, 0.0167);
+per_frame_2=age = age + 1;
+per_frame_3=q1 = 0.03;
+per_frame_4=q2 = 2.5 * (1 + 2 * mdw_onset);
+per_frame_5=q6 = 1;
+per_frame_6=q3 = max(1 - 1.2 * dt * q6, 0);
+per_frame_7=q5 = above(age, 3);
+warp_1=`shader_body
+warp_2=`{
+warp_3=`  float3 w = float3(0.299, 0.587, 0.114);
+warp_4=`  float2 px = texsize_camera.zw * 2;
+warp_5=`  float l = dot(tex2D(sampler_fc_camera, uv_orig).xyz, w);
+warp_6=`  // The brightness gradient, per camera pixel.
+warp_7=`  float2 g = float2(dot(tex2D(sampler_fc_camera, uv_orig + float2(px.x, 0)).xyz - tex2D(sampler_fc_camera, uv_orig - float2(px.x, 0)).xyz, w),
+warp_8=`                    dot(tex2D(sampler_fc_camera, uv_orig + float2(0, px.y)).xyz - tex2D(sampler_fc_camera, uv_orig - float2(0, px.y)).xyz, w)) * 0.25;
+warp_9=`  float3 st = tex2D(sampler_pc_main, uv_orig).xyz;
+warp_10=`  // How far the brightness moved here since last frame, along its gradient (normal flow), in pixels.
+warp_11=`  float it = l - st.x;
+warp_12=`  it = sign(it) * max(abs(it) - q1, 0);
+warp_13=`  float2 v = clamp(-it * g / (dot(g, g) + 0.004), -4, 4) * texsize_camera.zw;
+warp_14=`  // The push so far, settling back by at least one 8-bit step a frame.
+warp_15=`  float2 disp = (st.yz - 0.5) * 0.2;
+warp_16=`  disp = sign(disp) * max(abs(disp) * q3 - 0.001, 0);
+warp_17=`  disp = clamp((disp + v * q2) * q5, -0.1, 0.1);
+warp_18=`  ret = float3(l, disp * 5 + 0.5);
+warp_19=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  float2 disp = (tex2D(sampler_main, uv).yz - 0.5) * 0.2;
+comp_4=`  disp = lerp(disp, (GetBlur1(uv).yz - 0.5) * 0.2, 0.7);
+comp_5=`  float3 cam = tex2D(sampler_fc_camera, uv - disp).xyz;
+comp_6=`  ret = cam * (1 + saturate(length(disp) * 30) * 0.3);
+comp_7=`}

@@ -101,7 +101,7 @@ layer that the engine refreshes is a live feed.
 |---|---|---|
 | 8.12 textures | `ProjectMInstance::setTextureLoadCallback`; `onTextureLoad` and `Layer::presetMedia` in `RenderEngine.cpp` (both names, full strength, cropped, flipped) | `HeadlessRenderTests` `[externaltex]` (the spike), `RenderEngineTests` `[externaltex]` |
 | 8.12 music | `core/PresetInputs` (`BeatSnapshot`, `presetAudioInputs`), `BeatClockState::beatsPerBar`/`beatInBar`, the director's broadband `onsets`, `LayerChannel::setBeat`; the render thread sets `mdw_beat_phase`/`bar_phase`/`bpm`/`onset` | `PresetInputsTests`, `DirectorTests`, `RenderEngineTests` `[presetvars]`, `HostTransportTests`, `BeatClockTests` |
-| 8.12 presets | `resources/presets/MilkDAWp Originals/` (Camera Tunnel, Bar Spinner, Onset Edges), copied into the pack by `milkdawp_original_presets`; `package.sh` check | `HeadlessRenderTests` `[originals]` |
+| 8.12 presets | `resources/presets/MilkDAWp Originals/` (13: Camera Tunnel, Bar Spinner, Onset Edges, then ten camera presets, ADR-0015), copied into the pack by `milkdawp_original_presets`; `package.sh` check | `HeadlessRenderTests` `[originals]` |
 
 Verified: Windows Debug (476 tests), Linux GCC (`ci-linux`) and Clang ASan in the container; checked by eye in
 `mdw-view` with an image. To try by hand: each Originals preset with music playing (REAPER, host

@@ -1,0 +1,80 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+// MilkDAWp original preset (AGPL-3.0-or-later, written for this repo).
+// Movement gives off smoke: wherever the camera (sampler_camera) sees
+// something move, glowing smoke rises from it, curls and drifts out with
+// a kick on every beat (mdw_beat_phase). Fresh smoke is hot, old smoke cools
+// to a second colour; both turn once a bar (mdw_bar_phase).
+// The feedback buffer holds state, not a picture: red is last frame's camera
+// brightness, green the smoke, blue how fresh it is.
+mdw_format=1
+mdw_title=MilkDAWp - Motion Smoke
+mdw_tags=milkdawp,camera,motion,beat
+mdw_renderer=projectm
+mdw_ctl_1_name=Threshold
+mdw_ctl_1_slot=macro1
+mdw_ctl_1_mode=offset
+mdw_ctl_1_target=q1
+mdw_ctl_1_min=-0.035
+mdw_ctl_1_max=0.12
+mdw_ctl_1_default=0
+mdw_ctl_2_name=Smoke
+mdw_ctl_2_slot=macro2
+mdw_ctl_2_mode=scale
+mdw_ctl_2_target=q2
+mdw_ctl_2_min=0
+mdw_ctl_2_max=2.5
+mdw_ctl_2_default=1
+mdw_ctl_3_name=Camera
+mdw_ctl_3_slot=macro3
+mdw_ctl_3_mode=offset
+mdw_ctl_3_target=q4
+mdw_ctl_3_min=-0.15
+mdw_ctl_3_max=0.85
+mdw_ctl_3_default=0
+fDecay=1.0
+zoom=1.0
+rot=0.0
+warp=0.0
+fWaveAlpha=0
+ob_size=0
+ib_size=0
+mv_a=0
+per_frame_1=dt = if(above(mdw_dt, 0), mdw_dt, 0.0167);
+per_frame_2=pulse = pow(1 - mdw_beat_phase, 4) * above(mdw_bpm, 0);
+per_frame_3=q1 = 0.045;
+per_frame_4=q2 = 1;
+per_frame_5=q3 = mdw_bar_phase;
+per_frame_6=q4 = 0.15;
+per_frame_7=q5 = 0.35 * dt;
+per_frame_8=zoom = 1.003 + 0.025 * pulse;
+per_frame_9=rot = 0.002 * sin(time * 0.3);
+warp_1=`shader_body
+warp_2=`{
+warp_3=`  float2 px = texsize_camera.zw * 2;
+warp_4=`  float3 c = tex2D(sampler_fc_camera, uv_orig).xyz * 0.4
+warp_5=`           + (tex2D(sampler_fc_camera, uv_orig + float2(px.x, 0)).xyz + tex2D(sampler_fc_camera, uv_orig - float2(px.x, 0)).xyz
+warp_6=`            + tex2D(sampler_fc_camera, uv_orig + float2(0, px.y)).xyz + tex2D(sampler_fc_camera, uv_orig - float2(0, px.y)).xyz) * 0.15;
+warp_7=`  float l = dot(c, float3(0.299, 0.587, 0.114));
+warp_8=`  // Movement: against last frame's brightness, read where it was written.
+warp_9=`  float last = tex2D(sampler_pc_main, uv_orig).x;
+warp_10=`  float motion = saturate((abs(l - last) - q1) * 6) * q2;
+warp_11=`  // The smoke is carried along the warp, curled by slow noise, and rises.
+warp_12=`  float2 curl = (tex2D(sampler_noise_lq, uv * 0.1 + time * 0.01).xy - 0.5) * 0.008;
+warp_13=`  float2 smoke = tex2D(sampler_main, uv + curl + float2(0, 0.0025)).yz;
+warp_14=`  smoke.x = max(smoke.x * 0.985 - q5, motion);
+warp_15=`  smoke.y = max(smoke.y - q5 * 3, motion);
+warp_16=`  ret = float3(l, smoke.x, smoke.y);
+warp_17=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  float3 st = tex2D(sampler_main, uv).xyz;
+comp_4=`  float d = saturate(st.y + GetBlur1(uv).y * 0.6);
+comp_5=`  float3 hot = 0.5 + 0.5 * cos(6.2831853 * (q3 + float3(0, 0.333, 0.667)));
+comp_6=`  float3 cool = 0.5 + 0.5 * cos(6.2831853 * (q3 + 0.45 + float3(0, 0.333, 0.667)));
+comp_7=`  float3 smoke = lerp(cool, hot + 0.3, saturate(st.z * 1.5)) * d;
+comp_8=`  ret = smoke + tex2D(sampler_fc_camera, uv).xyz * saturate(q4);
+comp_9=`}

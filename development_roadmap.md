@@ -3060,6 +3060,11 @@ Stage B, `.milkdawp` v1 on patched projectM:
         (`core::presetAudioInputs`).
       - **Presets**: Camera Tunnel, Bar Spinner and Onset Edges in
         `resources/presets/MilkDAWp Originals/`, shipped in the pack as that folder.
+        Then ten more camera presets (Matthew's asks and a few of ours): Heat Trails, Reptile
+        Vision, Poster Pop, Spotlight Particles, Time Waterfall, Downbeat Freeze, Motion Smoke,
+        Liquid Mosh, Chroma Echo, Halftone. The motion ones keep state in the feedback buffer
+        (red: last frame's camera brightness; green/blue: heat, smoke or displacement) and
+        sample neighbours through `sampler_fc_camera` (clamped: the default wraps).
       - **Tests**: the spike, the engine end to end (media upright and cropped, `mdw_bpm`),
         the director, the phase maths, and the three presets (compile with no projectM
         warning; picture moves; media presets change with black media). Windows; Linux GCC

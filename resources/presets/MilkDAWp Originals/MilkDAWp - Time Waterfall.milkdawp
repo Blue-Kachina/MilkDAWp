@@ -1,0 +1,66 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+// MilkDAWp original preset (AGPL-3.0-or-later, written for this repo).
+// A slit-scan, like a photo-finish camera: every frame one line of the
+// camera (sampler_camera) joins the bottom and the picture climbs, so the
+// screen shows that line over the last few seconds, and anything moving
+// through it smears into a time-shape. The line sways once a bar
+// (mdw_bar_phase); every beat leaves a faint ruled line and every bar a
+// brighter one, so the music is drawn into the picture like a score.
+mdw_format=1
+mdw_title=MilkDAWp - Time Waterfall
+mdw_tags=milkdawp,camera,bar
+mdw_renderer=projectm
+mdw_ctl_1_name=Speed
+mdw_ctl_1_slot=macro1
+mdw_ctl_1_mode=offset
+mdw_ctl_1_target=q1
+mdw_ctl_1_min=-1
+mdw_ctl_1_max=4
+mdw_ctl_1_default=0
+mdw_ctl_2_name=Sway
+mdw_ctl_2_slot=macro2
+mdw_ctl_2_mode=expr
+mdw_ctl_2_min=0
+mdw_ctl_2_max=1
+mdw_ctl_2_default=0.5
+mdw_ctl_2_code=q2 = 0.5 + mdw_c2 * 0.35 * sin(6.2831853 * mdw_bar_phase);
+mdw_ctl_3_name=Rules
+mdw_ctl_3_slot=macro3
+mdw_ctl_3_mode=scale
+mdw_ctl_3_target=q4
+mdw_ctl_3_min=0
+mdw_ctl_3_max=2.5
+mdw_ctl_3_default=1
+fDecay=1.0
+zoom=1.0
+rot=0.0
+warp=0.0
+fWaveAlpha=0
+ob_size=0
+ib_size=0
+mv_a=0
+per_frame_init_1=lastbp = 0;
+per_frame_init_2=lastbarp = 0;
+per_frame_1=newbeat = below(mdw_beat_phase, lastbp - 0.5);
+per_frame_2=lastbp = mdw_beat_phase;
+per_frame_3=newbar = below(mdw_bar_phase, lastbarp - 0.5);
+per_frame_4=lastbarp = mdw_bar_phase;
+per_frame_5=q1 = 2;
+per_frame_6=q2 = 0.5;
+per_frame_7=q4 = newbeat * 0.12 + newbar * 0.25;
+warp_1=`shader_body
+warp_2=`{
+warp_3=`  // Whole pixels, so the picture moves without blurring as it climbs.
+warp_4=`  float shift = max(floor(q1 + 0.5), 1) * texsize.w;
+warp_5=`  float3 old = tex2D(sampler_pc_main, uv_orig + float2(0, shift)).xyz;
+warp_6=`  float3 row = tex2D(sampler_camera, float2(uv_orig.x, q2)).xyz + q4 * float3(0.3, 0.8, 1.0);
+warp_7=`  ret = lerp(old, row, saturate((uv_orig.y - (1 - shift)) * 100000.0));
+warp_8=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  ret = tex2D(sampler_main, uv).xyz;
+comp_4=`}

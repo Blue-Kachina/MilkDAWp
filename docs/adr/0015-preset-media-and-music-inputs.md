@@ -74,7 +74,17 @@ WGL):
    `resources/presets/MilkDAWp Originals/` (Camera Tunnel, Bar Spinner, Onset
    Edges), AGPL-3.0-or-later. The build copies them into the bundled pack as a
    `MilkDAWp Originals` folder (target `milkdawp_original_presets`), after the
-   pack is made; `package.sh` refuses a content folder without them.
+   pack is made; `package.sh` refuses a content folder without them. Ten
+   more followed the same day (Heat Trails, Reptile Vision, Poster Pop,
+   Spotlight Particles, Time Waterfall, Downbeat Freeze, Motion Smoke, Liquid
+   Mosh, Chroma Echo, Halftone). The motion ones use the feedback buffer as
+   memory rather than as a picture: red holds last frame's camera brightness,
+   green and blue hold heat, smoke or displacement, read back through
+   `sampler_pc_main` at `uv_orig` so detection ignores the warp. Two rules
+   they follow: fades step by at least one 8-bit level a frame (the buffer is
+   RGBA8, so multiplying alone stalls), and neighbour samples use
+   `sampler_fc_camera` (the default sampler wraps, which draws false edges
+   along the frame's borders).
 
 ## Consequences
 

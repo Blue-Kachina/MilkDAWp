@@ -42,14 +42,14 @@ per_frame_5=dy = -0.002;
 warp_1=`shader_body
 warp_2=`{
 warp_3=`  float2 px = texsize_video.zw * 1.5;
-warp_4=`  float3 h = tex2D(sampler_video, uv_orig + float2(px.x, 0)).xyz - tex2D(sampler_video, uv_orig - float2(px.x, 0)).xyz;
-warp_5=`  float3 v = tex2D(sampler_video, uv_orig + float2(0, px.y)).xyz - tex2D(sampler_video, uv_orig - float2(0, px.y)).xyz;
+warp_4=`  float3 h = tex2D(sampler_fc_video, uv_orig + float2(px.x, 0)).xyz - tex2D(sampler_fc_video, uv_orig - float2(px.x, 0)).xyz;
+warp_5=`  float3 v = tex2D(sampler_fc_video, uv_orig + float2(0, px.y)).xyz - tex2D(sampler_fc_video, uv_orig - float2(0, px.y)).xyz;
 warp_6=`  float edge = saturate((dot(abs(h), 1) + dot(abs(v), 1)) * 1.5 - 0.1);
 warp_7=`  float3 hue = 0.5 + 0.5 * cos(6.2831853 * (q6 + float3(0, 0.333, 0.667)));
 warp_8=`  ret = tex2D(sampler_main, uv).xyz * 0.94 + edge * hue * q2;
 warp_9=`}
 comp_1=`shader_body
 comp_2=`{
-comp_3=`  float3 video = tex2D(sampler_video, uv).xyz;
+comp_3=`  float3 video = tex2D(sampler_fc_video, uv).xyz;
 comp_4=`  ret = tex2D(sampler_main, uv).xyz + video * saturate(q7);
 comp_5=`}

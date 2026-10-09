@@ -1,0 +1,70 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+// MilkDAWp original preset (AGPL-3.0-or-later, written for this repo).
+// Sees only what moves: the camera (sampler_camera) shows through wherever
+// something moved a moment ago, and the rest is dark. Stand still and you
+// vanish. Onsets (mdw_onset) brighten it; the Predator Macro turns it into a
+// green-phosphor hunter's view.
+// The feedback buffer is its memory: red is last frame's camera brightness,
+// green the movement, held briefly so a 30 fps camera doesn't flicker.
+mdw_format=1
+mdw_title=MilkDAWp - Reptile Vision
+mdw_tags=milkdawp,camera,motion
+mdw_renderer=projectm
+mdw_ctl_1_name=Threshold
+mdw_ctl_1_slot=macro1
+mdw_ctl_1_mode=offset
+mdw_ctl_1_target=q1
+mdw_ctl_1_min=-0.03
+mdw_ctl_1_max=0.12
+mdw_ctl_1_default=0
+mdw_ctl_2_name=Fade
+mdw_ctl_2_slot=macro2
+mdw_ctl_2_mode=scale
+mdw_ctl_2_target=q2
+mdw_ctl_2_min=0.25
+mdw_ctl_2_max=3
+mdw_ctl_2_default=1
+mdw_ctl_3_name=Predator
+mdw_ctl_3_slot=macro3
+mdw_ctl_3_mode=offset
+mdw_ctl_3_target=q3
+mdw_ctl_3_min=0
+mdw_ctl_3_max=1
+mdw_ctl_3_default=0
+fDecay=1.0
+zoom=1.0
+rot=0.0
+warp=0.0
+fWaveAlpha=0
+ob_size=0
+ib_size=0
+mv_a=0
+per_frame_1=dt = if(above(mdw_dt, 0), mdw_dt, 0.0167);
+per_frame_2=q1 = 0.04;
+per_frame_3=q2 = 3.5 * dt;
+per_frame_4=q3 = 0;
+per_frame_5=q4 = mdw_onset;
+warp_1=`shader_body
+warp_2=`{
+warp_3=`  float2 px = texsize_camera.zw * 2;
+warp_4=`  float3 c = tex2D(sampler_fc_camera, uv_orig).xyz * 0.4
+warp_5=`           + (tex2D(sampler_fc_camera, uv_orig + float2(px.x, 0)).xyz + tex2D(sampler_fc_camera, uv_orig - float2(px.x, 0)).xyz
+warp_6=`            + tex2D(sampler_fc_camera, uv_orig + float2(0, px.y)).xyz + tex2D(sampler_fc_camera, uv_orig - float2(0, px.y)).xyz) * 0.15;
+warp_7=`  float l = dot(c, float3(0.299, 0.587, 0.114));
+warp_8=`  float3 st = tex2D(sampler_pc_main, uv_orig).xyz;
+warp_9=`  float motion = saturate((abs(l - st.x) - q1) * 6);
+warp_10=`  ret = float3(l, max(motion, st.y - q2), 0);
+warp_11=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  float m = tex2D(sampler_main, uv).y;
+comp_4=`  m = saturate(max(m, GetBlur1(uv).y * 1.5) * 1.6 - 0.1);
+comp_5=`  float3 seen = tex2D(sampler_fc_camera, uv).xyz * m * (1 + 0.6 * q4);
+comp_6=`  float g = dot(seen, float3(0.299, 0.587, 0.114));
+comp_7=`  float3 hunter = float3(0.25, 1.0, 0.35) * g * 1.8 + float3(0, 0.04, 0.02);
+comp_8=`  ret = lerp(seen, hunter, saturate(q3));
+comp_9=`}

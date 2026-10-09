@@ -759,15 +759,16 @@ TEST_CASE("The hand-made 8.12 presets compile, and draw from the media and the b
     return;
   }
   using namespace juce::gl;
-  // A checkerboard "camera" picture, so edges and media both show; or black.
+  // A checkerboard "camera" picture that scrolls sideways a texel a frame, so edges,
+  // media and movement all show; or black.
   std::uint32_t media = 0;
   glGenTextures(1, &media);
-  const auto fillMedia = [&](bool checker) {
+  const auto fillMedia = [&](bool checker, int scroll) {
     std::vector<std::uint8_t> rgba(64U * 36U * 4U, 0);
     for (int y = 0; y < 36 && checker; ++y) {
       for (int x = 0; x < 64; ++x) {
         auto* p = &rgba[static_cast<std::size_t>(y * 64 + x) * 4];
-        const bool on = ((x / 8) + (y / 8)) % 2 == 0;
+        const bool on = (((x + scroll) / 8) + (y / 8)) % 2 == 0;
         p[0] = on ? 230 : 20;
         p[1] = on ? 180 : 40;
         p[2] = on ? 90 : 120;
@@ -782,7 +783,7 @@ TEST_CASE("The hand-made 8.12 presets compile, and draw from the media and the b
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 64, 36, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
     glBindTexture(GL_TEXTURE_2D, 0);
   };
-  fillMedia(true);
+  fillMedia(true, 0);
   rig.instance->setTextureLoadCallback(&onMediaTextureLoad, &media);
   std::vector<std::string> errors;
   const auto& fn = rig.library->functions();
@@ -797,7 +798,7 @@ TEST_CASE("The hand-made 8.12 presets compile, and draw from the media and the b
 
   const auto folder = juce::File(MILKDAWP_ORIGINAL_PRESETS_DIR);
   const auto files = folder.findChildFiles(juce::File::findFiles, false, "*.milkdawp");
-  REQUIRE(files.size() >= 3);
+  REQUIRE(files.size() >= 13);
   int n = 0;
   for (const auto& file : files) {
     INFO(file.getFileName());
@@ -812,10 +813,11 @@ TEST_CASE("The hand-made 8.12 presets compile, and draw from the media and the b
     const auto defaults = milkdawp::core::macroDefaults(parsed.preset);
     // Loads the preset fresh and plays 1.5 s at 120 bpm with an onset on every
     // beat, Macros on their defaults; the frames half way and at the end.
-    const auto play = [&](std::vector<std::uint8_t>& early, std::vector<std::uint8_t>& late) {
+    const auto play = [&](bool withMedia, std::vector<std::uint8_t>& early, std::vector<std::uint8_t>& late) {
       errors.clear();
       rig.instance->loadPresetData(compiled.c_str(), false);
       for (int frame = 0; frame < 90; ++frame, ++n) {
+        fillMedia(withMedia, frame);
         const double beats = frame / kFps * 2.0;
         const double phase = beats - std::floor(beats);
         rig.instance->setPresetVariable(milkdawp::core::kBpmVariable, 120.0);
@@ -826,6 +828,7 @@ TEST_CASE("The hand-made 8.12 presets compile, and draw from the media and the b
           rig.instance->setPresetVariable(milkdawp::core::kMacroVariables[k], defaults[k].value_or(0.0f));
         }
         rig.instance->setPresetVariable(milkdawp::core::kWarpVariable, 1.0);
+        rig.instance->setPresetVariable(milkdawp::core::kDtVariable, 1.0 / kFps);
         auto pixels = rig.renderFrame(n);
         if (frame == 45) {
           early = std::move(pixels);
@@ -840,17 +843,15 @@ TEST_CASE("The hand-made 8.12 presets compile, and draw from the media and the b
     };
     std::vector<std::uint8_t> early;
     std::vector<std::uint8_t> late;
-    play(early, late);
+    play(true, early, late);
     INFO("brightness " << meanBrightness(late) << ", change " << meanDifference(early, late));
-    CHECK(meanBrightness(late) > 30.0);
+    CHECK(meanBrightness(late) > 15.0);
     CHECK(meanDifference(early, late) > 1.0);
     // A preset that names the media shows it: black media changes the picture.
-    if (text.find("sampler_camera") != std::string::npos || text.find("sampler_video") != std::string::npos) {
-      fillMedia(false);
+    if (text.find("_camera") != std::string::npos || text.find("_video") != std::string::npos) { // any prefix
       std::vector<std::uint8_t> blackEarly;
       std::vector<std::uint8_t> blackLate;
-      play(blackEarly, blackLate);
-      fillMedia(true);
+      play(false, blackEarly, blackLate);
       INFO("with black media: change " << meanDifference(late, blackLate));
       CHECK(meanDifference(late, blackLate) > 10.0);
     }

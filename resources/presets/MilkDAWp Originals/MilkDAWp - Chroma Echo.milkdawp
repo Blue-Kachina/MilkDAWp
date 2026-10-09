@@ -1,0 +1,59 @@
+MILKDROP_PRESET_VERSION=201
+PSVERSION=2
+PSVERSION_WARP=2
+PSVERSION_COMP=2
+[preset00]
+// MilkDAWp original preset (AGPL-3.0-or-later, written for this repo).
+// Colour lags behind: the camera (sampler_camera) as it is, but whatever
+// moves leaves rainbow fringes, because the picture's green follows half a
+// beat behind and its blue a whole beat behind (mdw_bpm; 120 bpm without a
+// beat). Still things look normal; moving things split into colours.
+// The feedback buffer holds the camera's brightness now (red) and its two
+// echoes (green, blue).
+mdw_format=1
+mdw_title=MilkDAWp - Chroma Echo
+mdw_tags=milkdawp,camera,motion,beat
+mdw_renderer=projectm
+mdw_ctl_1_name=Fringe
+mdw_ctl_1_slot=macro1
+mdw_ctl_1_mode=scale
+mdw_ctl_1_target=q3
+mdw_ctl_1_min=0
+mdw_ctl_1_max=3
+mdw_ctl_1_default=1
+mdw_ctl_2_name=Echo
+mdw_ctl_2_slot=macro2
+mdw_ctl_2_mode=expr
+mdw_ctl_2_min=0.25
+mdw_ctl_2_max=3
+mdw_ctl_2_default=1
+mdw_ctl_2_code=q1 = min(dt / (beat * 0.5 * mdw_c2), 1); q2 = min(dt / (beat * mdw_c2), 1);
+fDecay=1.0
+zoom=1.0
+rot=0.0
+warp=0.0
+fWaveAlpha=0
+ob_size=0
+ib_size=0
+mv_a=0
+per_frame_1=dt = if(above(mdw_dt, 0), mdw_dt, 0.0167);
+per_frame_2=beat = if(above(mdw_bpm, 0), 60 / mdw_bpm, 0.5);
+per_frame_3=q1 = min(dt / (beat * 0.5), 1);
+per_frame_4=q2 = min(dt / beat, 1);
+per_frame_5=q3 = 1.5;
+warp_1=`shader_body
+warp_2=`{
+warp_3=`  float l = dot(tex2D(sampler_camera, uv_orig).xyz, float3(0.299, 0.587, 0.114));
+warp_4=`  float2 lag = tex2D(sampler_pc_main, uv_orig).yz;
+warp_5=`  float2 d = l - lag;
+warp_6=`  // Follow at the echo's rate, but by at least one 8-bit step, or they never catch up.
+warp_7=`  float2 mv = sign(d) * max(abs(d * float2(q1, q2)), min(abs(d), 1.5 / 255));
+warp_8=`  ret = float3(l, lag + mv);
+warp_9=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`  float3 cam = tex2D(sampler_camera, uv).xyz;
+comp_4=`  float3 st = tex2D(sampler_main, uv).xyz;
+comp_5=`  float3 fringe = float3(st.x - (st.y + st.z) * 0.5, st.y - st.x, st.z - st.x);
+comp_6=`  ret = saturate(cam + fringe * q3);
+comp_7=`}

@@ -628,3 +628,8 @@ in the roadmap's Phase 8 and ADR-0011.
   didn't: at our pin projectM doesn't own a callback texture. `sampler_camera` and `sampler_video`
   are both the layer's media at full strength, whatever Media Mix is (Media Mix stays the
   overlay's opacity, §6.2 row 16). Three hand-made presets ship as "MilkDAWp Originals" in the pack.
+- (2026-10-08) Matthew liked Onset Edges and asked for more camera presets: its opposite (Poster
+  Pop), the camera only where the visual is lit (Spotlight Particles), reptile vision, and a
+  motion heatmap (Heat Trails); with six of ours (Time Waterfall, Downbeat Freeze, Motion Smoke,
+  Liquid Mosh, Chroma Echo, Halftone), all ten built. Motion detection keeps state in the feedback
+  buffer (ADR-0015).
